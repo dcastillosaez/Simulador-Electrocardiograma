@@ -1,0 +1,466 @@
+proyecto como una plataforma de simulación clínica de ECG, no como una simple app que “dibuja ondas”. La clave es separar muy bien motor fisiológico, renderizado, escenarios clínicos, evaluación, y herramientas de autoría.
+
+1) Objetivo correcto del producto
+
+Define el simulador en tres niveles:
+
+Nivel 1: visualizador didáctico
+
+Muestra ECG en 1, 3, 6 y 12 derivaciones.
+Permite pausar, cambiar velocidad, amplitud, calibración, filtro, ruido y frecuencia cardíaca.
+Útil para docencia básica.
+
+Nivel 2: simulador clínico
+
+Genera ritmos normales y patológicos.
+Incluye cambios dinámicos: isquemia, arritmias, bloqueo AV, extrasístoles, taquicardias, fibrilación, etc.
+Soporta transiciones temporales y respuesta a intervenciones.
+
+Nivel 3: plataforma profesional
+
+Editor de escenarios.
+Evaluación automática del alumno.
+Registro de sesiones.
+Exportación de trazas.
+Modo instructor.
+API para integrar con LMS, simuladores y laboratorios.
+
+Si quieres “lo más potente posible”, apunta directamente a este nivel 3, aunque lo construyas por fases.
+
+2) Arquitectura recomendada
+
+La arquitectura ideal es modular, orientada a dominio y extensible.
+
+Capas principales
+
+A. Motor fisiológico
+Es el núcleo. Genera la señal ECG y el estado del paciente.
+
+Responsabilidades:
+
+Modelar ritmo base.
+Generar morfología P-QRS-T.
+Variar intervalos PR, QRS, QT, RR.
+Inyectar ruido, artefactos y deriva de línea base.
+Cambiar el comportamiento según eventos clínicos.
+
+Lo mejor es que este motor no dependa de la interfaz. Debe poder ejecutarse:
+
+en navegador,
+en backend,
+o en tests.
+
+B. Motor de escenarios
+Gestiona la narrativa clínica.
+
+Ejemplos:
+
+“Paciente con dolor torácico que evoluciona a elevación ST”.
+“Taquicardia supraventricular con maniobras vagales”.
+“Bloqueo AV de segundo grado que progresa”.
+
+Debe soportar:
+
+líneas de tiempo,
+condiciones,
+eventos,
+disparadores por intervención,
+branching.
+
+C. Motor de reglas
+Decide cómo cambia el ECG según el estado del paciente.
+
+Ejemplo:
+
+Si aumenta la frecuencia cardíaca, reduce el RR.
+Si hay hiperpotasemia, ensancha QRS y aplana P.
+Si hay isquemia, altera ST y T.
+Si se administra adenosina, cambia el ritmo según el caso.
+
+Esto conviene modelarlo como reglas declarativas, no como if/else dispersos por el código.
+
+D. Capa de visualización
+Encargada de dibujar el ECG y otros monitores.
+
+Debe soportar:
+
+trazado fluido a 60 fps,
+zoom,
+grid clínico,
+selección de derivaciones,
+congelar pantalla,
+medición de intervalos,
+impresión/exportación PDF o imagen.
+
+E. Capa de evaluación
+Sirve para entrenamiento.
+
+Puede evaluar:
+
+si el usuario identificó correctamente el ritmo,
+cuánto tardó,
+qué intervención eligió,
+si siguió el protocolo correcto,
+puntuación por escenario.
+
+F. Persistencia e integración
+
+usuarios,
+sesiones,
+escenarios,
+resultados,
+bibliotecas de casos,
+versiones de escenarios,
+telemetría.
+3) Modelo de dominio que deberías usar
+
+Te conviene diseñar el dominio con entidades claras:
+
+Paciente
+edad, sexo, constantes, contexto clínico, comorbilidades.
+Estado fisiológico
+ritmo, conducción, repolarización, perfusión, oxigenación, electrolitos.
+Señal ECG
+derivaciones, amplitud, frecuencia, ruido, filtros.
+Escenario
+objetivos, pasos, eventos, criterios de éxito, criterios de fallo.
+Intervención
+fármaco, maniobra, desfibrilación, marcapasos, oxígeno, etc.
+Observación
+hallazgos que ve el usuario.
+Resultado
+aciertos, errores, tiempos, puntuación.
+
+Esto te permitirá crecer sin rehacer todo.
+
+4) Cómo construir el motor ECG de forma seria
+
+No te limites a una onda “bonita”. Un ECG profesional debe poder generar:
+
+A. Morfología base
+
+Puedes modelar cada latido como suma de componentes:
+
+onda P,
+complejo QRS,
+onda T,
+segmento ST,
+intervalos PR y QT.
+
+Técnicamente, hay varias formas:
+
+modelos paramétricos con curvas gaussianas o spline,
+modelado por plantillas,
+síntesis basada en segmentos,
+mezcla de plantillas + perturbaciones.
+B. Variabilidad realista
+
+Debes incluir:
+
+variabilidad de RR,
+variación de amplitud entre derivaciones,
+artefacto por movimiento,
+ruido muscular,
+interferencia de red,
+deriva de línea base,
+filtro de monitor,
+saturación/clipping.
+C. Derivaciones
+
+No basta con una señal. El nivel profesional pide:
+
+12 derivaciones estándar,
+ritmo largo,
+opción de 1, 3 y 6 derivaciones,
+cambio de disposición del monitor.
+D. Dinámica temporal
+
+El ECG debe evolucionar:
+
+segundo a segundo,
+minuto a minuto,
+con eventos gatillados por la historia clínica.
+5) Estrategia de implementación por fases
+Fase 1: MVP sólido
+
+Objetivo: tener un simulador usable y estable.
+
+Incluye:
+
+1 y 12 derivaciones,
+10–15 ritmos comunes,
+controles de velocidad, amplitud y ruido,
+un motor simple de escenarios,
+almacenamiento básico de sesiones.
+
+No intentes meter todo aquí.
+
+Fase 2: simulación clínica avanzada
+
+Añade:
+
+evolución temporal de patologías,
+respuesta a intervenciones,
+escenarios con decisiones,
+evaluación automática,
+modo instructor,
+biblioteca de casos.
+Fase 3: plataforma profesional
+
+Añade:
+
+editor visual de escenarios,
+plantillas,
+colaboración,
+permisos,
+analítica,
+exportaciones,
+integración LMS,
+autenticación robusta,
+auditoría.
+Fase 4: escalado y calidad
+
+Añade:
+
+pruebas clínicas con usuarios reales,
+validación con cardiólogos/docentes,
+ajuste fino de señal,
+benchmark de rendimiento,
+hardening de seguridad.
+6) Stack recomendado
+
+Si quieres velocidad de desarrollo y buena calidad:
+
+Opción recomendada
+
+Frontend
+
+React + TypeScript
+Canvas o WebGL para el trazado
+Zustand/Redux para estado
+Tailwind o diseño propio si quieres mucha precisión visual
+
+Backend
+
+Python + FastAPI si priorizas facilidad para motor y lógica
+o Node.js/NestJS si tu equipo está muy orientado a TS
+
+Motor de simulación
+
+Python para prototipo y modelado
+luego, si hace falta rendimiento, mover el motor de señal a Rust o a una librería optimizada
+
+Base de datos
+
+PostgreSQL
+Redis para sesiones en tiempo real o caché
+almacenamiento de casos en JSON versionado
+
+Infraestructura
+
+Docker
+CI/CD
+observabilidad con logs estructurados y métricas
+Si quieres máxima escalabilidad técnica
+Frontend en React
+Backend en FastAPI
+Motor científico en Python
+Servicio de render o simulación aislado
+API interna para consumir señales
+7) Cómo estructuraría el repositorio
+
+Ejemplo:
+
+/ecg-simulator
+  /apps
+    /web
+    /api
+    /instructor-dashboard
+  /packages
+    /ecg-engine
+    /scenario-engine
+    /signal-models
+    /ui-components
+    /shared-types
+  /docs
+    /domain-model
+    /scenario-spec
+    /clinical-reference
+  /tests
+    /unit
+    /integration
+    /golden-signals
+
+Esto te ayuda a separar:
+
+motor,
+UI,
+escenarios,
+tipos compartidos,
+pruebas.
+8) Estrategias para hacerlo “completísimo”
+A. Diseña por escenarios, no por pantallas
+
+La pantalla es solo una salida. El corazón del producto son los escenarios clínicos.
+
+B. Usa especificaciones declarativas
+
+Define escenarios en JSON/YAML o un DSL propio.
+
+Ejemplo conceptual:
+
+estado inicial,
+eventos,
+condiciones,
+transiciones,
+resultados esperados.
+
+Así podrás crear casos sin tocar código.
+
+C. Crea una biblioteca de ritmos y patologías
+
+Empieza con un catálogo bien curado:
+
+ritmo sinusal normal,
+taquicardia sinusal,
+bradicardia sinusal,
+FA,
+flutter auricular,
+TSV,
+TV,
+FV,
+bloqueo AV 1º/2º/3º,
+BRI/BCRD,
+IAM con elevación ST,
+pericarditis,
+hiperkalemia,
+hipokalemia,
+hipocalcemia,
+hipercalcemia,
+WPW,
+torsades.
+D. Valida con trazas de referencia
+
+Construye una colección de ECGs de referencia y compara:
+
+intervalos,
+morfología,
+segmentación,
+apariencia visual.
+E. Separa “realismo clínico” de “experiencia de usuario”
+
+Un simulador excelente no solo debe ser fiel, sino también:
+
+legible,
+rápido,
+entrenable,
+explicativo.
+9) Cómo usar Claude de forma efectiva en el proyecto
+
+Claude te puede ayudar mucho si lo usas como arquitecto, generador de casos y copiloto de pruebas.
+
+Úsalo para:
+
+redactar especificaciones funcionales,
+generar modelos de dominio,
+proponer escenarios clínicos,
+convertir escenarios en JSON,
+escribir pruebas unitarias,
+revisar arquitectura,
+documentar ritmos y criterios,
+generar UI de instructor y dashboard.
+
+No lo uses como única fuente de verdad para la lógica clínica.
+La verdad del sistema debe estar en:
+
+tus especificaciones,
+tus tests,
+tus datasets,
+tus reglas versionadas.
+Flujo ideal con Claude
+Le das el objetivo del módulo.
+Le pides el contrato de entrada/salida.
+Le pides el diseño de datos.
+Le pides tests.
+Le pides refactor por capas.
+Le pides escenarios clínicos nuevos.
+10) Calidad, validación y seguridad
+
+Si el simulador va a usarse en formación sanitaria, esto es crítico:
+
+revisión por expertos clínicos,
+trazabilidad de cada cambio del motor,
+versiones de escenarios,
+registro de modificaciones,
+tests automáticos de regresión de señal,
+validación de salidas médicas.
+
+Y algo importante:
+si en algún momento se parece demasiado a una herramienta de apoyo clínico real, necesitas cuidar muy bien el posicionamiento legal y regulatorio. Para docencia es mucho más simple; para uso clínico real ya es otra categoría.
+
+11) Pruebas que deberías tener desde el día 1
+pruebas unitarias del motor de señal,
+pruebas de reglas fisiológicas,
+pruebas de escenarios,
+pruebas visuales con capturas de referencia,
+pruebas de rendimiento,
+pruebas de regresión de ritmos,
+pruebas de evaluación del alumno.
+
+Una buena práctica es tener “golden outputs”:
+
+para un mismo escenario, la señal esperada debe mantenerse estable entre versiones salvo cambios intencionales.
+12) Riesgos típicos que debes evitar
+construir solo la UI y dejar el motor vacío,
+meter lógica clínica directamente en componentes front-end,
+no versionar escenarios,
+no separar señal y presentación,
+intentar simular todo con if/else,
+no validar con profesionales,
+subestimar el ruido y los artefactos,
+no diseñar desde el principio para 12 derivaciones.
+13) Hoja de ruta práctica
+Semana 1–2
+definición del alcance,
+taxonomía de ritmos,
+modelo de dominio,
+estructura de escenarios,
+wireframes.
+Semana 3–4
+motor básico de señal,
+render ECG en tiempo real,
+5 ritmos principales,
+controles de monitor.
+Semana 5–6
+motor de escenarios,
+intervención manual,
+pausa y cambio de fase,
+persistencia mínima.
+Semana 7–8
+12 derivaciones,
+evaluación automática,
+modo instructor,
+exportación y sesiones.
+Después
+más patologías,
+editor visual,
+analítica,
+integración externa,
+pulido clínico.
+14) Mi recomendación de arquitectura final
+
+Si tuviera que resumirlo en una frase:
+
+Frontend de alto rendimiento + motor fisiológico independiente + escenarios declarativos + evaluación automática + validación clínica continua.
+
+Eso es lo que convierte una demo en una plataforma seria.
+
+Si quieres, puedo convertir esto en un 
+documento de arquitectura completo, con:
+
+módulos,
+APIs,
+esquema de base de datos,
+estructura de carpetas,
+y un 
+plan de implementación por sprints.
