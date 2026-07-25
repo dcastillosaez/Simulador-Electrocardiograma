@@ -2969,7 +2969,7 @@ Crear `packages/ecg-engine/tests/unit/test_sources.py`:
 import numpy as np
 import pytest
 
-from ecg_engine.conduction import CompleteBlock, FixedPR
+from ecg_engine.conduction import CompleteBlock, FixedPR, IrregularConduction
 from ecg_engine.rhythm import EventTrain, RegularTrain
 from ecg_engine.sources import BeatBasedSource, VentricularFibrillationSource
 from ecg_engine.types import (
@@ -3104,6 +3104,47 @@ def test_ventricular_fibrillation_implements_the_common_render_interface():
     )
     signal = source.render(0.0, 2500, 500)
     assert signal.shape == (N_LEADS, 2500)
+
+
+def test_ventricular_fibrillation_is_continuous_across_chunks():
+    """La normalización de la FV es una constante fijada al construir. Si
+    alguien la midiera dentro de `render`, cada trozo tendría su propio
+    factor de escala y el trazo saltaría en cada frontera. Ningún otro test
+    lo vería: la forma no cambia, el pico espectral tampoco, y la línea de
+    base se mide sobre una sola llamada."""
+    source = VentricularFibrillationSource(
+        coarseness=0.7,
+        amplitude_v=0.0004,
+        dominant_hz=6.0,
+        rng=np.random.default_rng(3),
+    )
+    whole = source.render(0.0, 1000, 500)
+    first = source.render(0.0, 500, 500)
+    second = source.render(1.0, 500, 500)
+    assert np.allclose(whole[:, :500], first)
+    assert np.allclose(whole[:, 500:], second)
+
+
+def test_set_rate_reaches_the_conduction_policy():
+    """En la fibrilación auricular la frecuencia la gobierna el nodo AV, no
+    la aurícula: la aurícula va a su aire a más de 400 por minuto. Si
+    `set_rate_hz` no llegara hasta la política de conducción, mover el
+    control de frecuencia en una FA no haría absolutamente nada."""
+    source = BeatBasedSource(
+        atrial=RegularTrain(
+            kind=EventKind.ATRIAL, template_id="flutter_f", rate_hz=420 / 60
+        ),
+        conduction=IrregularConduction(mean_rr_s=0.85, rr_spread_s=0.15),
+        rng=np.random.default_rng(11),
+    )
+    slow = len(
+        [e for e in source.events(0.0, 60.0) if e.kind is EventKind.VENTRICULAR]
+    )
+    source.set_rate_hz(150 / 60)
+    fast = len(
+        [e for e in source.events(60.0, 120.0) if e.kind is EventKind.VENTRICULAR]
+    )
+    assert fast > slow
 
 
 def test_ventricular_fibrillation_energy_sits_in_its_dominant_band():
@@ -3325,7 +3366,7 @@ class VentricularFibrillationSource:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_sources.py -v`
-Expected: PASS, 15 passed
+Expected: PASS, 17 passed
 
 - [ ] **Step 5: Commit**
 
