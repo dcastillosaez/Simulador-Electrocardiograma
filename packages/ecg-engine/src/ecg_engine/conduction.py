@@ -23,10 +23,24 @@ from .types import CardiacEvent, EventKind
 
 @runtime_checkable
 class ConductionPolicy(Protocol):
-    """Convierte eventos auriculares en eventos ventriculares."""
+    """Convierte eventos auriculares en eventos ventriculares.
+
+    La ventana `[t0_s, t1_s)` llega explícita y no se deduce de los eventos
+    recibidos. Las políticas puras la ignoran, porque su salida depende solo
+    del índice de cada P. `IrregularConduction` la necesita: sin ella tendría
+    que adivinar el rango a partir del primer y el último evento auricular, y
+    entonces su corrección dependería de cuántas ondas f caigan en el trozo
+    —un invariante que vive en el renderer, no aquí—. Una fibrilación
+    auricular perdería latidos en silencio el día que alguien ajustara el
+    margen de render.
+    """
 
     def conduct(
-        self, atrial: Sequence[CardiacEvent], rng: np.random.Generator
+        self,
+        atrial: Sequence[CardiacEvent],
+        rng: np.random.Generator,
+        t0_s: float,
+        t1_s: float,
     ) -> list[CardiacEvent]: ...
 
 
@@ -53,7 +67,11 @@ class FixedPR:
     template_id: str = "normal_qrst"
 
     def conduct(
-        self, atrial: Sequence[CardiacEvent], rng: np.random.Generator
+        self,
+        atrial: Sequence[CardiacEvent],
+        rng: np.random.Generator,
+        t0_s: float,
+        t1_s: float,
     ) -> list[CardiacEvent]:
         return [_ventricular(p, self.pr_s, self.template_id) for p in atrial]
 
@@ -79,7 +97,11 @@ class WenckebachPR:
             )
 
     def conduct(
-        self, atrial: Sequence[CardiacEvent], rng: np.random.Generator
+        self,
+        atrial: Sequence[CardiacEvent],
+        rng: np.random.Generator,
+        t0_s: float,
+        t1_s: float,
     ) -> list[CardiacEvent]:
         conducted: list[CardiacEvent] = []
         for p in atrial:
@@ -108,7 +130,11 @@ class FixedRatioBlock:
             raise ValueError(f"ratio debe ser al menos 2, recibido {self.ratio}")
 
     def conduct(
-        self, atrial: Sequence[CardiacEvent], rng: np.random.Generator
+        self,
+        atrial: Sequence[CardiacEvent],
+        rng: np.random.Generator,
+        t0_s: float,
+        t1_s: float,
     ) -> list[CardiacEvent]:
         return [
             _ventricular(p, self.pr_s, self.template_id)
@@ -127,7 +153,11 @@ class CompleteBlock:
     """
 
     def conduct(
-        self, atrial: Sequence[CardiacEvent], rng: np.random.Generator
+        self,
+        atrial: Sequence[CardiacEvent],
+        rng: np.random.Generator,
+        t0_s: float,
+        t1_s: float,
     ) -> list[CardiacEvent]:
         return []
 
@@ -186,13 +216,21 @@ class IrregularConduction:
             self._times_s.append(self._times_s[-1] + max(step_s, self._MIN_RR_S))
 
     def conduct(
-        self, atrial: Sequence[CardiacEvent], rng: np.random.Generator
+        self,
+        atrial: Sequence[CardiacEvent],
+        rng: np.random.Generator,
+        t0_s: float,
+        t1_s: float,
     ) -> list[CardiacEvent]:
-        if not atrial:
-            return []
-        start_s = atrial[0].t_s
-        end_s = atrial[-1].t_s
-        self._extend_until(end_s, rng)
+        """Devuelve los latidos ventriculares de la ventana `[t0_s, t1_s)`.
+
+        La ventana llega dada, no se deduce de `atrial`. Deducirla sería un
+        error sutil y difícil de ver: en la fibrilación auricular las ondas f
+        van a unas 420 por minuto, así que un trozo corto puede contener una
+        sola onda o ninguna, y el rango inferido se colapsaría a un instante
+        —o al conjunto vacío— dejando fuera latidos que sí debían sonar.
+        """
+        self._extend_until(t1_s, rng)
         return [
             CardiacEvent(
                 kind=EventKind.VENTRICULAR,
@@ -201,5 +239,5 @@ class IrregularConduction:
                 index=index,
             )
             for index, t_s in enumerate(self._times_s)
-            if start_s <= t_s <= end_s
+            if t0_s <= t_s < t1_s
         ]
