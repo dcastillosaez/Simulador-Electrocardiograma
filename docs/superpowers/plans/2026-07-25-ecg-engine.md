@@ -3284,6 +3284,13 @@ class VentricularFibrillationSource:
         self._detunes = rng.normal(1.0, 0.18, self._N_OSCILLATORS)
         self._weights = rng.uniform(0.5, 1.0, self._N_OSCILLATORS)
         self._lead_gains = rng.uniform(0.6, 1.4, N_LEADS).reshape(N_LEADS, 1)
+        # Amplitud eficaz analítica de la suma de senoides con fases
+        # independientes. Es una constante calculada aquí, no una medida
+        # tomada sobre cada trozo: medirla trozo a trozo daría un factor de
+        # escala distinto en cada uno y el trazo daría un salto en cada
+        # frontera. Dividir por la suma de pesos, en cambio, encoge la señal
+        # unas cuatro veces y la deja pegada a la línea de base.
+        self._norm = float(np.sqrt(np.sum(self._weights**2) / 2.0))
 
     def set_rate_hz(self, rate_hz: float) -> None:
         """La FV no tiene frecuencia cardíaca. El control no aplica."""
@@ -3299,13 +3306,17 @@ class VentricularFibrillationSource:
         ):
             freq_hz = self._dominant_hz * detune
             trace += weight * np.sin(2.0 * np.pi * freq_hz * t_s + phase)
-        trace /= self._weights.sum()
+        trace /= self._norm
 
-        # La fibrilación gruesa tiene excursiones amplias y lentas; la fina,
-        # una ondulación menuda y de bajo voltaje.
-        envelope = 1.0 + self._coarseness * np.sin(
-            2.0 * np.pi * 0.7 * t_s + self._phases[0]
-        )
+        # La envolvente modula la amplitud, pero nunca llega a apagarla: en
+        # la fibrilación ventricular no hay línea isoeléctrica, la señal no
+        # descansa jamás. Una envolvente profunda dejaba tramos de calma que
+        # no existen en un paciente en FV.
+        envelope = 1.0 + 0.30 * np.sin(2.0 * np.pi * 0.7 * t_s + self._phases[0])
+
+        # La fibrilación gruesa tiene excursiones amplias; la fina, una
+        # ondulación menuda y de bajo voltaje. Esa diferencia marca el
+        # pronóstico y la respuesta a la desfibrilación.
         trace = trace * envelope * self._coarseness
 
         return self._lead_gains * (self._amplitude_v * trace)[np.newaxis, :]
