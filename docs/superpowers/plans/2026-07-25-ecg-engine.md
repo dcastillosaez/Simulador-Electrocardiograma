@@ -372,7 +372,15 @@ class SignalSource(Protocol):
 
     def render(
         self, t0_s: float, n_samples: int, sample_rate_hz: int
-    ) -> np.ndarray: ...
+    ) -> np.ndarray:
+        """Genera señal desde `t0_s`.
+
+        Devuelve un array de forma `(12, n_samples)` y dtype `float64`, en
+        **voltios**, con las derivaciones en el orden de `LEAD_ORDER`. Ese
+        contrato vincula a toda implementación: el resto del sistema lo da
+        por hecho sin comprobarlo.
+        """
+        ...
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -538,7 +546,7 @@ Las plantillas son morfología pura: no saben nada de ritmo ni de frecuencia. Un
 - Produces:
   - `TEMPLATES: dict[str, BeatTemplate]` con las claves `"sinus_p"`, `"flutter_f"`, `"normal_qrst"`, `"wide_qrst"`, `"escape_qrst"`.
   - `get_template(template_id: str) -> BeatTemplate` — lanza `KeyError` con mensaje explícito si no existe.
-  - `target_extent_s(template: BeatTemplate, target: WaveTarget) -> tuple[float, float]` — extensión (inicio, fin) del target a ±2σ, relativa al instante del evento.
+  - `target_extent_s(template: BeatTemplate, target: WaveTarget) -> tuple[float, float]` — extensión (inicio, fin) del target a ±2,5σ, relativa al instante del evento.
   - `qrs_duration_s(template: BeatTemplate) -> float`
   - `qt_duration_s(template: BeatTemplate) -> float`
 
@@ -557,6 +565,7 @@ from ecg_engine.beat import (
     target_extent_s,
 )
 from ecg_engine.types import WaveTarget
+from ecg_engine.waveform import fwhm_s
 
 
 def test_registry_contains_the_five_mvp_templates():
@@ -599,10 +608,32 @@ def test_normal_qt_is_physiological():
     assert 0.350 <= qt <= 0.440
 
 
-def test_target_extent_covers_two_sigma_each_side():
+def test_target_extent_straddles_the_event_instant():
     template = get_template("normal_qrst")
     start, end = target_extent_s(template, WaveTarget.QRS)
     assert start < 0.0 < end
+
+
+def test_r_wave_is_sharp_not_broad():
+    """Guarda contra la tentación de ensanchar ondas hasta que los tests de
+    intervalo pasen. Una R normal mide unos 20 ms a media altura; si alguien
+    la engorda para estirar el QRS, el complejo deja de parecer normal aunque
+    su duración caiga en rango."""
+    r_wave = max(
+        get_template("normal_qrst").components_for(WaveTarget.QRS),
+        key=lambda c: c.amplitude_v,
+    )
+    assert fwhm_s(r_wave.width_s) == pytest.approx(0.021, abs=0.004)
+
+
+def test_wide_qrs_really_is_broad_at_half_height():
+    """El QRS ancho lo es por morfología, no por un truco de la convención
+    de medida: su onda dominante debe ser genuinamente ancha."""
+    dominant = max(
+        get_template("wide_qrst").components_for(WaveTarget.QRS),
+        key=lambda c: abs(c.amplitude_v),
+    )
+    assert fwhm_s(dominant.width_s) > 0.055
 
 
 def test_target_extent_of_absent_target_is_empty():
@@ -644,8 +675,14 @@ from __future__ import annotations
 
 from .types import BeatTemplate, GaussianComponent, WaveTarget
 
-_SIGMA_EXTENT: float = 2.0
-"""Cuántas desviaciones típicas a cada lado se consideran parte de la onda."""
+_SIGMA_EXTENT: float = 2.5
+"""Cuántas desviaciones típicas a cada lado se consideran parte de la onda.
+
+A ±2,5σ una gaussiana ha caído al 4,4 % de su pico, que es aproximadamente
+donde el ojo clínico sitúa el inicio y el final de una onda sobre el papel.
+Con ±2σ la extensión se queda corta y los intervalos medidos salen por debajo
+del rango fisiológico aunque la morfología sea correcta.
+"""
 
 
 def _p(amplitude_v: float, center_s: float, width_s: float) -> GaussianComponent:
@@ -691,14 +728,19 @@ TEMPLATES: dict[str, BeatTemplate] = {
         components=(_p(0.00020, 0.0, 0.018),),
     ),
     # --- Ventriculares -----------------------------------------------------
+    # Las posiciones de Q y S importan tanto como sus anchuras: en un ECG real
+    # la Q cae unos 26 ms antes del pico de la R y la S unos 28 ms después.
+    # Acercarlas comprime el QRS por debajo del rango fisiológico por mucho que
+    # se ensanchen las ondas, y ensancharlas para compensar produce un complejo
+    # gordo y redondeado que ya no parece un latido normal.
     "normal_qrst": BeatTemplate(
         template_id="normal_qrst",
         components=(
-            _qrs(-0.00005, -0.019, 0.0043),   # Q
-            _qrs(0.00100, 0.000, 0.0080),     # R
-            _qrs(-0.00015, 0.021, 0.0055),    # S
+            _qrs(-0.00005, -0.026, 0.0055),   # Q
+            _qrs(0.00100, 0.000, 0.0090),     # R
+            _qrs(-0.00015, 0.028, 0.0075),    # S
             _st(0.00000, 0.090, 0.0300),      # segmento ST, isoeléctrico
-            _t(0.00025, 0.230, 0.0430),       # T
+            _t(0.00025, 0.2525, 0.0430),      # T
         ),
     ),
     # QRS ancho de origen ventricular: R ensanchada y T de polaridad opuesta.
@@ -735,7 +777,7 @@ def get_template(template_id: str) -> BeatTemplate:
 def target_extent_s(
     template: BeatTemplate, target: WaveTarget
 ) -> tuple[float, float]:
-    """Extensión temporal de un target, a ±2σ, relativa al evento."""
+    """Extensión temporal de un target, a ±2,5σ, relativa al evento."""
     components = template.components_for(target)
     if not components:
         return (0.0, 0.0)
@@ -759,7 +801,7 @@ def qt_duration_s(template: BeatTemplate) -> float:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_beat.py -v`
-Expected: PASS, 10 passed
+Expected: PASS, 12 passed
 
 - [ ] **Step 5: Commit**
 
