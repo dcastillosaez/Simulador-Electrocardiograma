@@ -168,6 +168,43 @@ def test_flutter_conducts_a_fraction_of_its_atrial_waves():
     assert atrial / ventricular == pytest.approx(2.0, rel=0.15)
 
 
+@pytest.mark.parametrize(
+    "rhythm_id", sorted(EXPECTED_IDS - {"ventricular_fibrillation"})
+)
+def test_declared_pulse_matches_the_signal(rhythm_id):
+    """`ventricular_rate_hz` es lo que una interfaz mostrará como frecuencia
+    cardíaca, y la frecuencia cardíaca de un paciente es la de sus
+    ventrículos. En el bloqueo AV completo eso son los 40 lpm del escape, no
+    los 75 de unas aurículas que no conducen; en un Mobitz I son los 56 que
+    quedan tras caer una P de cada cuatro."""
+    definition = get_rhythm(rhythm_id)
+    source = definition.build_source(np.random.default_rng(20260725))
+    events = source.events(0.0, 120.0)
+    ventricular = len([e for e in events if e.kind is EventKind.VENTRICULAR])
+    assert ventricular / 120.0 == pytest.approx(
+        definition.ventricular_rate_hz, rel=0.08
+    )
+
+
+def test_fibrillation_declares_no_measurable_pulse():
+    """La fibrilación ventricular no tiene pulso: no hay contracción eficaz."""
+    assert get_rhythm("ventricular_fibrillation").ventricular_rate_hz == 0.0
+
+
+@pytest.mark.parametrize("rhythm_id", sorted(EXPECTED_IDS))
+def test_blocks_are_the_only_rhythms_where_command_and_pulse_differ(rhythm_id):
+    """En todo lo que conduce 1:1, mando y pulso son el mismo número. Si
+    empiezan a divergir en otro sitio, o el catálogo está mal o el ritmo no
+    conduce como creemos."""
+    definition = get_rhythm(rhythm_id)
+    command_hz = definition.default_parameters["heart_rate_hz"]
+    diverges = definition.ventricular_rate_hz != pytest.approx(command_hz)
+    if rhythm_id in {"av_block_second_mobitz_i", "av_block_third"}:
+        assert diverges
+    else:
+        assert not diverges
+
+
 def test_no_rhythm_specific_branching_in_the_engine():
     """Principio arquitectónico 3: cero casos especiales por ritmo.
 

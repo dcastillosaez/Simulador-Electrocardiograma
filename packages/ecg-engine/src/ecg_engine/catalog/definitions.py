@@ -63,7 +63,22 @@ class ParameterRange:
 
 @dataclass(frozen=True, slots=True)
 class RhythmDefinition:
-    """Contrato completo de un ritmo del catálogo."""
+    """Contrato completo de un ritmo del catálogo.
+
+    `heart_rate_hz`, dentro de `default_parameters` y `editable_parameters`,
+    es la **frecuencia de mando**: el valor que el usuario mueve y que el
+    motor propaga a quien gobierne el ritmo. En los ritmos sinusales es
+    también el pulso del paciente, pero en los bloqueos no: en un Mobitz I
+    manda la frecuencia sinusal y uno de cada cuatro latidos no llega al
+    ventrículo, y en un bloqueo completo las aurículas van a su aire mientras
+    el pulso lo marca el escape.
+
+    `ventricular_rate_hz` es ese pulso: lo que un clínico llama frecuencia
+    cardíaca y lo que una interfaz debe mostrar. Separarlos no es purismo.
+    Mostrar 75 lpm en un bloqueo AV completo —la frecuencia auricular— cuando
+    el paciente tiene un pulso de 40 basta para que un cardiólogo descarte el
+    simulador de un vistazo.
+    """
 
     rhythm_id: str
     display_name: str
@@ -71,6 +86,7 @@ class RhythmDefinition:
     build_source: Callable[[np.random.Generator], SignalSource]
     default_parameters: Mapping[str, float]
     editable_parameters: Mapping[str, ParameterRange]
+    ventricular_rate_hz: float
     clinical_description: str
     references: tuple[str, ...]
     allowed_overlays: tuple[str, ...] = field(default=())
@@ -210,6 +226,7 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         editable_parameters={
             "heart_rate_hz": ParameterRange(_bpm(60), _bpm(100), _bpm(70))
         },
+        ventricular_rate_hz=_bpm(70),
         clinical_description=(
             "Onda P precediendo a cada QRS con PR constante entre 120 y 200 ms, "
             "frecuencia entre 60 y 100 lpm y QRS estrecho."
@@ -225,6 +242,7 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         editable_parameters={
             "heart_rate_hz": ParameterRange(_bpm(101), _bpm(180), _bpm(120))
         },
+        ventricular_rate_hz=_bpm(120),
         clinical_description=(
             "Ritmo sinusal por encima de 100 lpm. La P puede fundirse con la T "
             "precedente a frecuencias altas."
@@ -240,6 +258,7 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         editable_parameters={
             "heart_rate_hz": ParameterRange(_bpm(30), _bpm(59), _bpm(48))
         },
+        ventricular_rate_hz=_bpm(48),
         clinical_description=(
             "Ritmo sinusal por debajo de 60 lpm. Frecuente y benigno en "
             "deportistas y durante el sueño."
@@ -255,6 +274,7 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         editable_parameters={
             "heart_rate_hz": ParameterRange(_bpm(50), _bpm(180), _bpm(80))
         },
+        ventricular_rate_hz=_bpm(80),
         clinical_description=(
             "Ausencia de ondas P organizadas, sustituidas por ondas f de "
             "amplitud variable, con respuesta ventricular irregularmente "
@@ -271,6 +291,7 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         build_source=_build_atrial_flutter,
         default_parameters={"heart_rate_hz": _bpm(150)},
         editable_parameters={"heart_rate_hz": _fixed(_bpm(150))},
+        ventricular_rate_hz=_bpm(150),
         clinical_description=(
             "Ondas F en dientes de sierra a unos 300 por minuto, con conducción "
             "habitualmente 2:1, lo que da una respuesta ventricular en torno a "
@@ -290,6 +311,7 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         editable_parameters={
             "heart_rate_hz": ParameterRange(_bpm(150), _bpm(250), _bpm(180))
         },
+        ventricular_rate_hz=_bpm(180),
         clinical_description=(
             "Taquicardia regular de QRS estrecho entre 150 y 250 lpm, con la P "
             "habitualmente oculta dentro del QRS o de la T."
@@ -306,6 +328,7 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         build_source=_build_ventricular_tachycardia,
         default_parameters={"heart_rate_hz": _bpm(180)},
         editable_parameters={"heart_rate_hz": _fixed(_bpm(180))},
+        ventricular_rate_hz=_bpm(180),
         clinical_description=(
             "Taquicardia regular de QRS ancho por encima de 120 ms, con "
             "disociación auriculoventricular."
@@ -322,6 +345,7 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         build_source=_build_ventricular_fibrillation,
         default_parameters={"heart_rate_hz": 0.0},
         editable_parameters={"heart_rate_hz": _FIXED_RATE},
+        ventricular_rate_hz=0.0,
         clinical_description=(
             "Actividad eléctrica caótica sin complejos identificables ni línea "
             "isoeléctrica. No tiene frecuencia cardíaca medible."
@@ -340,6 +364,7 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         editable_parameters={
             "heart_rate_hz": ParameterRange(_bpm(45), _bpm(100), _bpm(70))
         },
+        ventricular_rate_hz=_bpm(70),
         clinical_description=(
             "PR constante por encima de 200 ms, con conducción 1:1 conservada. "
             "Toda P va seguida de su QRS."
@@ -357,6 +382,7 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         editable_parameters={
             "heart_rate_hz": ParameterRange(_bpm(50), _bpm(100), _bpm(75))
         },
+        ventricular_rate_hz=_bpm(56.25),
         clinical_description=(
             "Alargamiento progresivo del PR latido a latido hasta que una onda "
             "P no conduce. Tras la pausa, el PR vuelve a su valor basal."
@@ -372,6 +398,7 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         build_source=_build_av_block_third,
         default_parameters={"heart_rate_hz": _bpm(75)},
         editable_parameters={"heart_rate_hz": _fixed(_bpm(75))},
+        ventricular_rate_hz=_bpm(40),
         clinical_description=(
             "Disociación auriculoventricular completa: las aurículas y los "
             "ventrículos laten a frecuencias independientes, con un ritmo de "
@@ -390,6 +417,7 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         editable_parameters={
             "heart_rate_hz": ParameterRange(_bpm(50), _bpm(120), _bpm(78))
         },
+        ventricular_rate_hz=_bpm(78),
         allowed_overlays=("st_elevation_inferior",),
         clinical_description=(
             "Ritmo sinusal con elevación del segmento ST en II, III y aVF. No "
