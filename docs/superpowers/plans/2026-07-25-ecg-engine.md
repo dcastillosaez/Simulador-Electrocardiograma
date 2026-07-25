@@ -1303,9 +1303,14 @@ class CompleteBlock:
         return []
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class IrregularConduction:
     """Conducción irregular de la fibrilación auricular.
+
+    Es la única política **mutable**, y por un motivo clínico: en la FA la
+    frecuencia que importa es la respuesta ventricular, y esa la fija el nodo
+    AV, no la aurícula. Controlar la frecuencia de una FA significa mover
+    `mean_rr_s`, que es justo lo que hace un frenador del nodo AV.
 
     La actividad auricular en la FA es caótica y de alta frecuencia. El nodo
     AV deja pasar impulsos de forma impredecible, y el resultado es un RR
@@ -1320,6 +1325,12 @@ class IrregularConduction:
     rr_spread_s: float
     template_id: str = "normal_qrst"
     _min_rr_s: float = 0.24
+
+    def set_rate_hz(self, rate_hz: float) -> None:
+        """Ajusta la respuesta ventricular media."""
+        if rate_hz <= 0.0:
+            raise ValueError(f"rate_hz debe ser positivo, recibido {rate_hz}")
+        self.mean_rr_s = 1.0 / rate_hz
 
     def conduct(
         self, atrial: Sequence[CardiacEvent], rng: np.random.Generator
@@ -1643,6 +1654,17 @@ def test_different_seeds_produce_different_jitter():
     assert first != pytest.approx(second)
 
 
+def test_regular_train_ignores_rate_changes_without_raising():
+    """La frecuencia de un tren regular es estructural. El motor llama a
+    `set_rate_hz` en todos los ritmos, así que esto no puede explotar."""
+    train = RegularTrain(
+        kind=EventKind.ATRIAL, template_id="flutter_f", rate_hz=300 / 60
+    )
+    before = train.events(0.0, 5.0)
+    train.set_rate_hz(60 / 60)
+    assert train.events(0.0, 5.0) == before
+
+
 def test_regular_train_has_no_variability_at_all():
     """El flutter a 300/min es un metrónomo: sin RSA ni jitter."""
     train = RegularTrain(
@@ -1780,10 +1802,14 @@ class RegularTrain:
             raise ValueError(f"rate_hz debe ser positivo, recibido {self.rate_hz}")
 
     def set_rate_hz(self, rate_hz: float) -> None:
-        raise TypeError(
-            "RegularTrain es inmutable; construye uno nuevo para cambiar la "
-            "frecuencia"
-        )
+        """No hace nada: la frecuencia de un tren regular es estructural.
+
+        El flutter despolariza la aurícula a 300 por minuto y un escape
+        ventricular late a 40. Esos números definen el ritmo; no son un
+        ajuste del usuario. Quien controla la frecuencia que el usuario sí
+        puede tocar es el catálogo, mediante `editable_parameters`.
+        """
+        return None
 
     def events(self, t0_s: float, t1_s: float) -> list[CardiacEvent]:
         interval_s = 1.0 / self.rate_hz
@@ -1804,7 +1830,7 @@ class RegularTrain:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_rhythm.py -v`
-Expected: PASS, 13 passed
+Expected: PASS, 14 passed
 
 - [ ] **Step 5: Commit**
 
@@ -2946,12 +2972,17 @@ class BeatBasedSource:
         self._rng = rng if rng is not None else np.random.default_rng(0)
 
     def set_rate_hz(self, rate_hz: float) -> None:
-        """Cambia la frecuencia del tren auricular.
+        """Propaga la frecuencia a quien la gobierne en este ritmo.
 
-        En los ritmos con conducción 1:1 eso equivale a cambiar la frecuencia
-        ventricular, que es lo que el usuario espera al mover el control.
+        En los ritmos con conducción 1:1 manda el tren auricular. En la
+        fibrilación auricular manda el nodo AV, porque la aurícula va a su
+        aire y lo que el usuario controla es la respuesta ventricular. Los
+        trenes regulares ignoran el cambio: su frecuencia es estructural.
         """
         self._atrial.set_rate_hz(rate_hz)
+        setter = getattr(self._conduction, "set_rate_hz", None)
+        if setter is not None:
+            setter(rate_hz)
 
     def events(self, t0_s: float, t1_s: float) -> list[CardiacEvent]:
         atrial = list(self._atrial.events(t0_s, t1_s))
@@ -3191,6 +3222,34 @@ def test_ventricular_fibrillation_exposes_no_rate_control():
     assert definition.category is RhythmCategory.VENTRICULAR
     rate_range = definition.editable_parameters["heart_rate_hz"]
     assert rate_range.minimum == rate_range.maximum
+
+
+@pytest.mark.parametrize("rhythm_id", sorted(EXPECTED_IDS))
+def test_editable_rate_actually_changes_the_ventricular_rate(rhythm_id):
+    """Coherencia entre lo que el catálogo promete y lo que el motor hace.
+
+    Si un rango es editable, mover la frecuencia tiene que notarse. Si no se
+    nota, el rango debe declararse fijo. Un deslizante que no hace nada es
+    peor que un control deshabilitado.
+    """
+    definition = get_rhythm(rhythm_id)
+    rate_range = definition.editable_parameters["heart_rate_hz"]
+    source = definition.build_source(np.random.default_rng(5))
+
+    if rate_range.minimum == rate_range.maximum:
+        pytest.skip("frecuencia estructural, declarada como fija")
+
+    def ventricular_count() -> int:
+        events = source.events(0.0, 60.0)
+        return len([e for e in events if e.kind is EventKind.VENTRICULAR])
+
+    source.set_rate_hz(rate_range.minimum)
+    slow = ventricular_count()
+    source.set_rate_hz(rate_range.maximum)
+    fast = len(
+        [e for e in source.events(60.0, 120.0) if e.kind is EventKind.VENTRICULAR]
+    )
+    assert fast > slow
 
 
 def test_third_degree_block_produces_dissociated_trains():
@@ -3439,6 +3498,18 @@ def _build_stemi_inferior(rng: np.random.Generator) -> SignalSource:
 _FIXED_RATE = ParameterRange(minimum=0.0, maximum=0.0, default=0.0)
 
 
+def _fixed(rate_hz: float) -> ParameterRange:
+    """Rango de un solo punto, para ritmos de frecuencia estructural.
+
+    El flutter despolariza la aurícula a 300 por minuto con conducción 2:1, y
+    un escape ventricular late a 40. Esas frecuencias definen el ritmo. Ofrecer
+    un control deslizante que no hace nada sería mentirle al usuario, así que
+    el catálogo declara el rango como fijo y la interfaz lo muestra
+    deshabilitado.
+    """
+    return ParameterRange(minimum=rate_hz, maximum=rate_hz, default=rate_hz)
+
+
 DEFINITIONS: tuple[RhythmDefinition, ...] = (
     RhythmDefinition(
         rhythm_id="sinus_normal",
@@ -3509,9 +3580,7 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         category=RhythmCategory.SUPRAVENTRICULAR,
         build_source=_build_atrial_flutter,
         default_parameters={"heart_rate_hz": _bpm(150)},
-        editable_parameters={
-            "heart_rate_hz": ParameterRange(_bpm(75), _bpm(150), _bpm(150))
-        },
+        editable_parameters={"heart_rate_hz": _fixed(_bpm(150))},
         clinical_description=(
             "Ondas F en dientes de sierra a unos 300 por minuto, con conducción "
             "habitualmente 2:1, lo que da una respuesta ventricular en torno a "
@@ -3546,9 +3615,7 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         category=RhythmCategory.VENTRICULAR,
         build_source=_build_ventricular_tachycardia,
         default_parameters={"heart_rate_hz": _bpm(180)},
-        editable_parameters={
-            "heart_rate_hz": ParameterRange(_bpm(120), _bpm(250), _bpm(180))
-        },
+        editable_parameters={"heart_rate_hz": _fixed(_bpm(180))},
         clinical_description=(
             "Taquicardia regular de QRS ancho por encima de 120 ms, con "
             "disociación auriculoventricular."
@@ -3614,9 +3681,7 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         category=RhythmCategory.BLOCK,
         build_source=_build_av_block_third,
         default_parameters={"heart_rate_hz": _bpm(75)},
-        editable_parameters={
-            "heart_rate_hz": ParameterRange(_bpm(50), _bpm(110), _bpm(75))
-        },
+        editable_parameters={"heart_rate_hz": _fixed(_bpm(75))},
         clinical_description=(
             "Disociación auriculoventricular completa: las aurículas y los "
             "ventrículos laten a frecuencias independientes, con un ritmo de "
@@ -3692,7 +3757,7 @@ def get_rhythm(rhythm_id: str) -> RhythmDefinition:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_catalog.py -v`
-Expected: PASS, 76 passed (los tests parametrizados generan 12 casos cada uno)
+Expected: PASS, 88 passed (los tests parametrizados generan 12 casos cada uno; los de frecuencia estructural aparecen como `skipped`)
 
 - [ ] **Step 5: Commit**
 
@@ -3982,7 +4047,7 @@ La API pública del paquete. Mantiene el reloj de simulación, aplica el ruido y
 - Produces:
   - `EcgEngine(rhythm_id: str, seed: int, sample_rate_hz: int = 500, params: EngineParams | None = None)`
   - Métodos: `generate(n_samples: int) -> np.ndarray`, `update_params(params: EngineParams) -> None`, `reset() -> None`.
-  - Propiedades de solo lectura: `t_s: float`, `rhythm_id: str`, `seed: int`, `sample_rate_hz: int`, `params: EngineParams`.
+  - Propiedades de solo lectura: `t_s: float`, `rhythm_id: str`, `seed: int`, `sample_rate_hz: int`, `params: EngineParams`, `source: SignalSource`.
   - Reexportado en `ecg_engine`: `EcgEngine`, `EngineParams`, `NoiseParams`, `VariabilityParams`, `get_rhythm`, `list_rhythms`, `measure`.
 
 - [ ] **Step 1: Write the failing test**
@@ -4211,6 +4276,16 @@ class EcgEngine:
     def params(self) -> EngineParams:
         return self._params
 
+    @property
+    def source(self) -> SignalSource:
+        """Fuente subyacente, de solo lectura.
+
+        La necesitan los golden signals para inspeccionar la línea de eventos
+        además de las muestras. Exponerla como propiedad evita que los tests
+        hurguen en atributos privados.
+        """
+        return self._source
+
     # --- operación ---------------------------------------------------------
 
     def update_params(self, params: EngineParams) -> None:
@@ -4294,3 +4369,487 @@ git commit -m "Añadir orquestador EcgEngine y API pública del paquete"
 ```
 
 ---
+
+### Task 16: Golden signals en tres niveles
+
+Tres niveles, porque detectan cosas distintas. Los de eventos cazan cambios en la fisiología con mensajes legibles. Los de muestras cazan cualquier alteración del renderizado. Los de medidas cazan lo peor: que las muestras apenas cambien mientras un intervalo se desplaza.
+
+Dos suites: limpia con ruido a cero, y con ruido a nivel fijo. Nunca se mezclan.
+
+**Files:**
+- Create: `packages/ecg-engine/tests/golden/conftest.py`
+- Create: `packages/ecg-engine/tests/golden/generate_golden.py`
+- Create: `packages/ecg-engine/tests/golden/test_golden.py`
+- Create: `packages/ecg-engine/tests/golden/data/` (generado)
+
+**Interfaces:**
+- Consumes: `EcgEngine`, `measure`, `list_rhythms`, `EngineParams`, `NoiseParams` de `ecg_engine`.
+- Produces: `GOLDEN_SEED`, `GOLDEN_DURATION_S`, `NOISY_PARAMS`, `golden_dir()`, `simulate(rhythm_id, noisy)` en `conftest.py`, reutilizado por el generador y por los tests.
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `packages/ecg-engine/tests/golden/conftest.py`:
+
+```python
+"""Utilidades compartidas entre el generador de golden files y sus tests.
+
+Que ambos usen exactamente el mismo código de simulación no es opcional: si
+divergen, los golden dejan de comprobar lo que creemos que comprueban.
+"""
+
+from __future__ import annotations
+
+import pathlib
+
+import numpy as np
+
+from ecg_engine import EcgEngine, EngineParams, NoiseParams, measure
+
+GOLDEN_SEED: int = 20260725
+GOLDEN_DURATION_S: float = 10.0
+GOLDEN_SAMPLE_RATE_HZ: int = 500
+
+NOISY_PARAMS: NoiseParams = NoiseParams(
+    emg_v=2e-5, mains_v=1e-5, baseline_v=1e-4, motion_v=8e-5
+)
+
+
+def golden_dir() -> pathlib.Path:
+    return pathlib.Path(__file__).parent / "data"
+
+
+def simulate(rhythm_id: str, noisy: bool) -> dict:
+    """Ejecuta la simulación canónica de un ritmo y devuelve sus tres niveles."""
+    engine = EcgEngine(
+        rhythm_id=rhythm_id, seed=GOLDEN_SEED, sample_rate_hz=GOLDEN_SAMPLE_RATE_HZ
+    )
+    if noisy:
+        engine.update_params(
+            EngineParams(
+                heart_rate_hz=engine.params.heart_rate_hz, noise=NOISY_PARAMS
+            )
+        )
+    n_samples = int(GOLDEN_DURATION_S * GOLDEN_SAMPLE_RATE_HZ)
+    signal = engine.generate(n_samples)
+
+    source = engine.source
+    events = (
+        list(source.events(0.0, GOLDEN_DURATION_S))
+        if hasattr(source, "events")
+        else []
+    )
+
+    return {
+        "signal": signal,
+        "events": [
+            (e.kind.value, round(e.t_s, 6), e.template_id, e.index) for e in events
+        ],
+        "measurements": measure(events, signal, GOLDEN_SAMPLE_RATE_HZ).as_dict(),
+    }
+
+
+def golden_paths(rhythm_id: str, noisy: bool) -> dict[str, pathlib.Path]:
+    suite = "noisy" if noisy else "clean"
+    base = golden_dir() / suite
+    return {
+        "signal": base / f"{rhythm_id}.samples.npy",
+        "events": base / f"{rhythm_id}.events.json",
+        "measurements": base / f"{rhythm_id}.measurements.json",
+    }
+```
+
+Crear `packages/ecg-engine/tests/golden/test_golden.py`:
+
+```python
+import json
+
+import numpy as np
+import pytest
+
+from ecg_engine import list_rhythms
+
+from .conftest import golden_paths, simulate
+
+RHYTHM_IDS = [d.rhythm_id for d in list_rhythms()]
+SUITES = [False, True]
+SUITE_NAMES = {False: "clean", True: "noisy"}
+
+SAMPLE_TOLERANCE_V = 1e-12
+MEASUREMENT_TOLERANCE = 1e-9
+
+
+@pytest.mark.parametrize("noisy", SUITES, ids=SUITE_NAMES.get)
+@pytest.mark.parametrize("rhythm_id", RHYTHM_IDS)
+def test_golden_samples_are_unchanged(rhythm_id, noisy):
+    """Regresión de señal. Si falla sin un cambio intencional del motor,
+    algo se ha roto."""
+    path = golden_paths(rhythm_id, noisy)["signal"]
+    if not path.exists():
+        pytest.fail(
+            f"falta el golden {path.name}. Genera con: "
+            "uv run python tests/golden/generate_golden.py"
+        )
+    expected = np.load(path)
+    actual = simulate(rhythm_id, noisy)["signal"]
+    assert actual.shape == expected.shape
+    np.testing.assert_allclose(actual, expected, atol=SAMPLE_TOLERANCE_V)
+
+
+@pytest.mark.parametrize("noisy", SUITES, ids=SUITE_NAMES.get)
+@pytest.mark.parametrize("rhythm_id", RHYTHM_IDS)
+def test_golden_events_are_unchanged(rhythm_id, noisy):
+    """Regresión de fisiología, con mensajes legibles: aquí un fallo dice
+    qué evento se movió, no en qué índice del array difiere un float."""
+    path = golden_paths(rhythm_id, noisy)["events"]
+    expected = json.loads(path.read_text(encoding="utf-8"))
+    actual = simulate(rhythm_id, noisy)["events"]
+    assert [list(e) for e in actual] == expected
+
+
+@pytest.mark.parametrize("noisy", SUITES, ids=SUITE_NAMES.get)
+@pytest.mark.parametrize("rhythm_id", RHYTHM_IDS)
+def test_golden_measurements_are_unchanged(rhythm_id, noisy):
+    """Caza el caso peor: muestras casi idénticas con un intervalo desplazado."""
+    path = golden_paths(rhythm_id, noisy)["measurements"]
+    expected = json.loads(path.read_text(encoding="utf-8"))
+    actual = simulate(rhythm_id, noisy)["measurements"]
+    assert set(actual) == set(expected)
+    for key, expected_value in expected.items():
+        actual_value = actual[key]
+        if expected_value is None:
+            assert np.isnan(actual_value), f"{key} debía ser NaN"
+        else:
+            assert actual_value == pytest.approx(
+                expected_value, abs=MEASUREMENT_TOLERANCE
+            ), f"{key}: {expected_value} → {actual_value}"
+
+
+def test_every_catalog_rhythm_has_golden_files():
+    """Un ritmo nuevo sin golden es un ritmo sin red de seguridad."""
+    missing = [
+        path.name
+        for rhythm_id in RHYTHM_IDS
+        for noisy in SUITES
+        for path in golden_paths(rhythm_id, noisy).values()
+        if not path.exists()
+    ]
+    assert missing == []
+
+
+def test_clean_and_noisy_suites_actually_differ():
+    """Si coincidieran, la suite con ruido no estaría probando nada."""
+    clean = simulate("sinus_normal", noisy=False)["signal"]
+    noisy = simulate("sinus_normal", noisy=True)["signal"]
+    assert not np.allclose(clean, noisy)
+
+
+def test_clean_suite_has_no_noise_at_all():
+    """Los tests de fisiología corren con el ruido a cero. Sin excepciones."""
+    from .conftest import GOLDEN_SEED, GOLDEN_SAMPLE_RATE_HZ
+    from ecg_engine import EcgEngine
+
+    engine = EcgEngine(rhythm_id="sinus_normal", seed=GOLDEN_SEED)
+    assert engine.params.noise.emg_v == 0.0
+    assert engine.params.noise.mains_v == 0.0
+    assert engine.params.noise.baseline_v == 0.0
+    assert engine.params.noise.motion_v == 0.0
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd packages/ecg-engine && uv run pytest tests/golden -v`
+Expected: FAIL — los ficheros de `tests/golden/data/` todavía no existen
+
+- [ ] **Step 3: Write minimal implementation**
+
+Crear `packages/ecg-engine/tests/golden/generate_golden.py`:
+
+```python
+"""Genera los ficheros de referencia de golden signals.
+
+**Ejecutar solo ante un cambio intencional y documentado del motor.**
+Regenerar los golden para «arreglar» un test que ha empezado a fallar
+equivale a borrar la alarma de incendios porque suena.
+
+    uv run python tests/golden/generate_golden.py
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import sys
+
+import numpy as np
+
+from ecg_engine import list_rhythms
+
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
+
+from conftest import golden_paths, simulate  # noqa: E402
+
+
+def _json_safe(value: float) -> float | None:
+    """NaN no es JSON válido. Un PR no medible se guarda como null."""
+    return None if math.isnan(value) else value
+
+
+def main() -> None:
+    written = 0
+    for definition in list_rhythms():
+        for noisy in (False, True):
+            result = simulate(definition.rhythm_id, noisy)
+            paths = golden_paths(definition.rhythm_id, noisy)
+            paths["signal"].parent.mkdir(parents=True, exist_ok=True)
+
+            np.save(paths["signal"], result["signal"])
+            paths["events"].write_text(
+                json.dumps(result["events"], indent=2), encoding="utf-8"
+            )
+            paths["measurements"].write_text(
+                json.dumps(
+                    {k: _json_safe(v) for k, v in result["measurements"].items()},
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            written += 3
+            suite = "noisy" if noisy else "clean"
+            print(f"  {definition.rhythm_id} [{suite}]")
+
+    print(f"\n{written} ficheros escritos en tests/golden/data/")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Generar los ficheros de referencia:
+
+```bash
+cd packages/ecg-engine && uv run python tests/golden/generate_golden.py
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd packages/ecg-engine && uv run pytest tests/golden -v`
+Expected: PASS, 74 passed (12 ritmos × 2 suites × 3 niveles, más 3 tests de integridad)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/ecg-engine/tests/golden/
+git commit -m "Añadir golden signals en tres niveles con suites limpia y con ruido"
+```
+
+---
+
+### Task 17: Benchmarks y verificación final
+
+Objetivos, no límites duros: existen para detectar regresiones de rendimiento, no para justificar optimización prematura.
+
+**Files:**
+- Create: `packages/ecg-engine/tests/benchmarks/test_performance.py`
+- Modify: `packages/ecg-engine/README.md`
+
+**Interfaces:**
+- Consumes: `EcgEngine`, `list_rhythms` de `ecg_engine`.
+- Produces: nada que consuman otras tareas. Cierra el plan.
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `packages/ecg-engine/tests/benchmarks/test_performance.py`:
+
+```python
+"""Objetivos de rendimiento del motor.
+
+El objetivo del diseño es generar 10 s de ECG de doce derivaciones en menos
+de 50 ms. Con chunks de 100 ms en producción, eso deja un margen holgado
+frente al tiempo real.
+"""
+
+from __future__ import annotations
+
+import time
+
+import numpy as np
+import pytest
+
+from ecg_engine import EcgEngine, list_rhythms
+
+TEN_SECONDS_SAMPLES = 5000
+TARGET_S = 0.050
+REALTIME_CHUNK_SAMPLES = 50  # 100 ms a 500 Hz
+REALTIME_BUDGET_S = 0.010
+
+
+def elapsed_s(fn) -> float:
+    start = time.perf_counter()
+    fn()
+    return time.perf_counter() - start
+
+
+def test_ten_seconds_of_ecg_generate_under_fifty_milliseconds():
+    engine = EcgEngine(rhythm_id="sinus_normal", seed=20260725)
+    duration_s = elapsed_s(lambda: engine.generate(TEN_SECONDS_SAMPLES))
+    assert duration_s < TARGET_S, f"{duration_s * 1000:.1f} ms, objetivo 50 ms"
+
+
+@pytest.mark.parametrize("rhythm_id", [d.rhythm_id for d in list_rhythms()])
+def test_no_rhythm_is_pathologically_slow(rhythm_id):
+    """Ningún ritmo debe salirse del presupuesto por más del cuádruple."""
+    engine = EcgEngine(rhythm_id=rhythm_id, seed=20260725)
+    duration_s = elapsed_s(lambda: engine.generate(TEN_SECONDS_SAMPLES))
+    assert duration_s < TARGET_S * 4, (
+        f"{rhythm_id}: {duration_s * 1000:.1f} ms"
+    )
+
+
+def test_realtime_chunks_stay_well_inside_their_budget():
+    """Un chunk de 100 ms debe generarse en mucho menos de 100 ms, o el
+    streaming no aguanta el tiempo real."""
+    engine = EcgEngine(rhythm_id="sinus_normal", seed=20260725)
+    engine.generate(REALTIME_CHUNK_SAMPLES)  # descarta el primer chunk
+    worst_s = max(
+        elapsed_s(lambda: engine.generate(REALTIME_CHUNK_SAMPLES))
+        for _ in range(50)
+    )
+    assert worst_s < REALTIME_BUDGET_S, f"peor caso {worst_s * 1000:.1f} ms"
+
+
+def test_generation_cost_does_not_grow_with_elapsed_simulation_time():
+    """La caché de la línea temporal crece con la sesión. Este test detecta
+    que esa caché degrade a comportamiento cuadrático en sesiones largas."""
+    engine = EcgEngine(rhythm_id="sinus_normal", seed=20260725)
+    early = elapsed_s(lambda: engine.generate(REALTIME_CHUNK_SAMPLES))
+    for _ in range(600):  # avanza un minuto de simulación
+        engine.generate(REALTIME_CHUNK_SAMPLES)
+    late = elapsed_s(lambda: engine.generate(REALTIME_CHUNK_SAMPLES))
+    assert late < max(early * 10, 0.005)
+
+
+def test_ten_minutes_of_simulation_produce_finite_values_throughout():
+    """Criterio de aceptación 2: diez minutos sin deriva ni valores rotos."""
+    engine = EcgEngine(rhythm_id="sinus_normal", seed=20260725)
+    for _ in range(6000):  # 600 s en chunks de 100 ms
+        chunk = engine.generate(REALTIME_CHUNK_SAMPLES)
+        assert np.isfinite(chunk).all()
+    assert engine.t_s == pytest.approx(600.0)
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd packages/ecg-engine && uv run pytest tests/benchmarks -v`
+Expected: FAIL con `ModuleNotFoundError: No module named 'tests.benchmarks'` o, si el motor es lento, fallo de presupuesto en `test_ten_seconds_of_ecg_generate_under_fifty_milliseconds`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Si algún benchmark falla, la causa más probable es el bucle por evento de `render_events`, que evalúa cada gaussiana sobre la rejilla completa. La optimización es acotar cada componente a su ventana de ±4σ en lugar de a toda la rejilla.
+
+Modificar `packages/ecg-engine/src/ecg_engine/renderer.py`, reemplazando `_trace_for_event`:
+
+```python
+_COMPONENT_EXTENT_SIGMA: float = 4.0
+
+
+def _trace_for_event(t_s: np.ndarray, event: CardiacEvent) -> np.ndarray:
+    """Suma las componentes del evento, cada una solo en su ventana útil.
+
+    Más allá de cuatro desviaciones típicas una gaussiana aporta menos de
+    3·10⁻⁵ de su amplitud: por debajo del ruido de cuantización de cualquier
+    ECG real. Restringir el cálculo a esa ventana evita evaluar cada onda
+    sobre la rejilla entera.
+    """
+    trace = np.zeros_like(t_s)
+    if t_s.size == 0:
+        return trace
+    sample_period_s = float(t_s[1] - t_s[0]) if t_s.size > 1 else 1.0
+
+    for component in get_template(event.template_id).components:
+        center_s = event.t_s + component.center_s
+        half_width_s = _COMPONENT_EXTENT_SIGMA * component.width_s
+        start = int(np.searchsorted(t_s, center_s - half_width_s, side="left"))
+        end = int(np.searchsorted(t_s, center_s + half_width_s, side="right"))
+        if start >= end:
+            continue
+        window = t_s[start:end]
+        trace[start:end] += render_component(window, component, offset_s=event.t_s)
+
+    return trace
+```
+
+Añadir el import de `numpy.searchsorted` no hace falta; `np` ya está importado.
+
+Actualizar `packages/ecg-engine/README.md`:
+
+```markdown
+# ecg-engine
+
+Motor fisiológico de generación de ECG. Paquete Python puro, sin dependencias
+de framework web. Trabaja exclusivamente en unidades SI: segundos, voltios y
+hercios.
+
+## Uso
+
+```python
+from ecg_engine import EcgEngine
+
+engine = EcgEngine(rhythm_id="sinus_normal", seed=20260725)
+signal = engine.generate(500)   # (12, 500) en voltios
+```
+
+## Desarrollo
+
+    uv sync --extra dev
+    uv run pytest                        # toda la suite
+    uv run pytest tests/unit             # solo unitarios
+    uv run pytest tests/golden           # regresión de señal
+    uv run pytest tests/benchmarks       # rendimiento
+
+## Golden signals
+
+Tres niveles —eventos, muestras y medidas— en dos suites, limpia y con ruido.
+Regenerarlos **solo** ante un cambio intencional y documentado del motor:
+
+    uv run python tests/golden/generate_golden.py
+
+## Arquitectura
+
+Dos trenes de eventos independientes, auricular y ventricular, enlazados por
+políticas de conducción explícitas. Los ritmos son entradas de catálogo, no
+ramas de código. Ver `docs/superpowers/specs/2026-07-25-ecg-simulator-fase1-design.md`.
+```
+
+- [ ] **Step 4: Run the whole suite**
+
+Run: `cd packages/ecg-engine && uv run pytest -v`
+Expected: PASS, toda la suite en verde — unitarios, golden y benchmarks
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/ecg-engine/
+git commit -m "Añadir benchmarks de rendimiento del motor"
+```
+
+---
+
+## Cierre del plan
+
+Al terminar la tarea 17, el paquete `ecg-engine` cumple la parte de los criterios de aceptación de la fase 1 que le corresponde:
+
+| Criterio | Cubierto por |
+|---|---|
+| 1. Doce ritmos en doce derivaciones | Tareas 13 y 15 |
+| 4. Reproducible desde la semilla | Tareas 15 y 16 |
+| 5. Golden signals en tres niveles y dos suites | Tarea 16 |
+| 6. Benchmarks dentro de objetivo | Tarea 17 |
+
+Quedan fuera de este plan, por depender de la API o del navegador:
+
+- **Criterio 2** (60 fps durante diez minutos): plan C. La tarea 17 verifica la mitad que sí es del motor —diez minutos de generación sin deriva ni valores rotos—.
+- **Criterio 3** (parámetros en caliente): el motor lo soporta desde la tarea 15; el control de usuario llega en los planes B y C.
+- **Criterio 7** (revisión clínica): requiere ver los trazados renderizados, así que se hace tras el plan C. Las `references` del catálogo son el material de contraste.
+
+**Siguiente paso tras ejecutar este plan:** escribir el plan B (API y streaming), ya con los contratos del motor fijados en código en lugar de sobre el papel.
+
