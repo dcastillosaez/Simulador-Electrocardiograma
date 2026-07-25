@@ -1,0 +1,19 @@
+[project]
+name = "ecg-engine"
+version = "1.0.0"
+description = "Motor fisiológico de generación de ECG"
+requires-python = ">=3.12"
+dependencies = ["numpy>=2.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-benchmark>=4.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ecg_engine"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
