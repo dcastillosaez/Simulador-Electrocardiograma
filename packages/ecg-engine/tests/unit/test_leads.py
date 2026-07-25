@@ -1,0 +1,84 @@
+import numpy as np
+import pytest
+
+from ecg_engine.leads import (
+    ATRIAL_PROJECTION,
+    NORMAL_AXIS_PROJECTION,
+    LeadProjection,
+    project,
+    projection_from_mapping,
+)
+from ecg_engine.types import LEAD_ORDER, N_LEADS
+
+
+def test_projection_has_one_coefficient_per_lead():
+    assert len(NORMAL_AXIS_PROJECTION.coefficients) == N_LEADS
+
+
+def test_projection_rejects_wrong_length():
+    with pytest.raises(ValueError, match="12"):
+        LeadProjection(coefficients=(1.0, 2.0))
+
+
+def test_avr_is_negative_under_a_normal_axis():
+    """Con eje normal, aVR siempre es negativa. Si sale positiva,
+    los electrodos están mal puestos o el modelo está mal."""
+    index = LEAD_ORDER.index("aVR")
+    assert NORMAL_AXIS_PROJECTION.coefficients[index] < 0.0
+
+
+def test_lead_ii_is_the_dominant_positive_limb_lead():
+    coefficients = NORMAL_AXIS_PROJECTION.coefficients
+    limb = {lead: coefficients[LEAD_ORDER.index(lead)] for lead in ("I", "II", "III")}
+    assert limb["II"] == max(limb.values())
+
+
+def test_einthoven_law_holds_for_the_limb_leads():
+    """I + III = II. Es una identidad geométrica, no una aproximación."""
+    c = NORMAL_AXIS_PROJECTION.coefficients
+    i, ii, iii = (c[LEAD_ORDER.index(x)] for x in ("I", "II", "III"))
+    assert i + iii == pytest.approx(ii, abs=1e-9)
+
+
+def test_precordial_progression_is_monotonic_from_v1_to_v5():
+    """Progresión de la onda R: V1 negativa, creciendo hasta V5."""
+    c = NORMAL_AXIS_PROJECTION.coefficients
+    precordial = [c[LEAD_ORDER.index(f"V{n}")] for n in range(1, 6)]
+    assert precordial[0] < 0.0
+    assert all(a < b for a, b in zip(precordial, precordial[1:]))
+
+
+def test_atrial_projection_differs_from_ventricular():
+    assert ATRIAL_PROJECTION.coefficients != NORMAL_AXIS_PROJECTION.coefficients
+
+
+def test_projection_from_mapping_orders_by_canonical_lead_order():
+    mapping = {lead: float(i) for i, lead in enumerate(LEAD_ORDER)}
+    projection = projection_from_mapping(mapping)
+    assert projection.coefficients == tuple(float(i) for i in range(N_LEADS))
+
+
+def test_projection_from_mapping_rejects_unknown_lead():
+    mapping = {lead: 1.0 for lead in LEAD_ORDER} | {"V7": 1.0}
+    with pytest.raises(ValueError, match="V7"):
+        projection_from_mapping(mapping)
+
+
+def test_projection_from_mapping_rejects_missing_lead():
+    mapping = {lead: 1.0 for lead in LEAD_ORDER if lead != "V6"}
+    with pytest.raises(ValueError, match="V6"):
+        projection_from_mapping(mapping)
+
+
+def test_project_expands_one_trace_into_twelve_leads():
+    trace = np.array([0.0, 1.0, 0.0, -1.0])
+    projected = project(trace, NORMAL_AXIS_PROJECTION)
+    assert projected.shape == (N_LEADS, 4)
+    assert projected.dtype == np.float64
+
+
+def test_project_scales_each_lead_by_its_coefficient():
+    trace = np.ones(3)
+    projected = project(trace, NORMAL_AXIS_PROJECTION)
+    for index, coefficient in enumerate(NORMAL_AXIS_PROJECTION.coefficients):
+        assert projected[index] == pytest.approx(np.full(3, coefficient))
