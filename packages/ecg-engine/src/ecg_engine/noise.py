@@ -12,6 +12,10 @@ mezclar en los tests dos cosas que deben verificarse por separado.
 
 Orden fijo de la cadena, que `apply_noise` respeta:
 ruido aditivo → modulación multiplicativa → clipping.
+
+`sample_rate_hz` se recibe siempre como parámetro explícito, nunca se deduce
+del espaciado de `t_s`: con una rejilla descendente o no uniforme esa
+deducción da un valor sin sentido y el ruido se desvanece en silencio.
 """
 
 from __future__ import annotations
@@ -37,7 +41,7 @@ _BASELINE_LEAD_GAIN: np.ndarray = np.array(
 
 
 def emg_noise(
-    t_s: np.ndarray, level_v: float, rng: np.random.Generator
+    t_s: np.ndarray, level_v: float, rng: np.random.Generator, sample_rate_hz: int
 ) -> np.ndarray:
     """Ruido muscular: aditivo, independiente en cada derivación.
 
@@ -48,7 +52,6 @@ def emg_noise(
     if level_v == 0.0 or n == 0:
         return np.zeros((N_LEADS, n), dtype=np.float64)
 
-    sample_rate_hz = 1.0 / float(np.mean(np.diff(t_s))) if n > 1 else 500.0
     white = rng.standard_normal((N_LEADS, n))
     spectrum = np.fft.rfft(white, axis=1)
     freqs = np.fft.rfftfreq(n, d=1.0 / sample_rate_hz)
@@ -76,7 +79,7 @@ def baseline_wander(
 
 
 def motion_artifact(
-    t_s: np.ndarray, level_v: float, rng: np.random.Generator
+    t_s: np.ndarray, level_v: float, rng: np.random.Generator, sample_rate_hz: int
 ) -> tuple[np.ndarray, np.ndarray]:
     """Artefacto de movimiento: ráfagas esporádicas, aditivas y multiplicativas.
 
@@ -90,8 +93,7 @@ def motion_artifact(
     if level_v == 0.0 or n == 0:
         return additive, multiplicative
 
-    duration_s = float(t_s[-1] - t_s[0]) if n > 1 else 0.0
-    sample_rate_hz = (n - 1) / duration_s if duration_s > 0 else 500.0
+    duration_s = n / sample_rate_hz
     burst_samples = max(1, int(_MOTION_BURST_DURATION_S * sample_rate_hz))
     n_bursts = rng.poisson(_MOTION_BURST_HZ * max(duration_s, 0.0))
 
@@ -119,11 +121,12 @@ def apply_noise(
     noise: NoiseParams,
     variability: VariabilityParams,
     rng: np.random.Generator,
+    sample_rate_hz: int,
 ) -> np.ndarray:
     """Aplica la cadena completa de artefactos, en orden fijo."""
     result = signal_v
     if noise.emg_v:
-        result = result + emg_noise(t_s, noise.emg_v, rng)
+        result = result + emg_noise(t_s, noise.emg_v, rng, sample_rate_hz)
     if noise.mains_v:
         result = result + mains_noise(t_s, noise.mains_v)
     if noise.baseline_v:
@@ -131,6 +134,8 @@ def apply_noise(
             t_s, noise.baseline_v, variability.respiration_hz
         )
     if noise.motion_v:
-        additive, multiplicative = motion_artifact(t_s, noise.motion_v, rng)
+        additive, multiplicative = motion_artifact(
+            t_s, noise.motion_v, rng, sample_rate_hz
+        )
         result = (result + additive) * multiplicative
     return apply_clipping(result, noise.clip_v)
