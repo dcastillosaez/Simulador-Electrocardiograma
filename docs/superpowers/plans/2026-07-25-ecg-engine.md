@@ -1056,7 +1056,7 @@ Cada política es **determinista a partir del índice del evento**, no de cuánt
 **Interfaces:**
 - Consumes: `CardiacEvent`, `EventKind` de `types.py`.
 - Produces:
-  - `ConductionPolicy` — Protocol con `conduct(atrial: Sequence[CardiacEvent], rng: np.random.Generator) -> list[CardiacEvent]`.
+  - `ConductionPolicy` — Protocol con `conduct(atrial: Sequence[CardiacEvent], rng: np.random.Generator, t0_s: float, t1_s: float) -> list[CardiacEvent]`. La ventana llega explícita y no se deduce de los eventos recibidos.
   - `FixedPR(pr_s: float, template_id: str = "normal_qrst")`
   - `WenckebachPR(pr_base_s: float, pr_increment_s: float, cycle_length: int, template_id: str = "normal_qrst")`
   - `FixedRatioBlock(ratio: int, pr_s: float, template_id: str = "normal_qrst")`
@@ -1093,6 +1093,11 @@ def atrial_train(count: int, interval_s: float = 0.857) -> list[CardiacEvent]:
     ]
 
 
+def window_of(atrial: list[CardiacEvent]) -> tuple[float, float]:
+    """Ventana que cubre un tren completo, para los tests que no la varían."""
+    return (0.0, atrial[-1].t_s + 1e-6) if atrial else (0.0, 0.0)
+
+
 @pytest.fixture
 def rng() -> np.random.Generator:
     return np.random.default_rng(20260725)
@@ -1100,29 +1105,40 @@ def rng() -> np.random.Generator:
 
 def test_fixed_pr_conducts_every_p(rng):
     atrial = atrial_train(10)
-    ventricular = FixedPR(pr_s=0.16).conduct(atrial, rng)
+    ventricular = FixedPR(pr_s=0.16).conduct(atrial, rng, *window_of(atrial))
     assert len(ventricular) == 10
     assert all(e.kind is EventKind.VENTRICULAR for e in ventricular)
 
 
 def test_fixed_pr_offsets_each_qrs_by_the_pr_interval(rng):
     atrial = atrial_train(5)
-    ventricular = FixedPR(pr_s=0.16).conduct(atrial, rng)
+    ventricular = FixedPR(pr_s=0.16).conduct(atrial, rng, *window_of(atrial))
     for p, qrs in zip(atrial, ventricular):
         assert qrs.t_s == pytest.approx(p.t_s + 0.16)
 
 
 def test_first_degree_block_is_just_a_long_fixed_pr(rng):
     """El BAV de primer grado no es una política aparte: es FixedPR largo."""
-    ventricular = FixedPR(pr_s=0.24).conduct(atrial_train(3), rng)
+    atrial = atrial_train(3)
+    ventricular = FixedPR(pr_s=0.24).conduct(atrial, rng, *window_of(atrial))
     assert ventricular[0].t_s == pytest.approx(0.24)
+
+
+def test_pure_policies_ignore_the_window(rng):
+    """Las políticas puras derivan todo del índice de la P. La ventana solo
+    existe para la fibrilación auricular; pasarles una distinta no puede
+    cambiar su salida."""
+    atrial = atrial_train(6)
+    wide = FixedPR(pr_s=0.16).conduct(atrial, rng, 0.0, 1000.0)
+    narrow = FixedPR(pr_s=0.16).conduct(atrial, rng, 2.0, 2.5)
+    assert [e.t_s for e in wide] == pytest.approx([e.t_s for e in narrow])
 
 
 def test_wenckebach_lengthens_pr_until_a_beat_drops(rng):
     """Mobitz I: el PR crece latido a latido y el cuarto no conduce."""
     policy = WenckebachPR(pr_base_s=0.16, pr_increment_s=0.04, cycle_length=4)
     atrial = atrial_train(8)
-    ventricular = policy.conduct(atrial, rng)
+    ventricular = policy.conduct(atrial, rng, *window_of(atrial))
 
     assert len(ventricular) == 6  # 8 P, 2 caídas
 
@@ -1140,7 +1156,7 @@ def test_wenckebach_lengthens_pr_until_a_beat_drops(rng):
 def test_wenckebach_resets_pr_after_the_dropped_beat(rng):
     policy = WenckebachPR(pr_base_s=0.16, pr_increment_s=0.04, cycle_length=4)
     atrial = atrial_train(8)
-    ventricular = policy.conduct(atrial, rng)
+    ventricular = policy.conduct(atrial, rng, *window_of(atrial))
     fifth = next(e for e in ventricular if e.index == 4)
     assert fifth.t_s - atrial[4].t_s == pytest.approx(0.16)
 
@@ -1149,20 +1165,28 @@ def test_wenckebach_is_independent_of_chunk_boundaries(rng):
     """Renderizar en dos trozos debe dar el mismo resultado que en uno."""
     policy = WenckebachPR(pr_base_s=0.16, pr_increment_s=0.04, cycle_length=4)
     atrial = atrial_train(12)
-    whole = policy.conduct(atrial, rng)
-    split = policy.conduct(atrial[:5], rng) + policy.conduct(atrial[5:], rng)
+    whole = policy.conduct(atrial, rng, *window_of(atrial))
+    split = policy.conduct(
+        atrial[:5], rng, *window_of(atrial[:5])
+    ) + policy.conduct(atrial[5:], rng, *window_of(atrial[5:]))
     assert [e.t_s for e in whole] == pytest.approx([e.t_s for e in split])
 
 
 def test_fixed_ratio_block_conducts_one_in_n(rng):
     """Flutter 2:1 — conduce una de cada dos ondas auriculares."""
-    ventricular = FixedRatioBlock(ratio=2, pr_s=0.14).conduct(atrial_train(10), rng)
+    atrial = atrial_train(10)
+    ventricular = FixedRatioBlock(ratio=2, pr_s=0.14).conduct(
+        atrial, rng, *window_of(atrial)
+    )
     assert len(ventricular) == 5
     assert [e.index for e in ventricular] == [0, 2, 4, 6, 8]
 
 
 def test_fixed_ratio_block_supports_four_to_one(rng):
-    ventricular = FixedRatioBlock(ratio=4, pr_s=0.14).conduct(atrial_train(12), rng)
+    atrial = atrial_train(12)
+    ventricular = FixedRatioBlock(ratio=4, pr_s=0.14).conduct(
+        atrial, rng, *window_of(atrial)
+    )
     assert [e.index for e in ventricular] == [0, 4, 8]
 
 
@@ -1171,70 +1195,90 @@ def test_fixed_ratio_block_rejects_a_ratio_below_two(rng):
         FixedRatioBlock(ratio=1, pr_s=0.14)
 
 
+def test_wenckebach_rejects_a_cycle_length_below_two(rng):
+    with pytest.raises(ValueError, match="cycle_length"):
+        WenckebachPR(pr_base_s=0.16, pr_increment_s=0.04, cycle_length=1)
+
+
 def test_complete_block_conducts_nothing(rng):
     """BAV de tercer grado: ninguna P alcanza el ventrículo.
     Los QRS los aporta una fuente de escape independiente."""
-    assert CompleteBlock().conduct(atrial_train(20), rng) == []
+    atrial = atrial_train(20)
+    assert CompleteBlock().conduct(atrial, rng, *window_of(atrial)) == []
 
 
 def test_irregular_conduction_produces_irregular_rr(rng):
     """FA: el RR debe ser genuinamente irregular, no solo ruidoso."""
     policy = IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.18)
-    ventricular = policy.conduct(atrial_train(400, interval_s=0.006), rng)
+    ventricular = policy.conduct([], rng, 0.0, 120.0)
     rr = np.diff([e.t_s for e in ventricular])
     assert rr.std() > 0.08
     assert rr.min() > 0.0
 
 
+def test_irregular_conduction_does_not_need_atrial_events_at_all(rng):
+    """La ventana manda. En la FA la aurícula no marca el paso del
+    ventrículo, así que la política debe producir latidos aunque no le
+    llegue ni una sola onda f: es justo lo que ocurre en un trozo corto."""
+    policy = IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.18)
+    assert policy.conduct([], rng, 0.0, 10.0)
+
+
 def test_irregular_conduction_is_deterministic_for_a_given_seed():
-    atrial = atrial_train(200, interval_s=0.006)
     first = IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.18).conduct(
-        atrial, np.random.default_rng(7)
+        [], np.random.default_rng(7), 0.0, 60.0
     )
     second = IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.18).conduct(
-        atrial, np.random.default_rng(7)
+        [], np.random.default_rng(7), 0.0, 60.0
     )
     assert [e.t_s for e in first] == pytest.approx([e.t_s for e in second])
 
 
-def test_irregular_conduction_is_independent_of_chunk_boundaries(rng):
-    """Gemelo del test de Wenckebach, y el motivo de que esta política tenga
-    caché. Sin ella, cada chunk sortearía intervalos nuevos y la FA daría una
-    señal distinta según dónde cayeran las fronteras."""
+def test_irregular_conduction_survives_chunks_shorter_than_its_beats(rng):
+    """El caso que de verdad importa, y el que un tren auricular denso
+    esconde: trozos de 100 ms, más cortos que el RR y que el intervalo entre
+    ondas f. Ni un latido puede perderse por el camino."""
     policy = IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.18)
-    atrial = atrial_train(2000, interval_s=0.006)  # 12 s de actividad auricular
-
     chunked: list[float] = []
-    for start in range(0, 2000, 250):
-        window = atrial[start : start + 250]
-        chunked.extend(e.t_s for e in policy.conduct(window, rng))
+    t = 0.0
+    while t < 30.0:
+        chunked.extend(e.t_s for e in policy.conduct([], rng, t, t + 0.1))
+        t += 0.1
 
     whole = IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.18).conduct(
-        atrial, np.random.default_rng(20260725)
+        [], np.random.default_rng(20260725), 0.0, 30.0
     )
-    assert [e.t_s for e in whole] == pytest.approx(sorted(set(chunked)))
+    assert [e.t_s for e in whole] == pytest.approx(chunked)
 
 
 def test_irregular_conduction_repeats_the_same_beats_for_a_repeated_window(rng):
     """Renderizar dos veces la misma ventana debe dar los mismos latidos."""
     policy = IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.18)
-    atrial = atrial_train(1000, interval_s=0.006)
-    first = policy.conduct(atrial, rng)
-    second = policy.conduct(atrial, rng)
+    first = policy.conduct([], rng, 0.0, 20.0)
+    second = policy.conduct([], rng, 0.0, 20.0)
     assert [e.t_s for e in first] == pytest.approx([e.t_s for e in second])
 
 
 def test_irregular_conduction_indices_are_absolute_not_per_window(rng):
     policy = IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.18)
-    atrial = atrial_train(3000, interval_s=0.006)
-    policy.conduct(atrial[:1500], rng)
-    late = policy.conduct(atrial[1500:], rng)
+    policy.conduct([], rng, 0.0, 30.0)
+    late = policy.conduct([], rng, 30.0, 60.0)
     assert late[0].index > 0
 
 
+def test_irregular_conduction_rate_change_affects_only_future_beats(rng):
+    policy = IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.18)
+    before = policy.conduct([], rng, 0.0, 30.0)
+    policy.set_rate_hz(150 / 60)
+    after = policy.conduct([], rng, 30.0, 60.0)
+    assert policy.conduct([], rng, 0.0, 30.0) == before
+    assert len(after) > len(before)
+
+
 def test_conducted_events_carry_the_configured_template(rng):
+    atrial = atrial_train(3)
     ventricular = FixedPR(pr_s=0.16, template_id="wide_qrst").conduct(
-        atrial_train(3), rng
+        atrial, rng, *window_of(atrial)
     )
     assert all(e.template_id == "wide_qrst" for e in ventricular)
 ```
@@ -1274,10 +1318,24 @@ from .types import CardiacEvent, EventKind
 
 @runtime_checkable
 class ConductionPolicy(Protocol):
-    """Convierte eventos auriculares en eventos ventriculares."""
+    """Convierte eventos auriculares en eventos ventriculares.
+
+    La ventana `[t0_s, t1_s)` llega explícita y no se deduce de los eventos
+    recibidos. Las políticas puras la ignoran, porque su salida depende solo
+    del índice de cada P. `IrregularConduction` la necesita: sin ella tendría
+    que adivinar el rango a partir del primer y el último evento auricular, y
+    entonces su corrección dependería de cuántas ondas f caigan en el trozo
+    —un invariante que vive en el renderer, no aquí—. Una fibrilación
+    auricular perdería latidos en silencio el día que alguien ajustara el
+    margen de render.
+    """
 
     def conduct(
-        self, atrial: Sequence[CardiacEvent], rng: np.random.Generator
+        self,
+        atrial: Sequence[CardiacEvent],
+        rng: np.random.Generator,
+        t0_s: float,
+        t1_s: float,
     ) -> list[CardiacEvent]: ...
 
 
@@ -1304,7 +1362,11 @@ class FixedPR:
     template_id: str = "normal_qrst"
 
     def conduct(
-        self, atrial: Sequence[CardiacEvent], rng: np.random.Generator
+        self,
+        atrial: Sequence[CardiacEvent],
+        rng: np.random.Generator,
+        t0_s: float,
+        t1_s: float,
     ) -> list[CardiacEvent]:
         return [_ventricular(p, self.pr_s, self.template_id) for p in atrial]
 
@@ -1330,7 +1392,11 @@ class WenckebachPR:
             )
 
     def conduct(
-        self, atrial: Sequence[CardiacEvent], rng: np.random.Generator
+        self,
+        atrial: Sequence[CardiacEvent],
+        rng: np.random.Generator,
+        t0_s: float,
+        t1_s: float,
     ) -> list[CardiacEvent]:
         conducted: list[CardiacEvent] = []
         for p in atrial:
@@ -1359,7 +1425,11 @@ class FixedRatioBlock:
             raise ValueError(f"ratio debe ser al menos 2, recibido {self.ratio}")
 
     def conduct(
-        self, atrial: Sequence[CardiacEvent], rng: np.random.Generator
+        self,
+        atrial: Sequence[CardiacEvent],
+        rng: np.random.Generator,
+        t0_s: float,
+        t1_s: float,
     ) -> list[CardiacEvent]:
         return [
             _ventricular(p, self.pr_s, self.template_id)
@@ -1378,7 +1448,11 @@ class CompleteBlock:
     """
 
     def conduct(
-        self, atrial: Sequence[CardiacEvent], rng: np.random.Generator
+        self,
+        atrial: Sequence[CardiacEvent],
+        rng: np.random.Generator,
+        t0_s: float,
+        t1_s: float,
     ) -> list[CardiacEvent]:
         return []
 
@@ -1437,13 +1511,21 @@ class IrregularConduction:
             self._times_s.append(self._times_s[-1] + max(step_s, self._MIN_RR_S))
 
     def conduct(
-        self, atrial: Sequence[CardiacEvent], rng: np.random.Generator
+        self,
+        atrial: Sequence[CardiacEvent],
+        rng: np.random.Generator,
+        t0_s: float,
+        t1_s: float,
     ) -> list[CardiacEvent]:
-        if not atrial:
-            return []
-        start_s = atrial[0].t_s
-        end_s = atrial[-1].t_s
-        self._extend_until(end_s, rng)
+        """Devuelve los latidos ventriculares de la ventana `[t0_s, t1_s)`.
+
+        La ventana llega dada, no se deduce de `atrial`. Deducirla sería un
+        error sutil y difícil de ver: en la fibrilación auricular las ondas f
+        van a unas 420 por minuto, así que un trozo corto puede contener una
+        sola onda o ninguna, y el rango inferido se colapsaría a un instante
+        —o al conjunto vacío— dejando fuera latidos que sí debían sonar.
+        """
+        self._extend_until(t1_s, rng)
         return [
             CardiacEvent(
                 kind=EventKind.VENTRICULAR,
@@ -1452,14 +1534,14 @@ class IrregularConduction:
                 index=index,
             )
             for index, t_s in enumerate(self._times_s)
-            if start_s <= t_s <= end_s
+            if t0_s <= t_s < t1_s
         ]
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_conduction.py -v`
-Expected: PASS, 16 passed
+Expected: PASS, 19 passed
 
 - [ ] **Step 5: Commit**
 
@@ -3085,7 +3167,11 @@ class BeatBasedSource:
 
     def events(self, t0_s: float, t1_s: float) -> list[CardiacEvent]:
         atrial = list(self._atrial.events(t0_s, t1_s))
-        ventricular = self._conduction.conduct(atrial, self._rng)
+        # La ventana va explícita: la política no debe deducirla de `atrial`.
+        # En la fibrilación auricular un trozo corto puede no contener ni una
+        # onda f, y aun así tiene que sonar el latido ventricular que caiga
+        # dentro.
+        ventricular = self._conduction.conduct(atrial, self._rng, t0_s, t1_s)
         if self._escape is not None:
             ventricular = ventricular + list(self._escape.events(t0_s, t1_s))
         return sorted(atrial + ventricular, key=lambda e: e.t_s)
