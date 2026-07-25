@@ -104,8 +104,15 @@ class RegularTrain:
 
     def events(self, t0_s: float, t1_s: float) -> list[CardiacEvent]:
         interval_s = 1.0 / self.rate_hz
-        first = max(0, math.ceil(t0_s / interval_s))
-        last = math.ceil(t1_s / interval_s)
+        # El rango candidato se ensancha un índice a cada lado a propósito,
+        # de modo que el filtro de abajo sea el único árbitro y use la misma
+        # operación `index * interval_s` que decide la pertenencia. Calcular
+        # los extremos por división y filtrar por multiplicación son dos
+        # redondeos distintos: un evento cuyo instante caiga a un ULP de una
+        # frontera se escapa por la grieta entre dos trozos y no aparece en
+        # ninguno. A 200 lpm eso perdía el 10 % de los latidos.
+        first = max(0, math.floor(t0_s / interval_s) - 1)
+        last = math.ceil(t1_s / interval_s) + 1
         return [
             CardiacEvent(
                 kind=self.kind,

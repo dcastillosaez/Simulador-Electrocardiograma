@@ -1856,6 +1856,32 @@ def test_different_seeds_produce_different_jitter():
     assert first != pytest.approx(second)
 
 
+@pytest.mark.parametrize("bpm", [40, 50, 75, 100, 150, 180, 200, 250, 300, 420])
+def test_regular_train_chunking_is_exact_at_every_rate(bpm):
+    """El tren regular también debe sobrevivir al troceado, y con más razón
+    que el otro: es el que usan el flutter y los ritmos de escape.
+
+    El fallo que este test caza no es teórico. Con el rango de índices
+    calculado por división y la pertenencia decidida por multiplicación, los
+    dos redondeos discrepan cuando un evento cae a un ULP de una frontera de
+    trozo: desaparece de la ventana anterior y de la siguiente a la vez. A
+    200 lpm se perdía uno de cada diez latidos, y ninguna de las frecuencias
+    que probaban los demás tests lo delataba."""
+    train = RegularTrain(
+        kind=EventKind.VENTRICULAR, template_id="normal_qrst", rate_hz=bpm / 60
+    )
+    n_chunks = 600  # un minuto en trozos de 100 ms
+    whole = {e.index for e in train.events(0.0, n_chunks * 50 / 500)}
+
+    chunked: set[int] = set()
+    for k in range(n_chunks):
+        chunked |= {
+            e.index for e in train.events(k * 50 / 500, (k + 1) * 50 / 500)
+        }
+
+    assert chunked == whole
+
+
 def test_regular_train_ignores_rate_changes_without_raising():
     """La frecuencia de un tren regular es estructural. El motor llama a
     `set_rate_hz` en todos los ritmos, así que esto no puede explotar."""
@@ -2015,8 +2041,15 @@ class RegularTrain:
 
     def events(self, t0_s: float, t1_s: float) -> list[CardiacEvent]:
         interval_s = 1.0 / self.rate_hz
-        first = max(0, math.ceil(t0_s / interval_s))
-        last = math.ceil(t1_s / interval_s)
+        # El rango candidato se ensancha un índice a cada lado a propósito,
+        # de modo que el filtro de abajo sea el único árbitro y use la misma
+        # operación `index * interval_s` que decide la pertenencia. Calcular
+        # los extremos por división y filtrar por multiplicación son dos
+        # redondeos distintos: un evento cuyo instante caiga a un ULP de una
+        # frontera se escapa por la grieta entre dos trozos y no aparece en
+        # ninguno. A 200 lpm eso perdía el 10 % de los latidos.
+        first = max(0, math.floor(t0_s / interval_s) - 1)
+        last = math.ceil(t1_s / interval_s) + 1
         return [
             CardiacEvent(
                 kind=self.kind,
@@ -2032,7 +2065,7 @@ class RegularTrain:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_rhythm.py -v`
-Expected: PASS, 14 passed
+Expected: PASS, 24 passed (el test parametrizado de troceado genera 10 casos)
 
 - [ ] **Step 5: Commit**
 
