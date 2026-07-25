@@ -2359,12 +2359,14 @@ La deriva de línea base vive aquí, no en `variability.py`, aunque se alimente 
 - Consumes: `NoiseParams`, `VariabilityParams`, `N_LEADS` de `types.py`; `respiratory_phase` de `variability.py`.
 - Produces:
   - `MAINS_HZ: float = 50.0`
-  - `emg_noise(t_s, level_v, rng) -> np.ndarray` de forma `(12, n)`
+  - `emg_noise(t_s, level_v, rng, sample_rate_hz) -> np.ndarray` de forma `(12, n)`
   - `mains_noise(t_s, level_v) -> np.ndarray` de forma `(12, n)`
   - `baseline_wander(t_s, level_v, respiration_hz) -> np.ndarray` de forma `(12, n)`
-  - `motion_artifact(t_s, level_v, rng) -> tuple[np.ndarray, np.ndarray]` — contribución aditiva y factor multiplicativo.
+  - `motion_artifact(t_s, level_v, rng, sample_rate_hz) -> tuple[np.ndarray, np.ndarray]` — contribución aditiva y factor multiplicativo.
   - `apply_clipping(signal_v, clip_v) -> np.ndarray`
-  - `apply_noise(signal_v, t_s, noise, variability, rng) -> np.ndarray` — aplica la cadena en orden fijo.
+  - `apply_noise(signal_v, t_s, noise, variability, rng, sample_rate_hz) -> np.ndarray` — aplica la cadena en orden fijo.
+
+La frecuencia de muestreo **se recibe, no se deduce del espaciado de `t_s`**. Deducirla parece inofensivo y no lo es: con una rejilla descendente o no uniforme el cálculo sale negativo o sin sentido y el ruido se desvanece en silencio, sin excepción ni aviso. El resto del paquete ya la pasa explícita —`SignalSource.render` la recibe—, así que inferirla aquí además rompía el patrón establecido.
 
 - [ ] **Step 1: Write the failing test**
 
