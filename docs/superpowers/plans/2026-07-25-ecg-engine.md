@@ -1019,7 +1019,7 @@ Cada política es **determinista a partir del índice del evento**, no de cuánt
   - `WenckebachPR(pr_base_s: float, pr_increment_s: float, cycle_length: int, template_id: str = "normal_qrst")`
   - `FixedRatioBlock(ratio: int, pr_s: float, template_id: str = "normal_qrst")`
   - `CompleteBlock()` — no conduce nada; el escape lo aporta otra fuente.
-  - `IrregularConduction(mean_rr_s: float, rr_spread_s: float, template_id: str = "normal_qrst")`
+  - `IrregularConduction(mean_rr_s: float, rr_spread_s: float, template_id: str = "normal_qrst")` — única política con estado: cachea su línea temporal hacia adelante y expone además `set_rate_hz(rate_hz: float) -> None`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1145,11 +1145,49 @@ def test_irregular_conduction_produces_irregular_rr(rng):
 
 
 def test_irregular_conduction_is_deterministic_for_a_given_seed():
-    policy = IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.18)
     atrial = atrial_train(200, interval_s=0.006)
-    first = policy.conduct(atrial, np.random.default_rng(7))
-    second = policy.conduct(atrial, np.random.default_rng(7))
+    first = IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.18).conduct(
+        atrial, np.random.default_rng(7)
+    )
+    second = IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.18).conduct(
+        atrial, np.random.default_rng(7)
+    )
     assert [e.t_s for e in first] == pytest.approx([e.t_s for e in second])
+
+
+def test_irregular_conduction_is_independent_of_chunk_boundaries(rng):
+    """Gemelo del test de Wenckebach, y el motivo de que esta política tenga
+    caché. Sin ella, cada chunk sortearía intervalos nuevos y la FA daría una
+    señal distinta según dónde cayeran las fronteras."""
+    policy = IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.18)
+    atrial = atrial_train(2000, interval_s=0.006)  # 12 s de actividad auricular
+
+    chunked: list[float] = []
+    for start in range(0, 2000, 250):
+        window = atrial[start : start + 250]
+        chunked.extend(e.t_s for e in policy.conduct(window, rng))
+
+    whole = IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.18).conduct(
+        atrial, np.random.default_rng(20260725)
+    )
+    assert [e.t_s for e in whole] == pytest.approx(sorted(set(chunked)))
+
+
+def test_irregular_conduction_repeats_the_same_beats_for_a_repeated_window(rng):
+    """Renderizar dos veces la misma ventana debe dar los mismos latidos."""
+    policy = IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.18)
+    atrial = atrial_train(1000, interval_s=0.006)
+    first = policy.conduct(atrial, rng)
+    second = policy.conduct(atrial, rng)
+    assert [e.t_s for e in first] == pytest.approx([e.t_s for e in second])
+
+
+def test_irregular_conduction_indices_are_absolute_not_per_window(rng):
+    policy = IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.18)
+    atrial = atrial_train(3000, interval_s=0.006)
+    policy.conduct(atrial[:1500], rng)
+    late = policy.conduct(atrial[1500:], rng)
+    assert late[0].index > 0
 
 
 def test_conducted_events_carry_the_configured_template(rng):
@@ -1303,34 +1341,58 @@ class CompleteBlock:
         return []
 
 
-@dataclass(slots=True)
 class IrregularConduction:
     """Conducción irregular de la fibrilación auricular.
 
-    Es la única política **mutable**, y por un motivo clínico: en la FA la
-    frecuencia que importa es la respuesta ventricular, y esa la fija el nodo
-    AV, no la aurícula. Controlar la frecuencia de una FA significa mover
-    `mean_rr_s`, que es justo lo que hace un frenador del nodo AV.
+    Es la única política **con estado**, y por dos motivos independientes.
 
-    La actividad auricular en la FA es caótica y de alta frecuencia. El nodo
-    AV deja pasar impulsos de forma impredecible, y el resultado es un RR
+    El primero es clínico: en la FA la frecuencia que importa es la respuesta
+    ventricular, y esa la fija el nodo AV, no la aurícula. Controlar la
+    frecuencia de una FA significa mover `mean_rr_s`, que es justo lo que hace
+    un frenador del nodo AV. De ahí que sea mutable.
+
+    El segundo es de determinismo. Las demás políticas derivan su
+    comportamiento del índice del evento auricular, así que son puras. Esta no
+    puede: la irregularidad del RR sale del RNG, y sortear en cada llamada
+    haría que el resultado dependiera de dónde caigan las fronteras de chunk.
+    Por eso mantiene una línea temporal cacheada que solo crece hacia adelante,
+    exactamente el mismo patrón que `EventTrain`. Sin esa caché, renderizar
+    10 s de una vez y renderizar cien chunks de 100 ms darían señales
+    distintas, y los golden de muestras y de eventos describirían latidos
+    diferentes sin que ningún test lo delatara.
+
+    La actividad auricular en la FA es caótica y de alta frecuencia; el nodo AV
+    deja pasar impulsos de forma impredecible. El resultado es un RR
     genuinamente irregular, no un RR regular con ruido encima.
-
-    La implementación recorre la ventana temporal cubierta por los eventos
-    auriculares y coloca QRS separados por intervalos extraídos de una
-    distribución normal truncada. Es determinista para un `rng` dado.
     """
 
-    mean_rr_s: float
-    rr_spread_s: float
-    template_id: str = "normal_qrst"
-    _min_rr_s: float = 0.24
+    _MIN_RR_S: float = 0.24
+
+    def __init__(
+        self,
+        mean_rr_s: float,
+        rr_spread_s: float,
+        template_id: str = "normal_qrst",
+    ) -> None:
+        self.mean_rr_s = mean_rr_s
+        self.rr_spread_s = rr_spread_s
+        self.template_id = template_id
+        self._times_s: list[float] = [0.0]
 
     def set_rate_hz(self, rate_hz: float) -> None:
-        """Ajusta la respuesta ventricular media."""
+        """Ajusta la respuesta ventricular media.
+
+        Solo afecta a los latidos aún no generados: la caché ya emitida no se
+        reescribe, igual que en `EventTrain`.
+        """
         if rate_hz <= 0.0:
             raise ValueError(f"rate_hz debe ser positivo, recibido {rate_hz}")
         self.mean_rr_s = 1.0 / rate_hz
+
+    def _extend_until(self, t_s: float, rng: np.random.Generator) -> None:
+        while self._times_s[-1] < t_s:
+            step_s = float(rng.normal(self.mean_rr_s, self.rr_spread_s))
+            self._times_s.append(self._times_s[-1] + max(step_s, self._MIN_RR_S))
 
     def conduct(
         self, atrial: Sequence[CardiacEvent], rng: np.random.Generator
@@ -1339,28 +1401,23 @@ class IrregularConduction:
             return []
         start_s = atrial[0].t_s
         end_s = atrial[-1].t_s
-        conducted: list[CardiacEvent] = []
-        t_s = start_s
-        index = 0
-        while t_s <= end_s:
-            conducted.append(
-                CardiacEvent(
-                    kind=EventKind.VENTRICULAR,
-                    t_s=t_s,
-                    template_id=self.template_id,
-                    index=index,
-                )
+        self._extend_until(end_s, rng)
+        return [
+            CardiacEvent(
+                kind=EventKind.VENTRICULAR,
+                t_s=t_s,
+                template_id=self.template_id,
+                index=index,
             )
-            step_s = float(rng.normal(self.mean_rr_s, self.rr_spread_s))
-            t_s += max(step_s, self._min_rr_s)
-            index += 1
-        return conducted
+            for index, t_s in enumerate(self._times_s)
+            if start_s <= t_s <= end_s
+        ]
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_conduction.py -v`
-Expected: PASS, 13 passed
+Expected: PASS, 16 passed
 
 - [ ] **Step 5: Commit**
 
