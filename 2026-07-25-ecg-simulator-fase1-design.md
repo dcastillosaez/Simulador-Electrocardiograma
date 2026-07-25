@@ -55,19 +55,7 @@ Esta sección existe para que nadie —incluido el yo de dentro de tres meses—
 
 ---
 
-## 3. Principios arquitectónicos
-
-Cinco reglas. Todo lo demás en este documento se deriva de ellas, y cualquier código que las viole necesita una justificación explícita.
-
-1. **Toda decisión fisiológica ocurre antes del renderer.** Si alguna vez hay que preguntarle a `renderer.py` por qué el ECG hace algo, la lógica está en el sitio equivocado.
-2. **Toda fuente de aleatoriedad pasa por el RNG de sesión.** Ni `random` global ni `np.random` sin generador explícito. Sin esta regla no hay golden signals ni replay, y ambos dejarían de funcionar de forma silenciosa.
-3. **El catálogo describe ritmos; el código no contiene casos especiales por ritmo.** Ni un solo `if rhythm_id == "..."` dentro del motor. Un ritmo nuevo es una entrada de catálogo, no una rama de ejecución.
-4. **Los overlays modifican morfología; no generan ritmo.** Un overlay nunca crea, elimina ni reordena eventos cardíacos.
-5. **Toda funcionalidad nueva debe ser verificable mediante eventos o golden signals.** Si no se puede comprobar por uno de esos dos caminos, el diseño de esa funcionalidad todavía no está terminado.
-
----
-
-## 4. Arquitectura general
+## 3. Arquitectura general
 
 Tres procesos, orquestados con `docker-compose`: FastAPI (motor y API), React/Vite (interfaz) y PostgreSQL.
 
@@ -103,19 +91,9 @@ La regla estructural que importa: **`ecg-engine` no importa nada de `apps/api`**
 
 El desacople entre los 500 Hz de generación y los 60 fps de dibujo es deliberado: el motor produce a ritmo fisiológico y el canvas consume lo que hay disponible.
 
-### Unidades
-
-La representación interna del motor es **exclusivamente SI**: segundos, voltios y hercios. Ningún milisegundo, milivoltio ni milímetro cruza la frontera de `ecg-engine`. Los textos de este documento citan valores en unidades clínicas cuando ayuda a leerlos —"PR de 160 ms", "12 a 20 respiraciones por minuto"—, pero eso es prosa, no el tipo de dato.
-
-Las unidades clínicas de presentación viven **solo en el renderer del cliente**: velocidad de papel en mm/s, calibración en mm/mV y cuadrícula de 1 y 5 mm. La conversión ocurre en un único punto, dentro de `render/`.
-
-Esto fija además una ambigüedad del contrato de red que conviene no dejar al azar: **el payload binario va en voltios**, no en milivoltios. Float32 tiene precisión de sobra para amplitudes del orden de 10⁻³ V, y así el cable respeta la misma regla que el motor.
-
-Parece una formalidad burocrática. Dentro de un año será la razón por la que cambiar la calibración no desplace un intervalo QT.
-
 ---
 
-## 5. Contrato del frame binario
+## 4. Contrato del frame binario
 
 Little-endian en todos los campos. Cabecera fija de 40 bytes:
 
@@ -130,7 +108,7 @@ Little-endian en todos los campos. Cabecera fija de 40 bytes:
 | 12 | uint32 | `reserved2` | 0 |
 | 16 | float64 | `t_start_s` | tiempo de simulación de la 1.ª muestra |
 | 24 | byte[16] | `session_id` | UUID canónico |
-| 40 | float32[] | payload | channel-major, en **voltios** |
+| 40 | float32[] | payload | channel-major |
 
 **Orden canónico de canales**, fijo: I, II, III, aVR, aVL, aVF, V1, V2, V3, V4, V5, V6.
 
@@ -146,7 +124,7 @@ Los mensajes de control siguen siendo JSON en frames de texto. Solo los datos va
 
 ---
 
-## 6. Motor fisiológico
+## 5. Motor fisiológico
 
 ### La decisión central: dos trenes independientes
 
@@ -184,7 +162,7 @@ El beneficio es doble. Por un lado se puede volcar el log de eventos para depura
 | `variability.py` | Variabilidad fisiológica normal |
 | `noise.py` | Artefactos de medición |
 | `renderer.py` | Eventos + overlays + ruido → muestras. Nada más |
-| `catalog/` | Los doce ritmos, como datos. Ver «El catálogo como contrato» |
+| `catalog/` | Los doce ritmos, como datos |
 | `engine.py` | Orquestador: `generate(n)`, `update_params()` |
 
 ### Morfología: suma de gaussianas paramétricas
@@ -208,42 +186,9 @@ El tren auricular solo emite eventos P a su frecuencia; no sabe nada de bloqueos
 
 Añadir preexcitación o un Wenckebach de periodicidad variable consiste en escribir una política nueva, sin tocar los trenes.
 
-### El catálogo como contrato
-
-Un ritmo no es un diccionario suelto de parámetros. Es un `RhythmDefinition` con campos fijos:
-
-| Campo | Descripción |
-|---|---|
-| `id` | Identificador estable. Nunca cambia, ni aunque cambie el nombre clínico |
-| `display_name` | Nombre para la interfaz |
-| `category` | Sinusal, supraventricular, ventricular, bloqueo o isquemia |
-| `generator` | Fuente de eventos: trenes auricular/ventricular, o señal continua |
-| `conduction_policy` | Política de `conduction.py` que le aplica |
-| `default_parameters` | Valores iniciales |
-| `editable_parameters` | Qué puede tocar el usuario, con sus rangos válidos |
-| `allowed_overlays` | Overlays compatibles con este ritmo |
-| `clinical_description` | Texto docente que ve el alumno |
-| `references` | Fuentes clínicas que respaldan la morfología |
-
-Dos campos merecen explicación. `allowed_overlays` es lo que impide combinaciones sin sentido, del tipo aplicar elevación del ST sobre una fibrilación ventricular: el motor rechaza la combinación en vez de generar algo que no existe en ningún paciente. Y `references` es lo que hace auditable la revisión clínica del criterio de aceptación 7 — un revisor puede contrastar cada morfología contra su fuente en lugar de fiarse.
-
-Formalizar esto no cambia el MVP, pero es lo que mantiene limpia la fase 2, cuando el catálogo pase de doce entradas a veintiuna y aparezca el editor de escenarios.
-
 ### Overlays morfológicos
 
-Un `MorphologyOverlay` declara **explícitamente su alcance**, y el motor lo hace cumplir:
-
-| Campo | Contenido |
-|---|---|
-| `targets` | Sobre qué componentes actúa, de un conjunto cerrado: `P`, `PR`, `QRS`, `ST`, `T` |
-| `leads` | Sobre qué derivaciones |
-| `rules` | Qué transformación aplica a cada target |
-
-El motor rechaza cualquier overlay que intente modificar algo fuera de sus `targets` declarados. Sin esa restricción, un overlay de isquemia acabaría alterando de rebote la onda P, y ese bug sería endiabladamente difícil de localizar: el trazo seguiría pareciendo plausible.
-
-La otra mitad de la restricción es el principio 4: un overlay modifica morfología, nunca genera ritmo. No puede crear, eliminar ni reordenar eventos cardíacos. Si algo necesita cambiar *cuándo* late el corazón, eso es una política de conducción o una fuente de ritmo, no un overlay.
-
-Las transformaciones disponibles son offset del ST, inversión de la T, ensanchamiento del QRS y aplanamiento de la P.
+Un `MorphologyOverlay` declara qué derivaciones toca y cómo: offset del ST, inversión de la T, ensanchamiento del QRS, aplanamiento de la P.
 
 El IAM con elevación del ST no es un ritmo nuevo. Es ritmo sinusal normal más un overlay de elevación del ST aplicado a un subconjunto de derivaciones. Ese es el patrón para toda la patología morfológica futura: pericarditis, hiperpotasemia e hipopotasemia entran en fase 2 como datos de catálogo.
 
@@ -293,7 +238,7 @@ Todo lo aleatorio pasa por un `numpy.random.Generator(PCG64(seed))` propio de la
 
 ---
 
-## 7. API
+## 6. API
 
 ### REST — plano de control
 
@@ -307,7 +252,7 @@ Nunca en la ruta caliente.
 | `GET /api/sessions/{id}` | Detalle de sesión |
 | `GET /api/health` | Salud del servicio |
 
-No hay `POST /api/sessions`. La sesión la escribe el propio handler del WebSocket al cerrarse, según las reglas de la sección 8. Exponer además un endpoint de escritura crearía dos caminos para el mismo dato y abriría la puerta a sesiones inventadas por el cliente.
+No hay `POST /api/sessions`. La sesión la escribe el propio handler del WebSocket al cerrarse, según las reglas de la sección 7. Exponer además un endpoint de escritura crearía dos caminos para el mismo dato y abriría la puerta a sesiones inventadas por el cliente.
 
 ### WebSocket `/ws/simulation`
 
@@ -319,10 +264,7 @@ Control en JSON de texto, datos en binario.
 | `update {params}` | `updated {params efectivos}` |
 | `pause` / `resume` | `paused` / `resumed` |
 | `stop` | `stopped {duration_s}` |
-| `ping` *(reservado)* | `pong` *(reservado)* |
 | — | `error {code, detail}` |
-
-`ping`/`pong` no se implementa en la fase 1, pero el tipo de mensaje queda reservado en el protocolo desde ya. Cuando haga falta medir latencia de ida y vuelta —y hará falta en cuanto entren las intervenciones de la fase 2— se podrá añadir sin tocar la versión del contrato ni romper clientes existentes.
 
 **Pausar no es congelar.** `pause` detiene el reloj de simulación en el servidor. Congelar la pantalla es una acción puramente de cliente sobre el buffer, pensada para medir intervalos sin detener la simulación. Son dos cosas distintas y ambas hacen falta.
 
@@ -334,7 +276,7 @@ Todo lo demás es render y vive en el cliente: velocidad de papel (25 o 50 mm/s)
 
 ---
 
-## 8. Persistencia
+## 7. Persistencia
 
 PostgreSQL con Alembic para migraciones.
 
@@ -344,8 +286,7 @@ rhythms (
   name           text NOT NULL,
   category       text NOT NULL,
   spec           jsonb NOT NULL,
-  engine_semver  text NOT NULL,          -- p. ej. '1.0.0'
-  engine_commit  text NOT NULL,          -- SHA corto, p. ej. '8c4b92f'
+  engine_version text NOT NULL,
   created_at     timestamptz NOT NULL DEFAULT now()
 );
 
@@ -354,8 +295,7 @@ sessions (
   rhythm_id      text NOT NULL REFERENCES rhythms(id),
   params         jsonb NOT NULL,
   seed           bigint NOT NULL,
-  engine_semver  text NOT NULL,
-  engine_commit  text NOT NULL,
+  engine_version text NOT NULL,
   started_at     timestamptz NOT NULL,
   ended_at       timestamptz,
   duration_s     numeric
@@ -364,15 +304,13 @@ sessions (
 
 La base de datos recibe exclusivamente: el catálogo, las sesiones cerradas, los resultados y, como mucho, snapshots puntuales que pida el usuario al congelar o exportar. Nada de persistir chunks de 100 ms.
 
-La versión del motor es lo que hace honesto el replay: si el motor cambió entre la grabación y la reproducción, la sesión ya no reproduce idéntica, y el sistema lo sabe en vez de mentir.
-
-Va en **dos campos, no en uno**. El semver comunica la intención del cambio; el SHA del commit identifica el binario exacto. Hacen falta los dos porque durante el desarrollo habrá muchas builds distintas compartiendo el mismo `1.0.0`, y con solo el semver el replay creería reproducible algo que no lo es. El semver por sí solo miente en cuanto alguien toca el motor sin publicar versión.
+`engine_version` en `sessions` es lo que hace honesto el replay: si el motor cambió entre la grabación y la reproducción, la sesión ya no reproduce idéntica, y el sistema lo sabe en vez de mentir.
 
 Una sesión se persiste al recibir `stop` explícito, o al cerrarse el socket si duró cinco segundos o más.
 
 ---
 
-## 9. Frontend
+## 8. Frontend
 
 ```
 apps/web/src/
@@ -399,7 +337,7 @@ Cuadrícula menor de 1 mm y mayor de 5 mm. A 25 mm/s, 1 mm equivale a 40 ms. Cal
 
 ---
 
-## 10. Manejo de errores
+## 9. Manejo de errores
 
 | Situación | Respuesta | ¿Cierra el socket? |
 |---|---|---|
@@ -415,7 +353,7 @@ Si el buffer de envío se satura, el servidor descarta los frames más antiguos 
 
 ---
 
-## 11. Estrategia de tests
+## 10. Estrategia de tests
 
 ### Unitarios del motor
 
@@ -428,28 +366,9 @@ Si el buffer de envío se satura, el servidor descarta los frames más antiguos 
 
 ### Golden signals
 
-Dos niveles, eventos y muestras —el tercero, las medidas derivadas, se describe justo debajo—. Doce ritmos, diez segundos cada uno, semilla fija. Dos suites: una limpia, con el ruido a cero, y otra con niveles de ruido fijos.
+Dos niveles, eventos y muestras. Doce ritmos, diez segundos cada uno, semilla fija. Dos suites: una limpia, con el ruido a cero, y otra con niveles de ruido fijos.
 
 Los ficheros de referencia solo se regeneran ante un cambio intencional y documentado del motor.
-
-### Golden measurements
-
-Junto a las muestras se guarda, por ritmo y semilla, un conjunto de **medidas fisiológicas derivadas**: frecuencia cardíaca, PR medio, duración del QRS, QT, RR medio, desviación del RR y amplitud de R en II.
-
-La razón es que los dos tipos de golden detectan cosas distintas. Un cambio puede alterar ligeramente las muestras sin tocar la fisiología —un ajuste de suavizado, por ejemplo— o, mucho peor, mantener las muestras casi idénticas mientras desplaza un intervalo. Los golden de muestras cazan lo primero; los de medidas cazan lo segundo.
-
-Y hay un beneficio secundario nada menor: cuando fallan, fallan con un mensaje que se entiende. «El PR medio pasó de 160 a 190 ms» dice algo. «El array difiere en la posición 4127» no dice nada.
-
-### Benchmarks
-
-Objetivos, no límites duros. Existen para detectar regresiones de rendimiento, no para justificar optimización prematura.
-
-| Métrica | Objetivo |
-|---|---|
-| Motor: generar 10 s de ECG de 12 derivaciones | < 50 ms |
-| Frontend: trazado sostenido | 60 fps |
-| Frontend: CPU con simulación activa | < 25 % de un núcleo |
-| Latencia de `update` hasta cambio visible | < 300 ms |
 
 ### Integración
 
@@ -462,21 +381,20 @@ WebSocket de extremo a extremo con un cliente de prueba: conectar, `start`, vali
 
 ---
 
-## 12. Criterios de aceptación de la fase 1
+## 11. Criterios de aceptación de la fase 1
 
 1. Los doce ritmos se generan y se ven correctamente en las doce derivaciones.
 2. Trazado estable a 60 fps durante diez minutos seguidos, sin fugas de memoria ni deriva de sincronía.
 3. Frecuencia cardíaca y niveles de ruido modificables en caliente, sin cortes en el trazo.
-4. Sesión cerrada persistida en PostgreSQL y reproducible a partir de `seed`, `params`, `engine_semver` y `engine_commit`.
-5. Golden signals en verde en los tres niveles —eventos, muestras y medidas— y en ambas suites, limpia y con ruido.
-6. Benchmarks dentro de objetivo.
-7. **Revisión clínica de los doce trazados por un profesional antes de dar la fase por cerrada.**
+4. Sesión cerrada persistida en PostgreSQL y reproducible a partir de `seed`, `params` y `engine_version`.
+5. Golden signals en verde, en ambos niveles y ambas suites.
+6. **Revisión clínica de los doce trazados por un profesional antes de dar la fase por cerrada.**
 
-El séptimo criterio no es negociable. `CLAUDE.md` identifica "no validar con profesionales" como el riesgo principal del proyecto, y un simulador de ECG que no ha visto un clínico no vale para formar a nadie.
+El sexto criterio no es negociable. `CLAUDE.md` identifica "no validar con profesionales" como el riesgo principal del proyecto, y un simulador de ECG que no ha visto un clínico no vale para formar a nadie.
 
 ---
 
-## 13. Stack
+## 12. Stack
 
 | Capa | Tecnología |
 |---|---|
