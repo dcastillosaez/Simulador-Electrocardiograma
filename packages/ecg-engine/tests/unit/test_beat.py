@@ -8,6 +8,7 @@ from ecg_engine.beat import (
     target_extent_s,
 )
 from ecg_engine.types import WaveTarget
+from ecg_engine.waveform import fwhm_s
 
 
 def test_registry_contains_the_five_mvp_templates():
@@ -50,7 +51,7 @@ def test_normal_qt_is_physiological():
     assert 0.350 <= qt <= 0.440
 
 
-def test_target_extent_covers_two_sigma_each_side():
+def test_target_extent_straddles_the_event_instant():
     template = get_template("normal_qrst")
     start, end = target_extent_s(template, WaveTarget.QRS)
     assert start < 0.0 < end
@@ -64,3 +65,25 @@ def test_r_wave_is_the_dominant_positive_deflection():
     components = get_template("normal_qrst").components
     amplitudes = [c.amplitude_v for c in components]
     assert max(amplitudes) == pytest.approx(0.0010, abs=1e-4)
+
+
+def test_r_wave_is_sharp_not_broad():
+    """Guarda contra la tentación de ensanchar ondas hasta que los tests de
+    intervalo pasen. Una R normal mide unos 20 ms a media altura; si alguien
+    la engorda para estirar el QRS, el complejo deja de parecer normal aunque
+    su duración caiga en rango."""
+    r_wave = max(
+        get_template("normal_qrst").components_for(WaveTarget.QRS),
+        key=lambda c: c.amplitude_v,
+    )
+    assert fwhm_s(r_wave.width_s) == pytest.approx(0.021, abs=0.004)
+
+
+def test_wide_qrs_really_is_broad_at_half_height():
+    """El QRS ancho lo es por morfología, no por un truco de la convención
+    de medida: su onda dominante debe ser genuinamente ancha."""
+    dominant = max(
+        get_template("wide_qrst").components_for(WaveTarget.QRS),
+        key=lambda c: abs(c.amplitude_v),
+    )
+    assert fwhm_s(dominant.width_s) > 0.055

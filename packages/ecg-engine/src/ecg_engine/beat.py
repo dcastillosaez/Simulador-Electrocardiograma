@@ -17,8 +17,14 @@ from __future__ import annotations
 
 from .types import BeatTemplate, GaussianComponent, WaveTarget
 
-_SIGMA_EXTENT: float = 2.0
-"""Cuántas desviaciones típicas a cada lado se consideran parte de la onda."""
+_SIGMA_EXTENT: float = 2.5
+"""Cuántas desviaciones típicas a cada lado se consideran parte de la onda.
+
+A ±2,5σ una gaussiana ha caído al 4,4 % de su pico, que es aproximadamente
+donde el ojo clínico sitúa el inicio y el final de una onda sobre el papel.
+Con ±2σ la extensión se queda corta y los intervalos medidos salen por debajo
+del rango fisiológico aunque la morfología sea correcta.
+"""
 
 
 def _p(amplitude_v: float, center_s: float, width_s: float) -> GaussianComponent:
@@ -64,21 +70,26 @@ TEMPLATES: dict[str, BeatTemplate] = {
         components=(_p(0.00020, 0.0, 0.018),),
     ),
     # --- Ventriculares -----------------------------------------------------
+    # Las posiciones de Q y S importan tanto como sus anchuras: en un ECG real
+    # la Q cae unos 26 ms antes del pico de la R y la S unos 28 ms después.
+    # Acercarlas comprime el QRS por debajo del rango fisiológico por mucho que
+    # se ensanchen las ondas, y ensancharlas para compensar produce un complejo
+    # gordo y redondeado que ya no parece un latido normal.
     "normal_qrst": BeatTemplate(
         template_id="normal_qrst",
         components=(
-            _qrs(-0.00005, -0.019, 0.0090),   # Q
-            _qrs(0.00100, 0.000, 0.0170),     # R
-            _qrs(-0.00015, 0.021, 0.0115),    # S
+            _qrs(-0.00005, -0.026, 0.0055),   # Q
+            _qrs(0.00100, 0.000, 0.0090),     # R
+            _qrs(-0.00015, 0.028, 0.0075),    # S
             _st(0.00000, 0.090, 0.0300),      # segmento ST, isoeléctrico
-            _t(0.00025, 0.230, 0.0444),       # T
+            _t(0.00025, 0.2525, 0.0430),      # T
         ),
     ),
     # QRS ancho de origen ventricular: R ensanchada y T de polaridad opuesta.
     "wide_qrst": BeatTemplate(
         template_id="wide_qrst",
         components=(
-            _qrs(0.00110, 0.000, 0.0310),
+            _qrs(0.00110, 0.000, 0.0290),
             _st(0.00000, 0.110, 0.0350),
             _t(-0.00030, 0.280, 0.0520),
         ),
@@ -108,7 +119,7 @@ def get_template(template_id: str) -> BeatTemplate:
 def target_extent_s(
     template: BeatTemplate, target: WaveTarget
 ) -> tuple[float, float]:
-    """Extensión temporal de un target, a ±2σ, relativa al evento."""
+    """Extensión temporal de un target, a ±2,5σ, relativa al evento."""
     components = template.components_for(target)
     if not components:
         return (0.0, 0.0)
