@@ -1814,3 +1814,1241 @@ git commit -m "Añadir trenes de eventos auricular y ventricular"
 ```
 
 ---
+
+### Task 9: Overlays morfológicos en `overlays.py`
+
+Un overlay declara **explícitamente su alcance** y el motor lo hace cumplir. Sin esa restricción, un overlay de isquemia acabaría alterando de rebote la onda P y el bug sería casi imposible de localizar: el trazo seguiría pareciendo plausible.
+
+Los overlays aportan componentes **aditivas** limitadas a las derivaciones que declaran. Nunca crean, eliminan ni reordenan eventos: eso es ritmo, no morfología.
+
+**Files:**
+- Create: `packages/ecg-engine/src/ecg_engine/overlays.py`
+- Test: `packages/ecg-engine/tests/unit/test_overlays.py`
+
+**Interfaces:**
+- Consumes: `GaussianComponent`, `WaveTarget`, `LEAD_ORDER`, `N_LEADS` de `types.py`.
+- Produces:
+  - `OverlayScopeError(ValueError)`
+  - `OverlayRule(target: WaveTarget, amplitude_v: float, center_s: float, width_s: float)`
+  - `MorphologyOverlay(overlay_id: str, targets: frozenset[WaveTarget], leads: tuple[str, ...], rules: tuple[OverlayRule, ...])` con `components() -> tuple[GaussianComponent, ...]` y `lead_mask() -> np.ndarray` de forma `(12, 1)`.
+  - `ST_ELEVATION_INFERIOR: MorphologyOverlay`
+  - `OVERLAYS: dict[str, MorphologyOverlay]` y `get_overlay(overlay_id: str) -> MorphologyOverlay`
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `packages/ecg-engine/tests/unit/test_overlays.py`:
+
+```python
+import numpy as np
+import pytest
+
+from ecg_engine.overlays import (
+    OVERLAYS,
+    ST_ELEVATION_INFERIOR,
+    MorphologyOverlay,
+    OverlayRule,
+    OverlayScopeError,
+    get_overlay,
+)
+from ecg_engine.types import LEAD_ORDER, N_LEADS, WaveTarget
+
+
+def test_overlay_rejects_a_rule_outside_its_declared_targets():
+    """El corazón de la restricción: un overlay de ST no puede tocar la P."""
+    with pytest.raises(OverlayScopeError, match="P"):
+        MorphologyOverlay(
+            overlay_id="mal_declarado",
+            targets=frozenset({WaveTarget.ST}),
+            leads=("II",),
+            rules=(
+                OverlayRule(
+                    target=WaveTarget.P,
+                    amplitude_v=0.0001,
+                    center_s=0.0,
+                    width_s=0.01,
+                ),
+            ),
+        )
+
+
+def test_overlay_accepts_rules_within_its_declared_targets():
+    overlay = MorphologyOverlay(
+        overlay_id="ok",
+        targets=frozenset({WaveTarget.ST, WaveTarget.T}),
+        leads=("II",),
+        rules=(
+            OverlayRule(WaveTarget.ST, 0.0002, 0.09, 0.03),
+            OverlayRule(WaveTarget.T, -0.0001, 0.23, 0.04),
+        ),
+    )
+    assert len(overlay.components()) == 2
+
+
+def test_overlay_rejects_unknown_leads():
+    with pytest.raises(ValueError, match="V9"):
+        MorphologyOverlay(
+            overlay_id="lead_malo",
+            targets=frozenset({WaveTarget.ST}),
+            leads=("V9",),
+            rules=(OverlayRule(WaveTarget.ST, 0.0002, 0.09, 0.03),),
+        )
+
+
+def test_overlay_requires_at_least_one_lead():
+    with pytest.raises(ValueError, match="derivación"):
+        MorphologyOverlay(
+            overlay_id="sin_leads",
+            targets=frozenset({WaveTarget.ST}),
+            leads=(),
+            rules=(OverlayRule(WaveTarget.ST, 0.0002, 0.09, 0.03),),
+        )
+
+
+def test_lead_mask_is_one_for_affected_leads_and_zero_elsewhere():
+    mask = ST_ELEVATION_INFERIOR.lead_mask()
+    assert mask.shape == (N_LEADS, 1)
+    for lead in ("II", "III", "aVF"):
+        assert mask[LEAD_ORDER.index(lead), 0] == 1.0
+    for lead in ("I", "aVL", "V1", "V6"):
+        assert mask[LEAD_ORDER.index(lead), 0] == 0.0
+
+
+def test_inferior_infarct_elevates_st_in_the_inferior_leads():
+    """IAM inferior: II, III y aVF. Es el patrón clínico, no una elección
+    arbitraria."""
+    assert set(ST_ELEVATION_INFERIOR.leads) == {"II", "III", "aVF"}
+    assert ST_ELEVATION_INFERIOR.targets == frozenset({WaveTarget.ST})
+
+
+def test_st_elevation_amplitude_is_clinically_significant():
+    """Elevación de al menos 0,1 mV (1 mm), el umbral diagnóstico."""
+    st_rule = ST_ELEVATION_INFERIOR.rules[0]
+    assert st_rule.amplitude_v >= 0.0001
+
+
+def test_components_carry_the_rule_targets():
+    components = ST_ELEVATION_INFERIOR.components()
+    assert all(c.target is WaveTarget.ST for c in components)
+
+
+def test_registry_lookup_and_unknown_overlay_message():
+    assert get_overlay("st_elevation_inferior") is ST_ELEVATION_INFERIOR
+    with pytest.raises(KeyError, match="no_existe"):
+        get_overlay("no_existe")
+
+
+def test_registry_keys_match_overlay_ids():
+    assert all(key == overlay.overlay_id for key, overlay in OVERLAYS.items())
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_overlays.py -v`
+Expected: FAIL con `ModuleNotFoundError: No module named 'ecg_engine.overlays'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Crear `packages/ecg-engine/src/ecg_engine/overlays.py`:
+
+```python
+"""Overlays morfológicos.
+
+Un overlay modifica **morfología**, nunca ritmo: no crea, elimina ni reordena
+eventos cardíacos. Si algo necesita cambiar cuándo late el corazón, eso es
+una política de conducción o una fuente de ritmo.
+
+Cada overlay declara explícitamente su alcance —qué componentes toca y en qué
+derivaciones— y el motor lo hace cumplir. Un overlay que intente modificar
+algo fuera de sus `targets` declarados es un error de construcción, no un
+aviso: sin esa barrera, un overlay de isquemia acabaría alterando de rebote
+la onda P y ese bug sería endiabladamente difícil de localizar, porque el
+trazo seguiría pareciendo plausible.
+
+El IAM con elevación del ST no es un ritmo: es sinusal normal más este
+overlay. Ese patrón es el que servirá en fase 2 para pericarditis,
+hiperpotasemia e hipopotasemia.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+
+from .types import LEAD_ORDER, N_LEADS, GaussianComponent, WaveTarget
+
+
+class OverlayScopeError(ValueError):
+    """Un overlay intentó modificar algo fuera de sus targets declarados."""
+
+
+@dataclass(frozen=True, slots=True)
+class OverlayRule:
+    """Contribución aditiva a un componente del latido."""
+
+    target: WaveTarget
+    amplitude_v: float
+    center_s: float
+    width_s: float
+
+
+@dataclass(frozen=True, slots=True)
+class MorphologyOverlay:
+    """Modificación morfológica de alcance declarado y verificado."""
+
+    overlay_id: str
+    targets: frozenset[WaveTarget]
+    leads: tuple[str, ...]
+    rules: tuple[OverlayRule, ...]
+
+    def __post_init__(self) -> None:
+        if not self.leads:
+            raise ValueError(
+                f"el overlay {self.overlay_id!r} debe declarar al menos una "
+                "derivación"
+            )
+        unknown = sorted(set(self.leads) - set(LEAD_ORDER))
+        if unknown:
+            raise ValueError(
+                f"el overlay {self.overlay_id!r} declara derivaciones "
+                f"desconocidas: {', '.join(unknown)}"
+            )
+        out_of_scope = sorted(
+            {r.target.value for r in self.rules if r.target not in self.targets}
+        )
+        if out_of_scope:
+            declared = ", ".join(sorted(t.value for t in self.targets))
+            raise OverlayScopeError(
+                f"el overlay {self.overlay_id!r} declara targets [{declared}] "
+                f"pero tiene reglas sobre [{', '.join(out_of_scope)}]"
+            )
+
+    def components(self) -> tuple[GaussianComponent, ...]:
+        return tuple(
+            GaussianComponent(
+                target=rule.target,
+                amplitude_v=rule.amplitude_v,
+                center_s=rule.center_s,
+                width_s=rule.width_s,
+            )
+            for rule in self.rules
+        )
+
+    def lead_mask(self) -> np.ndarray:
+        """Máscara `(12, 1)` con 1,0 en las derivaciones afectadas."""
+        mask = np.zeros((N_LEADS, 1), dtype=np.float64)
+        for lead in self.leads:
+            mask[LEAD_ORDER.index(lead), 0] = 1.0
+        return mask
+
+
+# IAM inferior: elevación del ST en II, III y aVF. 0,2 mV son 2 mm a la
+# calibración estándar, muy por encima del umbral diagnóstico de 1 mm.
+ST_ELEVATION_INFERIOR: MorphologyOverlay = MorphologyOverlay(
+    overlay_id="st_elevation_inferior",
+    targets=frozenset({WaveTarget.ST}),
+    leads=("II", "III", "aVF"),
+    rules=(
+        OverlayRule(
+            target=WaveTarget.ST, amplitude_v=0.00020, center_s=0.090, width_s=0.045
+        ),
+    ),
+)
+
+OVERLAYS: dict[str, MorphologyOverlay] = {
+    ST_ELEVATION_INFERIOR.overlay_id: ST_ELEVATION_INFERIOR,
+}
+
+
+def get_overlay(overlay_id: str) -> MorphologyOverlay:
+    try:
+        return OVERLAYS[overlay_id]
+    except KeyError as exc:
+        known = ", ".join(sorted(OVERLAYS)) or "(ninguno)"
+        raise KeyError(
+            f"overlay desconocido: {overlay_id!r}. Conocidos: {known}"
+        ) from exc
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_overlays.py -v`
+Expected: PASS, 10 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/ecg-engine/src/ecg_engine/overlays.py packages/ecg-engine/tests/unit/test_overlays.py
+git commit -m "Añadir overlays morfológicos con alcance declarado"
+```
+
+---
+
+### Task 10: Artefactos de medición en `noise.py`
+
+Ruido es lo que introduce **la medición**, no el paciente. Nunca debe alterar los intervalos reales del evento subyacente, y los tests lo verifican midiendo sobre señal base conocida.
+
+La deriva de línea base vive aquí, no en `variability.py`, aunque se alimente del mismo oscilador respiratorio: es un artefacto de impedancia por movimiento del tórax, y clasificarla como fisiología llevaría a mezclar cosas distintas en los tests.
+
+**Files:**
+- Create: `packages/ecg-engine/src/ecg_engine/noise.py`
+- Test: `packages/ecg-engine/tests/unit/test_noise.py`
+
+**Interfaces:**
+- Consumes: `NoiseParams`, `VariabilityParams`, `N_LEADS` de `types.py`; `respiratory_phase` de `variability.py`.
+- Produces:
+  - `MAINS_HZ: float = 50.0`
+  - `emg_noise(t_s, level_v, rng) -> np.ndarray` de forma `(12, n)`
+  - `mains_noise(t_s, level_v) -> np.ndarray` de forma `(12, n)`
+  - `baseline_wander(t_s, level_v, respiration_hz) -> np.ndarray` de forma `(12, n)`
+  - `motion_artifact(t_s, level_v, rng) -> tuple[np.ndarray, np.ndarray]` — contribución aditiva y factor multiplicativo.
+  - `apply_clipping(signal_v, clip_v) -> np.ndarray`
+  - `apply_noise(signal_v, t_s, noise, variability, rng) -> np.ndarray` — aplica la cadena en orden fijo.
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `packages/ecg-engine/tests/unit/test_noise.py`:
+
+```python
+import numpy as np
+import pytest
+
+from ecg_engine.noise import (
+    MAINS_HZ,
+    apply_clipping,
+    apply_noise,
+    baseline_wander,
+    emg_noise,
+    mains_noise,
+    motion_artifact,
+)
+from ecg_engine.types import N_LEADS, NoiseParams, VariabilityParams
+
+
+@pytest.fixture
+def t_s() -> np.ndarray:
+    return np.arange(5000) / 500.0  # 10 s a 500 Hz
+
+
+@pytest.fixture
+def rng() -> np.random.Generator:
+    return np.random.default_rng(20260725)
+
+
+def test_mains_frequency_is_european():
+    assert MAINS_HZ == 50.0
+
+
+def test_all_noise_generators_return_twelve_lead_arrays(t_s, rng):
+    assert emg_noise(t_s, 1e-5, rng).shape == (N_LEADS, t_s.size)
+    assert mains_noise(t_s, 1e-5).shape == (N_LEADS, t_s.size)
+    assert baseline_wander(t_s, 1e-4, 0.25).shape == (N_LEADS, t_s.size)
+
+
+def test_emg_noise_is_independent_across_leads(t_s, rng):
+    """Ruido muscular: cada electrodo capta el suyo."""
+    noise = emg_noise(t_s, 1e-5, rng)
+    correlation = np.corrcoef(noise[0], noise[1])[0, 1]
+    assert abs(correlation) < 0.15
+
+
+def test_emg_noise_scales_with_its_level(t_s, rng):
+    quiet = emg_noise(t_s, 1e-6, np.random.default_rng(1))
+    loud = emg_noise(t_s, 1e-4, np.random.default_rng(1))
+    assert loud.std() == pytest.approx(100 * quiet.std(), rel=0.05)
+
+
+def test_mains_noise_is_common_to_every_lead(t_s):
+    """La interferencia de red entra por igual en todas las derivaciones."""
+    noise = mains_noise(t_s, 1e-5)
+    assert np.allclose(noise[0], noise[7])
+
+
+def test_mains_noise_sits_at_fifty_hertz(t_s):
+    noise = mains_noise(t_s, 1e-5)[0]
+    spectrum = np.abs(np.fft.rfft(noise))
+    freqs = np.fft.rfftfreq(noise.size, d=1 / 500.0)
+    assert freqs[int(np.argmax(spectrum))] == pytest.approx(50.0, abs=0.5)
+
+
+def test_baseline_wander_follows_the_respiratory_frequency(t_s):
+    wander = baseline_wander(t_s, 1e-4, respiration_hz=0.25)[0]
+    spectrum = np.abs(np.fft.rfft(wander))
+    freqs = np.fft.rfftfreq(wander.size, d=1 / 500.0)
+    assert freqs[int(np.argmax(spectrum))] == pytest.approx(0.25, abs=0.05)
+
+
+def test_baseline_wander_differs_between_leads(t_s):
+    """Comparte oscilador, pero su amplitud escala distinto por derivación."""
+    wander = baseline_wander(t_s, 1e-4, 0.25)
+    assert not np.allclose(wander[0], wander[6])
+
+
+def test_motion_artifact_returns_additive_and_multiplicative_parts(t_s, rng):
+    additive, multiplicative = motion_artifact(t_s, 1e-4, rng)
+    assert additive.shape == (N_LEADS, t_s.size)
+    assert multiplicative.shape == (N_LEADS, t_s.size)
+    assert multiplicative.mean() == pytest.approx(1.0, abs=0.05)
+
+
+def test_motion_artifact_comes_in_bursts_not_continuously(t_s, rng):
+    """El artefacto de movimiento es esporádico: la mayor parte del registro
+    está limpia."""
+    additive, _ = motion_artifact(t_s, 1e-4, rng)
+    quiet_fraction = np.mean(np.abs(additive[0]) < 1e-6)
+    assert quiet_fraction > 0.5
+
+
+def test_clipping_bounds_the_signal_symmetrically():
+    signal = np.array([[-0.005, 0.0, 0.005]])
+    clipped = apply_clipping(signal, clip_v=0.002)
+    assert clipped.min() == pytest.approx(-0.002)
+    assert clipped.max() == pytest.approx(0.002)
+
+
+def test_clipping_is_a_no_op_when_disabled():
+    signal = np.array([[-0.005, 0.0, 0.005]])
+    assert np.array_equal(apply_clipping(signal, clip_v=None), signal)
+
+
+def test_noise_free_params_leave_the_signal_untouched(t_s, rng):
+    """Requisito para los tests de fisiología: con ruido a cero, la señal
+    que entra es exactamente la que sale."""
+    signal = np.ones((N_LEADS, t_s.size)) * 0.001
+    result = apply_noise(signal, t_s, NoiseParams(), VariabilityParams(), rng)
+    assert np.array_equal(result, signal)
+
+
+def test_apply_noise_preserves_shape_and_dtype(t_s, rng):
+    signal = np.zeros((N_LEADS, t_s.size))
+    params = NoiseParams(emg_v=1e-5, mains_v=1e-5, baseline_v=1e-4, motion_v=1e-4)
+    result = apply_noise(signal, t_s, params, VariabilityParams(), rng)
+    assert result.shape == signal.shape
+    assert result.dtype == np.float64
+
+
+def test_apply_noise_is_deterministic_for_a_given_seed(t_s):
+    signal = np.zeros((N_LEADS, t_s.size))
+    params = NoiseParams(emg_v=1e-5, mains_v=1e-5, baseline_v=1e-4, motion_v=1e-4)
+    first = apply_noise(
+        signal, t_s, params, VariabilityParams(), np.random.default_rng(5)
+    )
+    second = apply_noise(
+        signal, t_s, params, VariabilityParams(), np.random.default_rng(5)
+    )
+    assert np.array_equal(first, second)
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_noise.py -v`
+Expected: FAIL con `ModuleNotFoundError: No module named 'ecg_engine.noise'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Crear `packages/ecg-engine/src/ecg_engine/noise.py`:
+
+```python
+"""Artefactos de medición.
+
+Ruido es lo que introduce la medición, no el paciente. Nunca debe alterar los
+intervalos reales del evento subyacente: si un filtro de ruido desplaza un QT,
+está mal implementado.
+
+La deriva de línea base vive aquí y no en `variability.py`, aunque se alimente
+del mismo oscilador respiratorio. Es un artefacto de impedancia causado por el
+movimiento del tórax: su origen es fisiológico, pero lo que registra el
+aparato es un defecto de medición. Clasificarla como fisiología llevaría a
+mezclar en los tests dos cosas que deben verificarse por separado.
+
+Orden fijo de la cadena, que `apply_noise` respeta:
+ruido aditivo → modulación multiplicativa → clipping.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+from .types import N_LEADS, NoiseParams, VariabilityParams
+from .variability import respiratory_phase
+
+MAINS_HZ: float = 50.0
+"""Frecuencia de la red eléctrica en Europa."""
+
+_EMG_LOW_HZ: float = 20.0
+_EMG_HIGH_HZ: float = 150.0
+_MOTION_BURST_HZ: float = 0.08
+_MOTION_BURST_DURATION_S: float = 0.6
+
+# La deriva de línea base no entra igual en todas las derivaciones: depende de
+# la posición del electrodo respecto al movimiento del tórax.
+_BASELINE_LEAD_GAIN: np.ndarray = np.array(
+    [0.8, 1.0, 0.9, 0.6, 0.5, 0.9, 1.2, 1.3, 1.1, 0.9, 0.8, 0.7]
+).reshape(N_LEADS, 1)
+
+
+def emg_noise(
+    t_s: np.ndarray, level_v: float, rng: np.random.Generator
+) -> np.ndarray:
+    """Ruido muscular: aditivo, independiente en cada derivación.
+
+    Se genera como ruido blanco filtrado a la banda 20-150 Hz mediante una
+    máscara en el dominio de la frecuencia.
+    """
+    n = t_s.size
+    if level_v == 0.0 or n == 0:
+        return np.zeros((N_LEADS, n), dtype=np.float64)
+
+    sample_rate_hz = 1.0 / float(np.mean(np.diff(t_s))) if n > 1 else 500.0
+    white = rng.standard_normal((N_LEADS, n))
+    spectrum = np.fft.rfft(white, axis=1)
+    freqs = np.fft.rfftfreq(n, d=1.0 / sample_rate_hz)
+    band = (freqs >= _EMG_LOW_HZ) & (freqs <= _EMG_HIGH_HZ)
+    spectrum[:, ~band] = 0.0
+    filtered = np.fft.irfft(spectrum, n=n, axis=1)
+
+    scale = np.std(filtered, axis=1, keepdims=True)
+    scale[scale == 0.0] = 1.0
+    return level_v * filtered / scale
+
+
+def mains_noise(t_s: np.ndarray, level_v: float) -> np.ndarray:
+    """Interferencia de red: aditiva, idéntica en todas las derivaciones."""
+    trace = level_v * np.sin(2.0 * np.pi * MAINS_HZ * t_s)
+    return np.tile(trace, (N_LEADS, 1))
+
+
+def baseline_wander(
+    t_s: np.ndarray, level_v: float, respiration_hz: float
+) -> np.ndarray:
+    """Deriva de línea base: aditiva, escalada por derivación."""
+    trace = level_v * respiratory_phase(t_s, respiration_hz)
+    return _BASELINE_LEAD_GAIN * np.tile(trace, (N_LEADS, 1))
+
+
+def motion_artifact(
+    t_s: np.ndarray, level_v: float, rng: np.random.Generator
+) -> tuple[np.ndarray, np.ndarray]:
+    """Artefacto de movimiento: ráfagas esporádicas, aditivas y multiplicativas.
+
+    Devuelve `(aditivo, multiplicativo)`. El multiplicativo modula la amplitud
+    del trazo durante la ráfaga, que es lo que ocurre cuando el contacto del
+    electrodo empeora momentáneamente.
+    """
+    n = t_s.size
+    additive = np.zeros((N_LEADS, n), dtype=np.float64)
+    multiplicative = np.ones((N_LEADS, n), dtype=np.float64)
+    if level_v == 0.0 or n == 0:
+        return additive, multiplicative
+
+    duration_s = float(t_s[-1] - t_s[0]) if n > 1 else 0.0
+    sample_rate_hz = (n - 1) / duration_s if duration_s > 0 else 500.0
+    burst_samples = max(1, int(_MOTION_BURST_DURATION_S * sample_rate_hz))
+    n_bursts = rng.poisson(_MOTION_BURST_HZ * max(duration_s, 0.0))
+
+    for _ in range(int(n_bursts)):
+        lead = int(rng.integers(0, N_LEADS))
+        start = int(rng.integers(0, max(1, n - burst_samples)))
+        end = min(n, start + burst_samples)
+        window = np.hanning(end - start)
+        additive[lead, start:end] += level_v * window * rng.normal(1.0, 0.3)
+        multiplicative[lead, start:end] *= 1.0 - 0.25 * window
+
+    return additive, multiplicative
+
+
+def apply_clipping(signal_v: np.ndarray, clip_v: float | None) -> np.ndarray:
+    """Saturación simétrica del amplificador. Último paso de la cadena."""
+    if clip_v is None:
+        return signal_v
+    return np.clip(signal_v, -clip_v, clip_v)
+
+
+def apply_noise(
+    signal_v: np.ndarray,
+    t_s: np.ndarray,
+    noise: NoiseParams,
+    variability: VariabilityParams,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Aplica la cadena completa de artefactos, en orden fijo."""
+    result = signal_v
+    if noise.emg_v:
+        result = result + emg_noise(t_s, noise.emg_v, rng)
+    if noise.mains_v:
+        result = result + mains_noise(t_s, noise.mains_v)
+    if noise.baseline_v:
+        result = result + baseline_wander(
+            t_s, noise.baseline_v, variability.respiration_hz
+        )
+    if noise.motion_v:
+        additive, multiplicative = motion_artifact(t_s, noise.motion_v, rng)
+        result = (result + additive) * multiplicative
+    return apply_clipping(result, noise.clip_v)
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_noise.py -v`
+Expected: PASS, 15 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/ecg-engine/src/ecg_engine/noise.py packages/ecg-engine/tests/unit/test_noise.py
+git commit -m "Añadir artefactos de medición"
+```
+
+---
+
+### Task 11: El renderer tonto en `renderer.py`
+
+Este módulo es deliberadamente estúpido. Recibe eventos, overlays y una rejilla temporal, y devuelve muestras. No decide nada fisiológico: ni cuándo late el corazón, ni si una P conduce, ni cuánto varía el RR.
+
+El criterio para revisarlo: si alguna vez hay que preguntarle a `renderer.py` por qué el ECG hace algo, la lógica está en el sitio equivocado.
+
+**Files:**
+- Create: `packages/ecg-engine/src/ecg_engine/renderer.py`
+- Test: `packages/ecg-engine/tests/unit/test_renderer.py`
+
+**Interfaces:**
+- Consumes: `CardiacEvent`, `EventKind`, `N_LEADS`, `VariabilityParams` de `types.py`; `get_template` de `beat.py`; `render_component` de `waveform.py`; `LeadProjection`, `ATRIAL_PROJECTION`, `NORMAL_AXIS_PROJECTION` de `leads.py`; `MorphologyOverlay` de `overlays.py`; `amplitude_scale` de `variability.py`.
+- Produces:
+  - `RENDER_MARGIN_S: float = 0.6`
+  - `DEFAULT_PROJECTIONS: dict[EventKind, LeadProjection]`
+  - `time_grid(t0_s: float, n_samples: int, sample_rate_hz: int) -> np.ndarray`
+  - `render_events(events, t_s, projections, overlays=(), variability=None) -> np.ndarray` de forma `(12, n)`
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `packages/ecg-engine/tests/unit/test_renderer.py`:
+
+```python
+import numpy as np
+import pytest
+
+from ecg_engine.leads import NORMAL_AXIS_PROJECTION
+from ecg_engine.overlays import ST_ELEVATION_INFERIOR
+from ecg_engine.renderer import (
+    DEFAULT_PROJECTIONS,
+    RENDER_MARGIN_S,
+    render_events,
+    time_grid,
+)
+from ecg_engine.types import (
+    LEAD_ORDER,
+    N_LEADS,
+    CardiacEvent,
+    EventKind,
+    VariabilityParams,
+)
+
+
+def qrs_at(t_s: float, index: int = 0) -> CardiacEvent:
+    return CardiacEvent(
+        kind=EventKind.VENTRICULAR, t_s=t_s, template_id="normal_qrst", index=index
+    )
+
+
+def p_at(t_s: float, index: int = 0) -> CardiacEvent:
+    return CardiacEvent(
+        kind=EventKind.ATRIAL, t_s=t_s, template_id="sinus_p", index=index
+    )
+
+
+@pytest.fixture
+def grid() -> np.ndarray:
+    return time_grid(0.0, 1000, 500)  # 2 s
+
+
+def test_time_grid_spacing_matches_the_sample_rate():
+    t = time_grid(0.0, 500, 500)
+    assert t.size == 500
+    assert t[0] == pytest.approx(0.0)
+    assert np.diff(t) == pytest.approx(np.full(499, 1 / 500))
+
+
+def test_time_grid_starts_at_the_requested_offset():
+    t = time_grid(37.5, 10, 500)
+    assert t[0] == pytest.approx(37.5)
+
+
+def test_render_margin_covers_a_full_t_wave():
+    """La T de un latido anterior sigue contribuyendo dentro de la ventana."""
+    assert RENDER_MARGIN_S >= 0.5
+
+
+def test_empty_event_list_renders_a_flat_isoelectric_line(grid):
+    signal = render_events([], grid, DEFAULT_PROJECTIONS)
+    assert signal.shape == (N_LEADS, grid.size)
+    assert np.allclose(signal, 0.0)
+
+
+def test_a_single_qrs_peaks_at_its_event_time(grid):
+    signal = render_events([qrs_at(1.0)], grid, DEFAULT_PROJECTIONS)
+    lead_ii = signal[LEAD_ORDER.index("II")]
+    assert grid[int(np.argmax(lead_ii))] == pytest.approx(1.0, abs=0.005)
+
+
+def test_r_amplitude_in_lead_ii_is_about_one_millivolt(grid):
+    signal = render_events([qrs_at(1.0)], grid, DEFAULT_PROJECTIONS)
+    assert signal[LEAD_ORDER.index("II")].max() == pytest.approx(0.001, rel=0.15)
+
+
+def test_avr_is_negative_for_a_normal_qrs(grid):
+    signal = render_events([qrs_at(1.0)], grid, DEFAULT_PROJECTIONS)
+    assert signal[LEAD_ORDER.index("aVR")].min() < 0.0
+
+
+def test_atrial_and_ventricular_events_use_different_projections(grid):
+    p_only = render_events([p_at(1.0)], grid, DEFAULT_PROJECTIONS)
+    qrs_only = render_events([qrs_at(1.0)], grid, DEFAULT_PROJECTIONS)
+    v1 = LEAD_ORDER.index("V1")
+    assert p_only[v1].max() > 0.0    # P positiva en V1
+    assert qrs_only[v1].min() < 0.0  # QRS negativo en V1
+
+
+def test_events_superpose_additively(grid):
+    separate = render_events([qrs_at(0.5)], grid, DEFAULT_PROJECTIONS) + render_events(
+        [qrs_at(1.5, index=1)], grid, DEFAULT_PROJECTIONS
+    )
+    together = render_events(
+        [qrs_at(0.5), qrs_at(1.5, index=1)], grid, DEFAULT_PROJECTIONS
+    )
+    assert np.allclose(separate, together)
+
+
+def test_overlay_only_touches_its_declared_leads(grid):
+    plain = render_events([qrs_at(1.0)], grid, DEFAULT_PROJECTIONS)
+    elevated = render_events(
+        [qrs_at(1.0)], grid, DEFAULT_PROJECTIONS, overlays=(ST_ELEVATION_INFERIOR,)
+    )
+    for lead in ("II", "III", "aVF"):
+        assert not np.allclose(plain[LEAD_ORDER.index(lead)],
+                               elevated[LEAD_ORDER.index(lead)])
+    for lead in ("I", "aVL", "V1", "V2", "V6"):
+        assert np.allclose(plain[LEAD_ORDER.index(lead)],
+                           elevated[LEAD_ORDER.index(lead)])
+
+
+def test_overlay_raises_the_st_segment_above_baseline(grid):
+    elevated = render_events(
+        [qrs_at(1.0)], grid, DEFAULT_PROJECTIONS, overlays=(ST_ELEVATION_INFERIOR,)
+    )
+    st_sample = int((1.0 + 0.09) * 500)
+    assert elevated[LEAD_ORDER.index("III"), st_sample] > 0.00015
+
+
+def test_overlay_does_not_apply_to_atrial_events(grid):
+    """Un overlay de ST no puede modificar una onda P: es la regla que
+    impide que la isquemia altere la aurícula por accidente."""
+    plain = render_events([p_at(1.0)], grid, DEFAULT_PROJECTIONS)
+    with_overlay = render_events(
+        [p_at(1.0)], grid, DEFAULT_PROJECTIONS, overlays=(ST_ELEVATION_INFERIOR,)
+    )
+    assert np.allclose(plain, with_overlay)
+
+
+def test_variability_modulates_amplitude_without_moving_the_peak(grid):
+    params = VariabilityParams(amplitude_fraction=0.20, respiration_hz=0.25)
+    plain = render_events([qrs_at(1.0)], grid, DEFAULT_PROJECTIONS)
+    modulated = render_events(
+        [qrs_at(1.0)], grid, DEFAULT_PROJECTIONS, variability=params
+    )
+    lead_ii = LEAD_ORDER.index("II")
+    assert int(np.argmax(modulated[lead_ii])) == pytest.approx(
+        int(np.argmax(plain[lead_ii])), abs=2
+    )
+    assert modulated[lead_ii].max() != pytest.approx(plain[lead_ii].max())
+
+
+def test_output_is_always_float64_and_twelve_leads(grid):
+    signal = render_events([qrs_at(1.0)], grid, DEFAULT_PROJECTIONS)
+    assert signal.dtype == np.float64
+    assert signal.shape[0] == N_LEADS
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_renderer.py -v`
+Expected: FAIL con `ModuleNotFoundError: No module named 'ecg_engine.renderer'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Crear `packages/ecg-engine/src/ecg_engine/renderer.py`:
+
+```python
+"""Conversión de eventos a muestras.
+
+Este módulo es deliberadamente tonto. Recibe eventos, overlays y una rejilla
+temporal, y devuelve muestras. No decide nada fisiológico: ni cuándo late el
+corazón, ni si una P conduce, ni cuánto varía el RR. Toda esa lógica vive
+antes, en `rhythm.py`, `conduction.py`, `variability.py` y `overlays.py`.
+
+Criterio de revisión: si hay que preguntarle a este módulo *por qué* el ECG
+hace algo, la lógica está en el sitio equivocado.
+
+Respeta el tramo de la cadena que le corresponde:
+señal base → overlays → variabilidad. El ruido lo aplica el orquestador.
+"""
+
+from __future__ import annotations
+
+from typing import Mapping, Sequence
+
+import numpy as np
+
+from .beat import get_template
+from .leads import ATRIAL_PROJECTION, NORMAL_AXIS_PROJECTION, LeadProjection
+from .overlays import MorphologyOverlay
+from .types import (
+    N_LEADS,
+    CardiacEvent,
+    EventKind,
+    VariabilityParams,
+)
+from .variability import amplitude_scale
+from .waveform import render_component
+
+RENDER_MARGIN_S: float = 0.6
+"""Margen temporal que el llamante debe añadir al pedir eventos.
+
+Una onda T se extiende hasta medio segundo después del pico de su R, así que
+un latido anterior a la ventana sigue contribuyendo dentro de ella. Quien
+llama a `render_events` debe pasar los eventos de `[t0 - margen, t1 + margen)`,
+o aparecerán discontinuidades en las fronteras de chunk.
+"""
+
+DEFAULT_PROJECTIONS: dict[EventKind, LeadProjection] = {
+    EventKind.ATRIAL: ATRIAL_PROJECTION,
+    EventKind.VENTRICULAR: NORMAL_AXIS_PROJECTION,
+}
+
+
+def time_grid(t0_s: float, n_samples: int, sample_rate_hz: int) -> np.ndarray:
+    """Rejilla temporal absoluta de `n_samples` muestras desde `t0_s`."""
+    return t0_s + np.arange(n_samples, dtype=np.float64) / float(sample_rate_hz)
+
+
+def _trace_for_event(t_s: np.ndarray, event: CardiacEvent) -> np.ndarray:
+    template = get_template(event.template_id)
+    trace = np.zeros_like(t_s)
+    for component in template.components:
+        trace += render_component(t_s, component, offset_s=event.t_s)
+    return trace
+
+
+def render_events(
+    events: Sequence[CardiacEvent],
+    t_s: np.ndarray,
+    projections: Mapping[EventKind, LeadProjection],
+    overlays: Sequence[MorphologyOverlay] = (),
+    variability: VariabilityParams | None = None,
+) -> np.ndarray:
+    """Convierte una lista de eventos en una señal de doce derivaciones."""
+    signal = np.zeros((N_LEADS, t_s.size), dtype=np.float64)
+
+    for event in events:
+        trace = _trace_for_event(t_s, event)
+        signal += projections[event.kind].as_column() * trace[np.newaxis, :]
+
+    # Los overlays modifican morfología ventricular. No tocan la aurícula, y
+    # por construcción no pueden crear ni mover eventos.
+    ventricular = [e for e in events if e.kind is EventKind.VENTRICULAR]
+    for overlay in overlays:
+        overlay_trace = np.zeros_like(t_s)
+        for event in ventricular:
+            for component in overlay.components():
+                overlay_trace += render_component(
+                    t_s, component, offset_s=event.t_s
+                )
+        signal += overlay.lead_mask() * overlay_trace[np.newaxis, :]
+
+    if variability is not None:
+        signal *= amplitude_scale(t_s, variability)[np.newaxis, :]
+
+    return signal
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_renderer.py -v`
+Expected: PASS, 14 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/ecg-engine/src/ecg_engine/renderer.py packages/ecg-engine/tests/unit/test_renderer.py
+git commit -m "Añadir renderer de eventos a muestras"
+```
+
+---
+
+### Task 12: Fuentes de señal en `sources.py`
+
+Aquí se compone todo: tren auricular + política de conducción + escape opcional + renderer. La fibrilación ventricular es la única excepción al modelo de eventos, y aun así implementa la misma interfaz pública.
+
+**Files:**
+- Create: `packages/ecg-engine/src/ecg_engine/sources.py`
+- Test: `packages/ecg-engine/tests/unit/test_sources.py`
+
+**Interfaces:**
+- Consumes: `EventTrain`, `RegularTrain` de `rhythm.py`; `ConductionPolicy` de `conduction.py`; `render_events`, `time_grid`, `RENDER_MARGIN_S`, `DEFAULT_PROJECTIONS` de `renderer.py`; `MorphologyOverlay` de `overlays.py`; tipos de `types.py`.
+- Produces:
+  - `BeatBasedSource(atrial, conduction, escape=None, overlays=(), variability=VariabilityParams())` con `events(t0_s, t1_s) -> list[CardiacEvent]`, `render(t0_s, n_samples, sample_rate_hz) -> np.ndarray` y `set_rate_hz(rate_hz)`.
+  - `VentricularFibrillationSource(coarseness, amplitude_v, dominant_hz, rng)` con `render(...)` y `set_rate_hz(rate_hz)` que no hace nada.
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `packages/ecg-engine/tests/unit/test_sources.py`:
+
+```python
+import numpy as np
+import pytest
+
+from ecg_engine.conduction import CompleteBlock, FixedPR
+from ecg_engine.rhythm import EventTrain, RegularTrain
+from ecg_engine.sources import BeatBasedSource, VentricularFibrillationSource
+from ecg_engine.types import (
+    LEAD_ORDER,
+    N_LEADS,
+    EventKind,
+    VariabilityParams,
+)
+
+
+def sinus_source(seed: int = 20260725) -> BeatBasedSource:
+    return BeatBasedSource(
+        atrial=EventTrain(
+            kind=EventKind.ATRIAL,
+            template_id="sinus_p",
+            rate_hz=70 / 60,
+            variability=VariabilityParams(),
+            rng=np.random.default_rng(seed),
+        ),
+        conduction=FixedPR(pr_s=0.16),
+    )
+
+
+def complete_block_source() -> BeatBasedSource:
+    return BeatBasedSource(
+        atrial=RegularTrain(
+            kind=EventKind.ATRIAL, template_id="sinus_p", rate_hz=75 / 60
+        ),
+        conduction=CompleteBlock(),
+        escape=RegularTrain(
+            kind=EventKind.VENTRICULAR, template_id="escape_qrst", rate_hz=40 / 60
+        ),
+    )
+
+
+def test_source_emits_both_atrial_and_ventricular_events():
+    events = sinus_source().events(0.0, 10.0)
+    kinds = {e.kind for e in events}
+    assert kinds == {EventKind.ATRIAL, EventKind.VENTRICULAR}
+
+
+def test_events_come_back_sorted_in_time():
+    times = [e.t_s for e in sinus_source().events(0.0, 20.0)]
+    assert times == sorted(times)
+
+
+def test_every_p_is_followed_by_its_qrs_in_sinus_rhythm():
+    events = sinus_source().events(0.0, 20.0)
+    atrial = [e for e in events if e.kind is EventKind.ATRIAL]
+    ventricular = [e for e in events if e.kind is EventKind.VENTRICULAR]
+    assert abs(len(atrial) - len(ventricular)) <= 1
+
+
+def test_complete_block_produces_independent_atrial_and_ventricular_rates():
+    """BAV de tercer grado: aurícula a 75, ventrículo a 40, sin relación."""
+    events = complete_block_source().events(0.0, 60.0)
+    atrial = [e for e in events if e.kind is EventKind.ATRIAL]
+    ventricular = [e for e in events if e.kind is EventKind.VENTRICULAR]
+    assert len(atrial) / 60.0 == pytest.approx(75 / 60, rel=0.05)
+    assert len(ventricular) / 60.0 == pytest.approx(40 / 60, rel=0.05)
+
+
+def test_complete_block_pr_intervals_are_not_constant():
+    """Si el PR fuera constante habría conducción, y en el BAV completo no
+    la hay. Es la comprobación que distingue un bloqueo real de uno falso."""
+    events = complete_block_source().events(0.0, 60.0)
+    atrial = np.array([e.t_s for e in events if e.kind is EventKind.ATRIAL])
+    ventricular = [e.t_s for e in events if e.kind is EventKind.VENTRICULAR]
+    intervals = [
+        qrs - atrial[atrial <= qrs][-1] for qrs in ventricular if (atrial <= qrs).any()
+    ]
+    assert np.std(intervals) > 0.1
+
+
+def test_render_returns_twelve_leads_of_the_requested_length():
+    signal = sinus_source().render(0.0, 500, 500)
+    assert signal.shape == (N_LEADS, 500)
+    assert signal.dtype == np.float64
+
+
+def test_render_is_continuous_across_chunk_boundaries():
+    """Sin el margen de render aparecería un escalón en cada frontera."""
+    source = sinus_source()
+    whole = source.render(0.0, 1000, 500)
+    first = source.render(0.0, 500, 500)
+    second = source.render(1.0, 500, 500)
+    assert np.allclose(whole[:, :500], first)
+    assert np.allclose(whole[:, 500:], second, atol=1e-12)
+
+
+def test_render_includes_contributions_from_beats_before_the_window():
+    """Una T de un latido anterior debe seguir presente al inicio de la
+    ventana; si no, el margen no se está aplicando."""
+    source = sinus_source()
+    late = source.render(9.0, 250, 500)
+    assert np.abs(late).max() > 0.0
+
+
+def test_set_rate_changes_the_ventricular_rate():
+    source = sinus_source()
+    slow = source.events(0.0, 30.0)
+    source.set_rate_hz(140 / 60)
+    fast = source.events(30.0, 60.0)
+    slow_count = len([e for e in slow if e.kind is EventKind.VENTRICULAR])
+    fast_count = len([e for e in fast if e.kind is EventKind.VENTRICULAR])
+    assert fast_count > 1.5 * slow_count
+
+
+def test_two_sources_with_the_same_seed_render_identically():
+    assert np.array_equal(
+        sinus_source(seed=99).render(0.0, 2000, 500),
+        sinus_source(seed=99).render(0.0, 2000, 500),
+    )
+
+
+def test_ventricular_fibrillation_has_no_discrete_events():
+    source = VentricularFibrillationSource(
+        coarseness=0.7,
+        amplitude_v=0.0004,
+        dominant_hz=6.0,
+        rng=np.random.default_rng(1),
+    )
+    assert not hasattr(source, "events")
+
+
+def test_ventricular_fibrillation_implements_the_common_render_interface():
+    source = VentricularFibrillationSource(
+        coarseness=0.7,
+        amplitude_v=0.0004,
+        dominant_hz=6.0,
+        rng=np.random.default_rng(1),
+    )
+    signal = source.render(0.0, 2500, 500)
+    assert signal.shape == (N_LEADS, 2500)
+
+
+def test_ventricular_fibrillation_energy_sits_in_its_dominant_band():
+    source = VentricularFibrillationSource(
+        coarseness=0.7,
+        amplitude_v=0.0004,
+        dominant_hz=6.0,
+        rng=np.random.default_rng(1),
+    )
+    trace = source.render(0.0, 5000, 500)[LEAD_ORDER.index("II")]
+    spectrum = np.abs(np.fft.rfft(trace))
+    freqs = np.fft.rfftfreq(trace.size, d=1 / 500.0)
+    peak_hz = freqs[int(np.argmax(spectrum))]
+    assert 3.0 <= peak_hz <= 10.0
+
+
+def test_coarse_fibrillation_has_larger_excursions_than_fine():
+    coarse = VentricularFibrillationSource(
+        coarseness=1.0, amplitude_v=0.0004, dominant_hz=6.0,
+        rng=np.random.default_rng(4),
+    ).render(0.0, 5000, 500)
+    fine = VentricularFibrillationSource(
+        coarseness=0.2, amplitude_v=0.0004, dominant_hz=6.0,
+        rng=np.random.default_rng(4),
+    ).render(0.0, 5000, 500)
+    assert coarse.std() > fine.std()
+
+
+def test_fibrillation_has_no_isoelectric_baseline():
+    """En la FV no hay línea de base: la señal nunca descansa."""
+    trace = VentricularFibrillationSource(
+        coarseness=0.7, amplitude_v=0.0004, dominant_hz=6.0,
+        rng=np.random.default_rng(2),
+    ).render(0.0, 5000, 500)[LEAD_ORDER.index("II")]
+    near_zero = np.mean(np.abs(trace) < 0.00002)
+    assert near_zero < 0.15
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_sources.py -v`
+Expected: FAIL con `ModuleNotFoundError: No module named 'ecg_engine.sources'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Crear `packages/ecg-engine/src/ecg_engine/sources.py`:
+
+```python
+"""Fuentes de señal.
+
+`BeatBasedSource` compone el modelo de dos trenes: un tren auricular emite
+ondas P, una política de conducción decide cuáles alcanzan el ventrículo, y
+una fuente de escape opcional aporta QRS cuando el nodo AV no conduce nada.
+Esa composición es la que convierte once de los doce ritmos del MVP en
+configuración de catálogo en lugar de en código.
+
+`VentricularFibrillationSource` es la única excepción: en la FV no hay
+latidos discretos que modelar, así que genera señal caótica continua. Aun
+así implementa la misma interfaz `render`, de modo que el resto del sistema
+no necesita saber que es distinta.
+"""
+
+from __future__ import annotations
+
+from typing import Protocol, Sequence
+
+import numpy as np
+
+from .conduction import ConductionPolicy
+from .overlays import MorphologyOverlay
+from .renderer import (
+    DEFAULT_PROJECTIONS,
+    RENDER_MARGIN_S,
+    render_events,
+    time_grid,
+)
+from .types import N_LEADS, CardiacEvent, EventKind, VariabilityParams
+
+
+class _Train(Protocol):
+    """Lo que `BeatBasedSource` necesita de un tren, sea cual sea su tipo."""
+
+    def events(self, t0_s: float, t1_s: float) -> list[CardiacEvent]: ...
+
+
+class BeatBasedSource:
+    """Fuente construida sobre eventos cardíacos discretos."""
+
+    def __init__(
+        self,
+        atrial: _Train,
+        conduction: ConductionPolicy,
+        escape: _Train | None = None,
+        overlays: Sequence[MorphologyOverlay] = (),
+        variability: VariabilityParams | None = None,
+        rng: np.random.Generator | None = None,
+    ) -> None:
+        self._atrial = atrial
+        self._conduction = conduction
+        self._escape = escape
+        self._overlays = tuple(overlays)
+        self._variability = variability
+        self._rng = rng if rng is not None else np.random.default_rng(0)
+
+    def set_rate_hz(self, rate_hz: float) -> None:
+        """Cambia la frecuencia del tren auricular.
+
+        En los ritmos con conducción 1:1 eso equivale a cambiar la frecuencia
+        ventricular, que es lo que el usuario espera al mover el control.
+        """
+        self._atrial.set_rate_hz(rate_hz)
+
+    def events(self, t0_s: float, t1_s: float) -> list[CardiacEvent]:
+        atrial = list(self._atrial.events(t0_s, t1_s))
+        ventricular = self._conduction.conduct(atrial, self._rng)
+        if self._escape is not None:
+            ventricular = ventricular + list(self._escape.events(t0_s, t1_s))
+        return sorted(atrial + ventricular, key=lambda e: e.t_s)
+
+    def render(
+        self, t0_s: float, n_samples: int, sample_rate_hz: int
+    ) -> np.ndarray:
+        t_s = time_grid(t0_s, n_samples, sample_rate_hz)
+        window_end_s = t0_s + n_samples / float(sample_rate_hz)
+        # El margen es imprescindible: la T de un latido anterior a la ventana
+        # sigue contribuyendo dentro de ella.
+        events = self.events(
+            max(0.0, t0_s - RENDER_MARGIN_S), window_end_s + RENDER_MARGIN_S
+        )
+        return render_events(
+            events,
+            t_s,
+            DEFAULT_PROJECTIONS,
+            overlays=self._overlays,
+            variability=self._variability,
+        )
+
+
+class VentricularFibrillationSource:
+    """Señal caótica continua, sin latidos discretos.
+
+    Se genera como suma de senoides moduladas en frecuencia y amplitud en
+    torno a la frecuencia dominante. `coarseness` controla la diferencia
+    entre la fibrilación gruesa y la fina, que clínicamente marca el pronóstico
+    y la respuesta a la desfibrilación.
+    """
+
+    _N_OSCILLATORS: int = 12
+
+    def __init__(
+        self,
+        coarseness: float,
+        amplitude_v: float,
+        dominant_hz: float,
+        rng: np.random.Generator,
+    ) -> None:
+        if not 0.0 < coarseness <= 1.0:
+            raise ValueError(
+                f"coarseness debe estar en (0, 1], recibido {coarseness}"
+            )
+        if not 3.0 <= dominant_hz <= 10.0:
+            raise ValueError(
+                f"dominant_hz debe estar entre 3 y 10, recibido {dominant_hz}"
+            )
+        self._coarseness = coarseness
+        self._amplitude_v = amplitude_v
+        self._dominant_hz = dominant_hz
+        self._phases = rng.uniform(0.0, 2.0 * np.pi, self._N_OSCILLATORS)
+        self._detunes = rng.normal(1.0, 0.18, self._N_OSCILLATORS)
+        self._weights = rng.uniform(0.5, 1.0, self._N_OSCILLATORS)
+        self._lead_gains = rng.uniform(0.6, 1.4, N_LEADS).reshape(N_LEADS, 1)
+
+    def set_rate_hz(self, rate_hz: float) -> None:
+        """La FV no tiene frecuencia cardíaca. El control no aplica."""
+        return None
+
+    def render(
+        self, t0_s: float, n_samples: int, sample_rate_hz: int
+    ) -> np.ndarray:
+        t_s = time_grid(t0_s, n_samples, sample_rate_hz)
+        trace = np.zeros_like(t_s)
+        for phase, detune, weight in zip(
+            self._phases, self._detunes, self._weights
+        ):
+            freq_hz = self._dominant_hz * detune
+            trace += weight * np.sin(2.0 * np.pi * freq_hz * t_s + phase)
+        trace /= self._weights.sum()
+
+        # La fibrilación gruesa tiene excursiones amplias y lentas; la fina,
+        # una ondulación menuda y de bajo voltaje.
+        envelope = 1.0 + self._coarseness * np.sin(
+            2.0 * np.pi * 0.7 * t_s + self._phases[0]
+        )
+        trace = trace * envelope * self._coarseness
+
+        return self._lead_gains * (self._amplitude_v * trace)[np.newaxis, :]
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_sources.py -v`
+Expected: PASS, 15 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/ecg-engine/src/ecg_engine/sources.py packages/ecg-engine/tests/unit/test_sources.py
+git commit -m "Añadir fuentes de señal por eventos y de fibrilación ventricular"
+```
+
+---
