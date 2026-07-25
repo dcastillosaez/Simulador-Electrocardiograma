@@ -3052,3 +3052,1245 @@ git commit -m "Añadir fuentes de señal por eventos y de fibrilación ventricul
 ```
 
 ---
+
+### Task 13: El catálogo de ritmos
+
+Aquí es donde se comprueba si la arquitectura funciona. Si algún ritmo obliga a escribir un `if`, el diseño ha fallado y hay que arreglarlo antes de seguir.
+
+**Files:**
+- Create: `packages/ecg-engine/src/ecg_engine/catalog/__init__.py`
+- Create: `packages/ecg-engine/src/ecg_engine/catalog/definitions.py`
+- Test: `packages/ecg-engine/tests/unit/test_catalog.py`
+
+**Interfaces:**
+- Consumes: todo lo anterior.
+- Produces:
+  - `RhythmCategory(str, Enum)` con `SINUS`, `SUPRAVENTRICULAR`, `VENTRICULAR`, `BLOCK`, `ISCHEMIA`.
+  - `ParameterRange(minimum: float, maximum: float, default: float)` con `clamp(value) -> float`.
+  - `RhythmDefinition` — dataclass congelada con `rhythm_id`, `display_name`, `category`, `build_source`, `default_parameters`, `editable_parameters`, `allowed_overlays`, `clinical_description`, `references`.
+  - `list_rhythms() -> tuple[RhythmDefinition, ...]`, `get_rhythm(rhythm_id: str) -> RhythmDefinition`, `RHYTHM_IDS: tuple[str, ...]`.
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `packages/ecg-engine/tests/unit/test_catalog.py`:
+
+```python
+import numpy as np
+import pytest
+
+from ecg_engine.catalog import RHYTHM_IDS, get_rhythm, list_rhythms
+from ecg_engine.catalog.definitions import ParameterRange, RhythmCategory
+from ecg_engine.types import N_LEADS, EventKind
+
+EXPECTED_IDS = {
+    "sinus_normal",
+    "sinus_tachycardia",
+    "sinus_bradycardia",
+    "atrial_fibrillation",
+    "atrial_flutter",
+    "svt",
+    "ventricular_tachycardia",
+    "ventricular_fibrillation",
+    "av_block_first",
+    "av_block_second_mobitz_i",
+    "av_block_third",
+    "stemi_inferior",
+}
+
+
+def test_catalog_contains_exactly_the_twelve_mvp_rhythms():
+    assert set(RHYTHM_IDS) == EXPECTED_IDS
+    assert len(RHYTHM_IDS) == 12
+
+
+def test_registry_keys_match_definition_ids():
+    assert all(d.rhythm_id in EXPECTED_IDS for d in list_rhythms())
+
+
+def test_unknown_rhythm_raises_with_a_helpful_message():
+    with pytest.raises(KeyError, match="taquicardia_rara"):
+        get_rhythm("taquicardia_rara")
+
+
+@pytest.mark.parametrize("rhythm_id", sorted(EXPECTED_IDS))
+def test_every_rhythm_declares_its_full_contract(rhythm_id):
+    definition = get_rhythm(rhythm_id)
+    assert definition.display_name
+    assert isinstance(definition.category, RhythmCategory)
+    assert definition.clinical_description
+    assert definition.references, f"{rhythm_id} debe citar al menos una fuente"
+    assert "heart_rate_hz" in definition.editable_parameters
+
+
+@pytest.mark.parametrize("rhythm_id", sorted(EXPECTED_IDS))
+def test_every_rhythm_renders_twelve_leads(rhythm_id):
+    source = get_rhythm(rhythm_id).build_source(np.random.default_rng(20260725))
+    signal = source.render(0.0, 2500, 500)
+    assert signal.shape == (N_LEADS, 2500)
+    assert np.isfinite(signal).all()
+
+
+@pytest.mark.parametrize("rhythm_id", sorted(EXPECTED_IDS))
+def test_every_rhythm_produces_a_non_flat_trace(rhythm_id):
+    source = get_rhythm(rhythm_id).build_source(np.random.default_rng(1))
+    signal = source.render(0.0, 2500, 500)
+    assert np.abs(signal).max() > 0.0001
+
+
+@pytest.mark.parametrize("rhythm_id", sorted(EXPECTED_IDS))
+def test_every_rhythm_is_deterministic_for_a_given_seed(rhythm_id):
+    first = get_rhythm(rhythm_id).build_source(np.random.default_rng(8))
+    second = get_rhythm(rhythm_id).build_source(np.random.default_rng(8))
+    assert np.array_equal(first.render(0.0, 1500, 500), second.render(0.0, 1500, 500))
+
+
+def test_default_rates_are_clinically_correct():
+    """Cada ritmo debe nacer en su rango clínico, no en uno genérico."""
+    assert get_rhythm("sinus_normal").default_parameters["heart_rate_hz"] == (
+        pytest.approx(70 / 60)
+    )
+    assert get_rhythm("sinus_bradycardia").default_parameters["heart_rate_hz"] < (
+        60 / 60
+    )
+    assert get_rhythm("sinus_tachycardia").default_parameters["heart_rate_hz"] > (
+        100 / 60
+    )
+    assert get_rhythm("svt").default_parameters["heart_rate_hz"] > 150 / 60
+
+
+def test_editable_rate_ranges_are_bounded_by_physiology():
+    """Nadie debe poder poner una bradicardia a 200 lpm desde la interfaz."""
+    brady = get_rhythm("sinus_bradycardia").editable_parameters["heart_rate_hz"]
+    assert brady.maximum <= 60 / 60
+    tachy = get_rhythm("sinus_tachycardia").editable_parameters["heart_rate_hz"]
+    assert tachy.minimum >= 100 / 60
+
+
+def test_parameter_range_clamps_out_of_range_values():
+    r = ParameterRange(minimum=1.0, maximum=2.0, default=1.5)
+    assert r.clamp(0.0) == 1.0
+    assert r.clamp(3.0) == 2.0
+    assert r.clamp(1.7) == 1.7
+
+
+def test_parameter_range_rejects_an_out_of_bounds_default():
+    with pytest.raises(ValueError, match="default"):
+        ParameterRange(minimum=1.0, maximum=2.0, default=5.0)
+
+
+def test_only_stemi_declares_the_st_elevation_overlay():
+    """El IAM no es un ritmo nuevo: es sinusal más un overlay."""
+    assert get_rhythm("stemi_inferior").allowed_overlays == ("st_elevation_inferior",)
+    others = [d for d in list_rhythms() if d.rhythm_id != "stemi_inferior"]
+    assert all(d.allowed_overlays == () for d in others)
+
+
+def test_ventricular_fibrillation_exposes_no_rate_control():
+    """La FV no tiene frecuencia cardíaca; el catálogo no debe fingir que sí."""
+    definition = get_rhythm("ventricular_fibrillation")
+    assert definition.category is RhythmCategory.VENTRICULAR
+    rate_range = definition.editable_parameters["heart_rate_hz"]
+    assert rate_range.minimum == rate_range.maximum
+
+
+def test_third_degree_block_produces_dissociated_trains():
+    source = get_rhythm("av_block_third").build_source(np.random.default_rng(3))
+    events = source.events(0.0, 60.0)
+    atrial = len([e for e in events if e.kind is EventKind.ATRIAL])
+    ventricular = len([e for e in events if e.kind is EventKind.VENTRICULAR])
+    assert atrial > ventricular * 1.5
+
+
+def test_atrial_fibrillation_has_irregular_rr():
+    source = get_rhythm("atrial_fibrillation").build_source(np.random.default_rng(3))
+    events = source.events(0.0, 120.0)
+    ventricular = [e.t_s for e in events if e.kind is EventKind.VENTRICULAR]
+    rr = np.diff(ventricular)
+    assert rr.std() > 0.08
+
+
+def test_flutter_conducts_a_fraction_of_its_atrial_waves():
+    source = get_rhythm("atrial_flutter").build_source(np.random.default_rng(3))
+    events = source.events(0.0, 60.0)
+    atrial = len([e for e in events if e.kind is EventKind.ATRIAL])
+    ventricular = len([e for e in events if e.kind is EventKind.VENTRICULAR])
+    assert atrial / ventricular == pytest.approx(2.0, rel=0.15)
+
+
+def test_no_rhythm_specific_branching_in_the_engine():
+    """Principio arquitectónico 3: cero casos especiales por ritmo.
+
+    Este test es una red de seguridad barata contra la tentación de meter
+    un `if rhythm_id == ...` cuando algún ritmo se resista.
+    """
+    import pathlib
+
+    import ecg_engine
+
+    root = pathlib.Path(ecg_engine.__file__).parent
+    offenders = []
+    for path in root.rglob("*.py"):
+        if path.parent.name == "catalog":
+            continue
+        source = path.read_text(encoding="utf-8")
+        for rhythm_id in RHYTHM_IDS:
+            if f'"{rhythm_id}"' in source or f"'{rhythm_id}'" in source:
+                offenders.append(f"{path.name}: {rhythm_id}")
+    assert offenders == []
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_catalog.py -v`
+Expected: FAIL con `ModuleNotFoundError: No module named 'ecg_engine.catalog'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Crear `packages/ecg-engine/src/ecg_engine/catalog/definitions.py`:
+
+```python
+"""Los doce ritmos del MVP, como datos.
+
+Si algún ritmo obligara a escribir un `if` fuera de este paquete, la
+arquitectura habría fallado. Todo lo que distingue un ritmo de otro cabe en
+una `RhythmDefinition`: qué trenes lo componen, qué política de conducción
+lo gobierna y qué overlays admite.
+
+Las descripciones clínicas y las referencias no son adorno: son lo que hace
+auditable la revisión por un profesional antes de cerrar la fase.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Callable, Mapping
+
+import numpy as np
+
+from ..conduction import (
+    CompleteBlock,
+    FixedPR,
+    FixedRatioBlock,
+    IrregularConduction,
+    WenckebachPR,
+)
+from ..overlays import ST_ELEVATION_INFERIOR
+from ..rhythm import EventTrain, RegularTrain
+from ..sources import BeatBasedSource, VentricularFibrillationSource
+from ..types import EventKind, SignalSource, VariabilityParams
+
+
+class RhythmCategory(str, Enum):
+    SINUS = "sinus"
+    SUPRAVENTRICULAR = "supraventricular"
+    VENTRICULAR = "ventricular"
+    BLOCK = "block"
+    ISCHEMIA = "ischemia"
+
+
+@dataclass(frozen=True, slots=True)
+class ParameterRange:
+    """Rango válido de un parámetro editable por el usuario."""
+
+    minimum: float
+    maximum: float
+    default: float
+
+    def __post_init__(self) -> None:
+        if self.minimum > self.maximum:
+            raise ValueError(
+                f"minimum {self.minimum} supera a maximum {self.maximum}"
+            )
+        if not self.minimum <= self.default <= self.maximum:
+            raise ValueError(
+                f"default {self.default} fuera del rango "
+                f"[{self.minimum}, {self.maximum}]"
+            )
+
+    def clamp(self, value: float) -> float:
+        return min(max(value, self.minimum), self.maximum)
+
+
+@dataclass(frozen=True, slots=True)
+class RhythmDefinition:
+    """Contrato completo de un ritmo del catálogo."""
+
+    rhythm_id: str
+    display_name: str
+    category: RhythmCategory
+    build_source: Callable[[np.random.Generator], SignalSource]
+    default_parameters: Mapping[str, float]
+    editable_parameters: Mapping[str, ParameterRange]
+    clinical_description: str
+    references: tuple[str, ...]
+    allowed_overlays: tuple[str, ...] = field(default=())
+
+
+def _bpm(value: float) -> float:
+    """Latidos por minuto a hercios. La frontera con las unidades clínicas."""
+    return value / 60.0
+
+
+def _atrial_train(
+    rate_hz: float, rng: np.random.Generator, template_id: str = "sinus_p"
+) -> EventTrain:
+    return EventTrain(
+        kind=EventKind.ATRIAL,
+        template_id=template_id,
+        rate_hz=rate_hz,
+        variability=VariabilityParams(),
+        rng=rng,
+    )
+
+
+def _sinus_like(
+    rate_bpm: float, pr_s: float = 0.16
+) -> Callable[[np.random.Generator], SignalSource]:
+    def build(rng: np.random.Generator) -> SignalSource:
+        return BeatBasedSource(
+            atrial=_atrial_train(_bpm(rate_bpm), rng),
+            conduction=FixedPR(pr_s=pr_s),
+            variability=VariabilityParams(),
+            rng=rng,
+        )
+
+    return build
+
+
+def _build_atrial_fibrillation(rng: np.random.Generator) -> SignalSource:
+    return BeatBasedSource(
+        # Actividad auricular caótica de alta frecuencia: ondas f, no ondas P.
+        atrial=RegularTrain(
+            kind=EventKind.ATRIAL, template_id="flutter_f", rate_hz=_bpm(420)
+        ),
+        conduction=IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.20),
+        variability=VariabilityParams(),
+        rng=rng,
+    )
+
+
+def _build_atrial_flutter(rng: np.random.Generator) -> SignalSource:
+    return BeatBasedSource(
+        atrial=RegularTrain(
+            kind=EventKind.ATRIAL, template_id="flutter_f", rate_hz=_bpm(300)
+        ),
+        conduction=FixedRatioBlock(ratio=2, pr_s=0.14),
+        variability=VariabilityParams(),
+        rng=rng,
+    )
+
+
+def _build_ventricular_tachycardia(rng: np.random.Generator) -> SignalSource:
+    return BeatBasedSource(
+        # En la TV no hay actividad auricular organizada que conduzca: el
+        # tren "auricular" solo marca el paso del foco ventricular.
+        atrial=RegularTrain(
+            kind=EventKind.ATRIAL, template_id="sinus_p", rate_hz=_bpm(180)
+        ),
+        conduction=CompleteBlock(),
+        escape=RegularTrain(
+            kind=EventKind.VENTRICULAR, template_id="wide_qrst", rate_hz=_bpm(180)
+        ),
+        variability=VariabilityParams(),
+        rng=rng,
+    )
+
+
+def _build_ventricular_fibrillation(rng: np.random.Generator) -> SignalSource:
+    return VentricularFibrillationSource(
+        coarseness=0.7, amplitude_v=0.00040, dominant_hz=6.0, rng=rng
+    )
+
+
+def _build_av_block_second(rng: np.random.Generator) -> SignalSource:
+    return BeatBasedSource(
+        atrial=_atrial_train(_bpm(75), rng),
+        conduction=WenckebachPR(
+            pr_base_s=0.16, pr_increment_s=0.05, cycle_length=4
+        ),
+        variability=VariabilityParams(),
+        rng=rng,
+    )
+
+
+def _build_av_block_third(rng: np.random.Generator) -> SignalSource:
+    return BeatBasedSource(
+        atrial=_atrial_train(_bpm(75), rng),
+        conduction=CompleteBlock(),
+        escape=RegularTrain(
+            kind=EventKind.VENTRICULAR, template_id="escape_qrst", rate_hz=_bpm(40)
+        ),
+        variability=VariabilityParams(),
+        rng=rng,
+    )
+
+
+def _build_stemi_inferior(rng: np.random.Generator) -> SignalSource:
+    return BeatBasedSource(
+        atrial=_atrial_train(_bpm(78), rng),
+        conduction=FixedPR(pr_s=0.16),
+        overlays=(ST_ELEVATION_INFERIOR,),
+        variability=VariabilityParams(),
+        rng=rng,
+    )
+
+
+_FIXED_RATE = ParameterRange(minimum=0.0, maximum=0.0, default=0.0)
+
+
+DEFINITIONS: tuple[RhythmDefinition, ...] = (
+    RhythmDefinition(
+        rhythm_id="sinus_normal",
+        display_name="Ritmo sinusal normal",
+        category=RhythmCategory.SINUS,
+        build_source=_sinus_like(70),
+        default_parameters={"heart_rate_hz": _bpm(70)},
+        editable_parameters={
+            "heart_rate_hz": ParameterRange(_bpm(60), _bpm(100), _bpm(70))
+        },
+        clinical_description=(
+            "Onda P precediendo a cada QRS con PR constante entre 120 y 200 ms, "
+            "frecuencia entre 60 y 100 lpm y QRS estrecho."
+        ),
+        references=("Surawicz B, Knilans T. Chou's Electrocardiography, cap. 1",),
+    ),
+    RhythmDefinition(
+        rhythm_id="sinus_tachycardia",
+        display_name="Taquicardia sinusal",
+        category=RhythmCategory.SINUS,
+        build_source=_sinus_like(120),
+        default_parameters={"heart_rate_hz": _bpm(120)},
+        editable_parameters={
+            "heart_rate_hz": ParameterRange(_bpm(101), _bpm(180), _bpm(120))
+        },
+        clinical_description=(
+            "Ritmo sinusal por encima de 100 lpm. La P puede fundirse con la T "
+            "precedente a frecuencias altas."
+        ),
+        references=("Surawicz B, Knilans T. Chou's Electrocardiography, cap. 13",),
+    ),
+    RhythmDefinition(
+        rhythm_id="sinus_bradycardia",
+        display_name="Bradicardia sinusal",
+        category=RhythmCategory.SINUS,
+        build_source=_sinus_like(48),
+        default_parameters={"heart_rate_hz": _bpm(48)},
+        editable_parameters={
+            "heart_rate_hz": ParameterRange(_bpm(30), _bpm(59), _bpm(48))
+        },
+        clinical_description=(
+            "Ritmo sinusal por debajo de 60 lpm. Frecuente y benigno en "
+            "deportistas y durante el sueño."
+        ),
+        references=("Surawicz B, Knilans T. Chou's Electrocardiography, cap. 13",),
+    ),
+    RhythmDefinition(
+        rhythm_id="atrial_fibrillation",
+        display_name="Fibrilación auricular",
+        category=RhythmCategory.SUPRAVENTRICULAR,
+        build_source=_build_atrial_fibrillation,
+        default_parameters={"heart_rate_hz": _bpm(80)},
+        editable_parameters={
+            "heart_rate_hz": ParameterRange(_bpm(50), _bpm(180), _bpm(80))
+        },
+        clinical_description=(
+            "Ausencia de ondas P organizadas, sustituidas por ondas f de "
+            "amplitud variable, con respuesta ventricular irregularmente "
+            "irregular."
+        ),
+        references=(
+            "Hindricks G, et al. 2020 ESC Guidelines for atrial fibrillation",
+        ),
+    ),
+    RhythmDefinition(
+        rhythm_id="atrial_flutter",
+        display_name="Flutter auricular",
+        category=RhythmCategory.SUPRAVENTRICULAR,
+        build_source=_build_atrial_flutter,
+        default_parameters={"heart_rate_hz": _bpm(150)},
+        editable_parameters={
+            "heart_rate_hz": ParameterRange(_bpm(75), _bpm(150), _bpm(150))
+        },
+        clinical_description=(
+            "Ondas F en dientes de sierra a unos 300 por minuto, con conducción "
+            "habitualmente 2:1, lo que da una respuesta ventricular en torno a "
+            "150 lpm."
+        ),
+        references=(
+            "Brugada J, et al. 2019 ESC Guidelines for supraventricular "
+            "tachycardia",
+        ),
+    ),
+    RhythmDefinition(
+        rhythm_id="svt",
+        display_name="Taquicardia supraventricular",
+        category=RhythmCategory.SUPRAVENTRICULAR,
+        build_source=_sinus_like(180, pr_s=0.09),
+        default_parameters={"heart_rate_hz": _bpm(180)},
+        editable_parameters={
+            "heart_rate_hz": ParameterRange(_bpm(150), _bpm(250), _bpm(180))
+        },
+        clinical_description=(
+            "Taquicardia regular de QRS estrecho entre 150 y 250 lpm, con la P "
+            "habitualmente oculta dentro del QRS o de la T."
+        ),
+        references=(
+            "Brugada J, et al. 2019 ESC Guidelines for supraventricular "
+            "tachycardia",
+        ),
+    ),
+    RhythmDefinition(
+        rhythm_id="ventricular_tachycardia",
+        display_name="Taquicardia ventricular",
+        category=RhythmCategory.VENTRICULAR,
+        build_source=_build_ventricular_tachycardia,
+        default_parameters={"heart_rate_hz": _bpm(180)},
+        editable_parameters={
+            "heart_rate_hz": ParameterRange(_bpm(120), _bpm(250), _bpm(180))
+        },
+        clinical_description=(
+            "Taquicardia regular de QRS ancho por encima de 120 ms, con "
+            "disociación auriculoventricular."
+        ),
+        references=(
+            "Zeppenfeld K, et al. 2022 ESC Guidelines for ventricular "
+            "arrhythmias",
+        ),
+    ),
+    RhythmDefinition(
+        rhythm_id="ventricular_fibrillation",
+        display_name="Fibrilación ventricular",
+        category=RhythmCategory.VENTRICULAR,
+        build_source=_build_ventricular_fibrillation,
+        default_parameters={"heart_rate_hz": 0.0},
+        editable_parameters={"heart_rate_hz": _FIXED_RATE},
+        clinical_description=(
+            "Actividad eléctrica caótica sin complejos identificables ni línea "
+            "isoeléctrica. No tiene frecuencia cardíaca medible."
+        ),
+        references=(
+            "Zeppenfeld K, et al. 2022 ESC Guidelines for ventricular "
+            "arrhythmias",
+        ),
+    ),
+    RhythmDefinition(
+        rhythm_id="av_block_first",
+        display_name="Bloqueo AV de primer grado",
+        category=RhythmCategory.BLOCK,
+        build_source=_sinus_like(70, pr_s=0.26),
+        default_parameters={"heart_rate_hz": _bpm(70)},
+        editable_parameters={
+            "heart_rate_hz": ParameterRange(_bpm(45), _bpm(100), _bpm(70))
+        },
+        clinical_description=(
+            "PR constante por encima de 200 ms, con conducción 1:1 conservada. "
+            "Toda P va seguida de su QRS."
+        ),
+        references=(
+            "Glikson M, et al. 2021 ESC Guidelines on cardiac pacing",
+        ),
+    ),
+    RhythmDefinition(
+        rhythm_id="av_block_second_mobitz_i",
+        display_name="Bloqueo AV de segundo grado, Mobitz I",
+        category=RhythmCategory.BLOCK,
+        build_source=_build_av_block_second,
+        default_parameters={"heart_rate_hz": _bpm(75)},
+        editable_parameters={
+            "heart_rate_hz": ParameterRange(_bpm(50), _bpm(100), _bpm(75))
+        },
+        clinical_description=(
+            "Alargamiento progresivo del PR latido a latido hasta que una onda "
+            "P no conduce. Tras la pausa, el PR vuelve a su valor basal."
+        ),
+        references=(
+            "Glikson M, et al. 2021 ESC Guidelines on cardiac pacing",
+        ),
+    ),
+    RhythmDefinition(
+        rhythm_id="av_block_third",
+        display_name="Bloqueo AV completo",
+        category=RhythmCategory.BLOCK,
+        build_source=_build_av_block_third,
+        default_parameters={"heart_rate_hz": _bpm(75)},
+        editable_parameters={
+            "heart_rate_hz": ParameterRange(_bpm(50), _bpm(110), _bpm(75))
+        },
+        clinical_description=(
+            "Disociación auriculoventricular completa: las aurículas y los "
+            "ventrículos laten a frecuencias independientes, con un ritmo de "
+            "escape ventricular en torno a 40 lpm."
+        ),
+        references=(
+            "Glikson M, et al. 2021 ESC Guidelines on cardiac pacing",
+        ),
+    ),
+    RhythmDefinition(
+        rhythm_id="stemi_inferior",
+        display_name="IAM inferior con elevación del ST",
+        category=RhythmCategory.ISCHEMIA,
+        build_source=_build_stemi_inferior,
+        default_parameters={"heart_rate_hz": _bpm(78)},
+        editable_parameters={
+            "heart_rate_hz": ParameterRange(_bpm(50), _bpm(120), _bpm(78))
+        },
+        allowed_overlays=("st_elevation_inferior",),
+        clinical_description=(
+            "Ritmo sinusal con elevación del segmento ST en II, III y aVF. No "
+            "es un ritmo distinto: es sinusal más un overlay morfológico."
+        ),
+        references=(
+            "Byrne RA, et al. 2023 ESC Guidelines for acute coronary syndromes",
+        ),
+    ),
+)
+```
+
+Crear `packages/ecg-engine/src/ecg_engine/catalog/__init__.py`:
+
+```python
+"""Acceso al catálogo de ritmos."""
+
+from __future__ import annotations
+
+from .definitions import (
+    DEFINITIONS,
+    ParameterRange,
+    RhythmCategory,
+    RhythmDefinition,
+)
+
+_BY_ID: dict[str, RhythmDefinition] = {d.rhythm_id: d for d in DEFINITIONS}
+
+RHYTHM_IDS: tuple[str, ...] = tuple(_BY_ID)
+
+__all__ = [
+    "RHYTHM_IDS",
+    "ParameterRange",
+    "RhythmCategory",
+    "RhythmDefinition",
+    "get_rhythm",
+    "list_rhythms",
+]
+
+
+def list_rhythms() -> tuple[RhythmDefinition, ...]:
+    return DEFINITIONS
+
+
+def get_rhythm(rhythm_id: str) -> RhythmDefinition:
+    try:
+        return _BY_ID[rhythm_id]
+    except KeyError as exc:
+        known = ", ".join(sorted(_BY_ID))
+        raise KeyError(
+            f"ritmo desconocido: {rhythm_id!r}. Conocidos: {known}"
+        ) from exc
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_catalog.py -v`
+Expected: PASS, 76 passed (los tests parametrizados generan 12 casos cada uno)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/ecg-engine/src/ecg_engine/catalog/ packages/ecg-engine/tests/unit/test_catalog.py
+git commit -m "Añadir catálogo con los doce ritmos del MVP"
+```
+
+---
+
+### Task 14: Medidas derivadas en `measurements.py`
+
+Estas medidas son la base de los golden measurements. Un cambio puede alterar ligeramente las muestras sin tocar la fisiología, o —mucho peor— mantener las muestras casi idénticas mientras desplaza un intervalo. Los golden de muestras cazan lo primero; estos, lo segundo. Y cuando fallan, fallan con un mensaje que se entiende.
+
+**Files:**
+- Create: `packages/ecg-engine/src/ecg_engine/measurements.py`
+- Test: `packages/ecg-engine/tests/unit/test_measurements.py`
+
+**Interfaces:**
+- Consumes: `CardiacEvent`, `EventKind`, `LEAD_ORDER` de `types.py`; `get_template`, `qrs_duration_s`, `qt_duration_s` de `beat.py`.
+- Produces:
+  - `PR_DISSOCIATION_THRESHOLD_S: float = 0.05`
+  - `Measurements` — dataclass congelada con `heart_rate_hz`, `rr_mean_s`, `rr_std_s`, `pr_mean_s`, `qrs_duration_s`, `qt_s`, `r_amplitude_lead_ii_v`, y método `as_dict() -> dict[str, float]`.
+  - `measure(events, signal_v, sample_rate_hz) -> Measurements`
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `packages/ecg-engine/tests/unit/test_measurements.py`:
+
+```python
+import math
+
+import numpy as np
+import pytest
+
+from ecg_engine.catalog import get_rhythm
+from ecg_engine.measurements import Measurements, measure
+from ecg_engine.types import LEAD_ORDER, N_LEADS, CardiacEvent, EventKind
+
+
+def build(rhythm_id: str, seconds: float = 30.0, seed: int = 20260725):
+    source = get_rhythm(rhythm_id).build_source(np.random.default_rng(seed))
+    n_samples = int(seconds * 500)
+    signal = source.render(0.0, n_samples, 500)
+    events = source.events(0.0, seconds) if hasattr(source, "events") else []
+    return events, signal
+
+
+def test_measures_heart_rate_from_ventricular_events():
+    events, signal = build("sinus_normal", seconds=60.0)
+    result = measure(events, signal, 500)
+    assert result.heart_rate_hz == pytest.approx(70 / 60, rel=0.05)
+
+
+def test_bradycardia_measures_below_sixty_bpm():
+    events, signal = build("sinus_bradycardia", seconds=60.0)
+    assert measure(events, signal, 500).heart_rate_hz < 60 / 60
+
+
+def test_tachycardia_measures_above_one_hundred_bpm():
+    events, signal = build("sinus_tachycardia", seconds=60.0)
+    assert measure(events, signal, 500).heart_rate_hz > 100 / 60
+
+
+def test_rr_standard_deviation_is_small_in_sinus_rhythm():
+    events, signal = build("sinus_normal", seconds=60.0)
+    assert measure(events, signal, 500).rr_std_s < 0.08
+
+
+def test_rr_standard_deviation_is_large_in_atrial_fibrillation():
+    """La irregularidad del RR es el hallazgo que define la FA."""
+    events, signal = build("atrial_fibrillation", seconds=120.0)
+    assert measure(events, signal, 500).rr_std_s > 0.10
+
+
+def test_pr_interval_matches_the_configured_value_in_sinus_rhythm():
+    events, signal = build("sinus_normal", seconds=30.0)
+    assert measure(events, signal, 500).pr_mean_s == pytest.approx(0.16, abs=0.02)
+
+
+def test_first_degree_block_measures_a_pr_above_two_hundred_ms():
+    events, signal = build("av_block_first", seconds=30.0)
+    assert measure(events, signal, 500).pr_mean_s > 0.20
+
+
+def test_complete_block_reports_no_measurable_pr():
+    """Con disociación AV el PR no existe. Devolver un número medio sería
+    mentir; se devuelve NaN."""
+    events, signal = build("av_block_third", seconds=60.0)
+    assert math.isnan(measure(events, signal, 500).pr_mean_s)
+
+
+def test_ventricular_tachycardia_measures_a_wide_qrs():
+    events, signal = build("ventricular_tachycardia", seconds=20.0)
+    assert measure(events, signal, 500).qrs_duration_s > 0.120
+
+
+def test_sinus_rhythm_measures_a_narrow_qrs():
+    events, signal = build("sinus_normal", seconds=20.0)
+    assert measure(events, signal, 500).qrs_duration_s < 0.120
+
+
+def test_qt_is_within_the_physiological_range():
+    events, signal = build("sinus_normal", seconds=20.0)
+    assert 0.30 <= measure(events, signal, 500).qt_s <= 0.46
+
+
+def test_r_amplitude_is_read_from_lead_two():
+    events, signal = build("sinus_normal", seconds=20.0)
+    result = measure(events, signal, 500)
+    assert result.r_amplitude_lead_ii_v == pytest.approx(
+        signal[LEAD_ORDER.index("II")].max(), rel=1e-9
+    )
+
+
+def test_measurements_without_events_report_nan_timings():
+    """La fibrilación ventricular no tiene eventos discretos que medir."""
+    signal = np.zeros((N_LEADS, 5000))
+    result = measure([], signal, 500)
+    assert math.isnan(result.heart_rate_hz)
+    assert math.isnan(result.pr_mean_s)
+
+
+def test_as_dict_exposes_every_field_for_the_golden_files():
+    events, signal = build("sinus_normal", seconds=20.0)
+    payload = measure(events, signal, 500).as_dict()
+    assert set(payload) == {
+        "heart_rate_hz",
+        "rr_mean_s",
+        "rr_std_s",
+        "pr_mean_s",
+        "qrs_duration_s",
+        "qt_s",
+        "r_amplitude_lead_ii_v",
+    }
+    assert all(isinstance(v, float) for v in payload.values())
+
+
+def test_measurements_are_immutable():
+    import dataclasses
+
+    events, signal = build("sinus_normal", seconds=10.0)
+    result = measure(events, signal, 500)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        result.heart_rate_hz = 1.0
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_measurements.py -v`
+Expected: FAIL con `ModuleNotFoundError: No module named 'ecg_engine.measurements'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Crear `packages/ecg-engine/src/ecg_engine/measurements.py`:
+
+```python
+"""Medidas fisiológicas derivadas de una simulación.
+
+Son la base de los golden measurements. Su valor está en que fallan con un
+mensaje que se entiende: «el PR medio pasó de 160 a 190 ms» dice algo, «el
+array difiere en la posición 4127» no dice nada.
+
+Los tiempos se miden sobre los **eventos**, no sobre la señal: detectar picos
+en una señal con ruido introduce sus propios errores, y aquí lo que interesa
+es verificar la fisiología que el motor pretende generar.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import asdict, dataclass
+from typing import Sequence
+
+import numpy as np
+
+from .beat import get_template, qrs_duration_s, qt_duration_s
+from .types import LEAD_ORDER, CardiacEvent, EventKind
+
+PR_DISSOCIATION_THRESHOLD_S: float = 0.05
+"""Por encima de esta dispersión, el PR deja de considerarse medible.
+
+En un bloqueo AV completo cada QRS cae a una distancia arbitraria de la P
+anterior. Promediar esas distancias daría un número perfectamente calculado y
+clínicamente falso, así que se devuelve NaN.
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class Measurements:
+    heart_rate_hz: float
+    rr_mean_s: float
+    rr_std_s: float
+    pr_mean_s: float
+    qrs_duration_s: float
+    qt_s: float
+    r_amplitude_lead_ii_v: float
+
+    def as_dict(self) -> dict[str, float]:
+        return {k: float(v) for k, v in asdict(self).items()}
+
+
+def _pr_mean_s(
+    atrial_times: np.ndarray, ventricular_times: np.ndarray
+) -> float:
+    if atrial_times.size == 0 or ventricular_times.size == 0:
+        return math.nan
+    intervals: list[float] = []
+    for qrs_s in ventricular_times:
+        preceding = atrial_times[atrial_times <= qrs_s]
+        if preceding.size:
+            intervals.append(float(qrs_s - preceding[-1]))
+    if not intervals:
+        return math.nan
+    if float(np.std(intervals)) > PR_DISSOCIATION_THRESHOLD_S:
+        return math.nan  # disociación auriculoventricular
+    return float(np.mean(intervals))
+
+
+def measure(
+    events: Sequence[CardiacEvent],
+    signal_v: np.ndarray,
+    sample_rate_hz: int,
+) -> Measurements:
+    """Extrae las medidas fisiológicas de una simulación."""
+    atrial = np.array(
+        [e.t_s for e in events if e.kind is EventKind.ATRIAL], dtype=np.float64
+    )
+    ventricular = np.array(
+        [e.t_s for e in events if e.kind is EventKind.VENTRICULAR], dtype=np.float64
+    )
+
+    duration_s = signal_v.shape[1] / float(sample_rate_hz)
+    heart_rate_hz = (
+        float(ventricular.size) / duration_s if ventricular.size else math.nan
+    )
+
+    rr = np.diff(ventricular) if ventricular.size > 1 else np.array([])
+    rr_mean_s = float(rr.mean()) if rr.size else math.nan
+    rr_std_s = float(rr.std()) if rr.size else math.nan
+
+    ventricular_events = [e for e in events if e.kind is EventKind.VENTRICULAR]
+    if ventricular_events:
+        template = get_template(ventricular_events[0].template_id)
+        qrs_s = qrs_duration_s(template)
+        qt_s = qt_duration_s(template)
+    else:
+        qrs_s = math.nan
+        qt_s = math.nan
+
+    return Measurements(
+        heart_rate_hz=heart_rate_hz,
+        rr_mean_s=rr_mean_s,
+        rr_std_s=rr_std_s,
+        pr_mean_s=_pr_mean_s(atrial, ventricular),
+        qrs_duration_s=qrs_s,
+        qt_s=qt_s,
+        r_amplitude_lead_ii_v=float(signal_v[LEAD_ORDER.index("II")].max()),
+    )
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_measurements.py -v`
+Expected: PASS, 15 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/ecg-engine/src/ecg_engine/measurements.py packages/ecg-engine/tests/unit/test_measurements.py
+git commit -m "Añadir medidas fisiológicas derivadas"
+```
+
+---
+
+### Task 15: El orquestador `EcgEngine`
+
+La API pública del paquete. Mantiene el reloj de simulación, aplica el ruido y acepta cambios de parámetros en caliente sin recrear la simulación.
+
+**Files:**
+- Create: `packages/ecg-engine/src/ecg_engine/engine.py`
+- Modify: `packages/ecg-engine/src/ecg_engine/__init__.py`
+- Test: `packages/ecg-engine/tests/unit/test_engine.py`
+
+**Interfaces:**
+- Consumes: `get_rhythm` de `catalog`; `apply_noise` de `noise.py`; `time_grid` de `renderer.py`; `EngineParams`, `DEFAULT_SAMPLE_RATE_HZ` de `types.py`.
+- Produces:
+  - `EcgEngine(rhythm_id: str, seed: int, sample_rate_hz: int = 500, params: EngineParams | None = None)`
+  - Métodos: `generate(n_samples: int) -> np.ndarray`, `update_params(params: EngineParams) -> None`, `reset() -> None`.
+  - Propiedades de solo lectura: `t_s: float`, `rhythm_id: str`, `seed: int`, `sample_rate_hz: int`, `params: EngineParams`.
+  - Reexportado en `ecg_engine`: `EcgEngine`, `EngineParams`, `NoiseParams`, `VariabilityParams`, `get_rhythm`, `list_rhythms`, `measure`.
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `packages/ecg-engine/tests/unit/test_engine.py`:
+
+```python
+import numpy as np
+import pytest
+
+from ecg_engine import EcgEngine, EngineParams, NoiseParams
+from ecg_engine.types import N_LEADS
+
+
+def engine(rhythm_id: str = "sinus_normal", seed: int = 20260725) -> EcgEngine:
+    return EcgEngine(rhythm_id=rhythm_id, seed=seed)
+
+
+def test_generate_returns_twelve_leads_of_the_requested_length():
+    signal = engine().generate(500)
+    assert signal.shape == (N_LEADS, 500)
+    assert signal.dtype == np.float64
+
+
+def test_clock_advances_by_the_generated_duration():
+    eng = engine()
+    assert eng.t_s == 0.0
+    eng.generate(500)
+    assert eng.t_s == pytest.approx(1.0)
+    eng.generate(250)
+    assert eng.t_s == pytest.approx(1.5)
+
+
+def test_consecutive_chunks_join_without_a_discontinuity():
+    """Requisito del streaming: sin esto, el trazo daría un salto cada 100 ms."""
+    eng = engine()
+    first = eng.generate(500)
+    second = eng.generate(500)
+    step = abs(second[1, 0] - first[1, -1])
+    assert step < 0.0002
+
+
+def test_chunked_generation_equals_a_single_large_generation():
+    whole = engine().generate(2500)
+    chunked_engine = engine()
+    chunks = [chunked_engine.generate(500) for _ in range(5)]
+    assert np.allclose(whole, np.concatenate(chunks, axis=1), atol=1e-12)
+
+
+def test_same_seed_and_params_reproduce_the_signal_bit_for_bit():
+    """Sin esto no hay golden signals ni replay."""
+    assert np.array_equal(engine(seed=42).generate(2500), engine(seed=42).generate(2500))
+
+
+def test_different_seeds_produce_different_signals():
+    assert not np.array_equal(
+        engine(seed=1).generate(2500), engine(seed=2).generate(2500)
+    )
+
+
+def test_unknown_rhythm_fails_fast():
+    with pytest.raises(KeyError, match="no_existe"):
+        EcgEngine(rhythm_id="no_existe", seed=1)
+
+
+def test_engine_starts_with_the_rhythm_default_parameters():
+    assert engine().params.heart_rate_hz == pytest.approx(70 / 60)
+
+
+def test_update_params_changes_the_rate_without_restarting():
+    eng = engine()
+    eng.generate(2500)
+    t_before = eng.t_s
+    eng.update_params(EngineParams(heart_rate_hz=150 / 60))
+    eng.generate(2500)
+    assert eng.t_s == pytest.approx(t_before + 5.0)
+    assert eng.params.heart_rate_hz == pytest.approx(150 / 60)
+
+
+def test_update_params_clamps_the_rate_to_the_rhythm_range():
+    """Una bradicardia sinusal no puede ir a 300 lpm por mucho que lo pidan."""
+    eng = engine("sinus_bradycardia")
+    eng.update_params(EngineParams(heart_rate_hz=300 / 60))
+    assert eng.params.heart_rate_hz <= 60 / 60
+
+
+def test_noise_free_engine_matches_the_clean_source():
+    clean = engine().generate(1000)
+    assert np.abs(clean).max() < 0.01  # sin ruido, amplitudes fisiológicas
+
+
+def test_enabling_noise_increases_signal_variance():
+    quiet = engine().generate(2500)
+    noisy_engine = engine()
+    noisy_engine.update_params(
+        EngineParams(
+            heart_rate_hz=70 / 60,
+            noise=NoiseParams(emg_v=2e-5, mains_v=1e-5, baseline_v=1e-4),
+        )
+    )
+    assert noisy_engine.generate(2500).std() > quiet.std()
+
+
+def test_reset_returns_the_clock_and_the_signal_to_the_origin():
+    eng = engine()
+    first = eng.generate(1000)
+    eng.generate(1000)
+    eng.reset()
+    assert eng.t_s == 0.0
+    assert np.array_equal(eng.generate(1000), first)
+
+
+def test_generate_rejects_a_non_positive_sample_count():
+    with pytest.raises(ValueError, match="n_samples"):
+        engine().generate(0)
+
+
+@pytest.mark.parametrize(
+    "rhythm_id",
+    [
+        "sinus_normal", "sinus_tachycardia", "sinus_bradycardia",
+        "atrial_fibrillation", "atrial_flutter", "svt",
+        "ventricular_tachycardia", "ventricular_fibrillation",
+        "av_block_first", "av_block_second_mobitz_i", "av_block_third",
+        "stemi_inferior",
+    ],
+)
+def test_every_catalog_rhythm_drives_the_engine(rhythm_id):
+    signal = EcgEngine(rhythm_id=rhythm_id, seed=7).generate(2500)
+    assert signal.shape == (N_LEADS, 2500)
+    assert np.isfinite(signal).all()
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd packages/ecg-engine && uv run pytest tests/unit/test_engine.py -v`
+Expected: FAIL con `ImportError: cannot import name 'EcgEngine' from 'ecg_engine'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Crear `packages/ecg-engine/src/ecg_engine/engine.py`:
+
+```python
+"""Orquestador del motor.
+
+Mantiene el reloj de simulación, compone la fuente del catálogo con la cadena
+de ruido y acepta cambios de parámetros en caliente sin recrear nada.
+
+El reloj avanza solo cuando se generan muestras, así que pausar la simulación
+es simplemente dejar de llamar a `generate`.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+from .catalog import get_rhythm
+from .noise import apply_noise
+from .renderer import time_grid
+from .types import DEFAULT_SAMPLE_RATE_HZ, EngineParams, SignalSource
+
+
+class EcgEngine:
+    """API pública del motor fisiológico."""
+
+    def __init__(
+        self,
+        rhythm_id: str,
+        seed: int,
+        sample_rate_hz: int = DEFAULT_SAMPLE_RATE_HZ,
+        params: EngineParams | None = None,
+    ) -> None:
+        self._definition = get_rhythm(rhythm_id)  # lanza KeyError si no existe
+        self._seed = seed
+        self._sample_rate_hz = sample_rate_hz
+        self._params = self._clamped(
+            params
+            if params is not None
+            else EngineParams(
+                heart_rate_hz=self._definition.default_parameters["heart_rate_hz"]
+            )
+        )
+        self._sample_index = 0
+        self._source: SignalSource = self._build_source()
+
+    # --- construcción y estado --------------------------------------------
+
+    def _build_source(self) -> SignalSource:
+        """Cada fuente recibe su propio generador, derivado de la semilla."""
+        source = self._definition.build_source(np.random.default_rng(self._seed))
+        source.set_rate_hz(self._params.heart_rate_hz)
+        self._noise_rng = np.random.default_rng(self._seed + 1)
+        return source
+
+    def _clamped(self, params: EngineParams) -> EngineParams:
+        """Recorta la frecuencia al rango clínico declarado por el ritmo."""
+        rate_range = self._definition.editable_parameters["heart_rate_hz"]
+        clamped_hz = rate_range.clamp(params.heart_rate_hz)
+        if clamped_hz == params.heart_rate_hz:
+            return params
+        return EngineParams(
+            heart_rate_hz=clamped_hz,
+            noise=params.noise,
+            variability=params.variability,
+        )
+
+    # --- propiedades -------------------------------------------------------
+
+    @property
+    def t_s(self) -> float:
+        return self._sample_index / float(self._sample_rate_hz)
+
+    @property
+    def rhythm_id(self) -> str:
+        return self._definition.rhythm_id
+
+    @property
+    def seed(self) -> int:
+        return self._seed
+
+    @property
+    def sample_rate_hz(self) -> int:
+        return self._sample_rate_hz
+
+    @property
+    def params(self) -> EngineParams:
+        return self._params
+
+    # --- operación ---------------------------------------------------------
+
+    def update_params(self, params: EngineParams) -> None:
+        """Aplica parámetros nuevos sin reiniciar la simulación."""
+        self._params = self._clamped(params)
+        self._source.set_rate_hz(self._params.heart_rate_hz)
+
+    def reset(self) -> None:
+        """Vuelve al origen. Con la misma semilla, repite la señal exacta."""
+        self._sample_index = 0
+        self._source = self._build_source()
+
+    def generate(self, n_samples: int) -> np.ndarray:
+        """Genera el siguiente bloque de señal y avanza el reloj."""
+        if n_samples <= 0:
+            raise ValueError(f"n_samples debe ser positivo, recibido {n_samples}")
+        t0_s = self.t_s
+        signal = self._source.render(t0_s, n_samples, self._sample_rate_hz)
+        t_s = time_grid(t0_s, n_samples, self._sample_rate_hz)
+        signal = apply_noise(
+            signal,
+            t_s,
+            self._params.noise,
+            self._params.variability,
+            self._noise_rng,
+        )
+        self._sample_index += n_samples
+        return signal
+```
+
+Reemplazar el contenido de `packages/ecg-engine/src/ecg_engine/__init__.py`:
+
+```python
+"""Motor fisiológico de generación de ECG.
+
+Trabaja exclusivamente en unidades SI: segundos, voltios y hercios.
+
+    from ecg_engine import EcgEngine
+
+    engine = EcgEngine(rhythm_id="sinus_normal", seed=20260725)
+    signal = engine.generate(500)   # (12, 500) en voltios
+"""
+
+from .catalog import get_rhythm, list_rhythms
+from .engine import EcgEngine
+from .measurements import Measurements, measure
+from .types import (
+    DEFAULT_SAMPLE_RATE_HZ,
+    LEAD_ORDER,
+    EngineParams,
+    NoiseParams,
+    VariabilityParams,
+)
+
+__version__ = "1.0.0"
+
+__all__ = [
+    "DEFAULT_SAMPLE_RATE_HZ",
+    "LEAD_ORDER",
+    "EcgEngine",
+    "EngineParams",
+    "Measurements",
+    "NoiseParams",
+    "VariabilityParams",
+    "get_rhythm",
+    "list_rhythms",
+    "measure",
+]
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd packages/ecg-engine && uv run pytest tests/unit -v`
+Expected: PASS, toda la suite unitaria en verde
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/ecg-engine/src/ecg_engine/engine.py packages/ecg-engine/src/ecg_engine/__init__.py packages/ecg-engine/tests/unit/test_engine.py
+git commit -m "Añadir orquestador EcgEngine y API pública del paquete"
+```
+
+---
