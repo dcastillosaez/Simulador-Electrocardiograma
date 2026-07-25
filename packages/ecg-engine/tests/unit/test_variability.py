@@ -51,6 +51,27 @@ def test_rr_modulation_follows_the_same_respiratory_oscillator(rng):
     assert trough_rr == pytest.approx(1.04, abs=1e-6)
 
 
+def test_amplitude_and_rr_respond_to_the_same_oscillator(rng):
+    """El punto arquitectónico del módulo: un solo oscilador para las dos
+    cosas. En el pico inspiratorio el RR se acorta y la amplitud sube, y
+    ocurre en el mismo instante porque ambas leen la misma fase. Si alguien
+    desacopla `amplitude_scale` de `respiratory_phase`, esto lo ve; el test
+    que solo mira el RR, no."""
+    params = VariabilityParams(
+        respiration_hz=0.25,
+        rsa_fraction=0.04,
+        amplitude_fraction=0.03,
+        rr_jitter_fraction=0.0,
+    )
+    peak_s, trough_s = 1.0, 3.0
+    scale = amplitude_scale(np.array([peak_s, trough_s]), params)
+
+    assert scale[0] == pytest.approx(1.03, abs=1e-9)
+    assert scale[1] == pytest.approx(0.97, abs=1e-9)
+    assert next_rr_s(1.0, peak_s, params, rng) == pytest.approx(0.96, abs=1e-9)
+    assert next_rr_s(1.0, trough_s, params, rng) == pytest.approx(1.04, abs=1e-9)
+
+
 def test_rr_jitter_is_small_and_random(rng):
     params = VariabilityParams(rsa_fraction=0.0, rr_jitter_fraction=0.015)
     values = [next_rr_s(1.0, t_s=0.0, params=params, rng=rng) for _ in range(500)]
