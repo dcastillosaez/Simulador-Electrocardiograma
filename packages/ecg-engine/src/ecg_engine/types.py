@@ -127,4 +127,12 @@ class SignalSource(Protocol):
 
     def render(
         self, t0_s: float, n_samples: int, sample_rate_hz: int
-    ) -> np.ndarray: ...
+    ) -> np.ndarray:
+        """Genera señal desde `t0_s`.
+
+        Devuelve un array de forma `(12, n_samples)` y dtype `float64`, en
+        **voltios**, con las derivaciones en el orden de `LEAD_ORDER`. Ese
+        contrato vincula a toda implementación: el resto del sistema lo da
+        por hecho sin comprobarlo.
+        """
+        ...
