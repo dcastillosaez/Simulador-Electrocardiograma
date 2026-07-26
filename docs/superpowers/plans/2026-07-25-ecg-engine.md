@@ -5120,15 +5120,37 @@ def test_realtime_chunks_stay_well_inside_their_budget():
     assert worst_s < REALTIME_BUDGET_S, f"peor caso {worst_s * 1000:.1f} ms"
 
 
-def test_generation_cost_does_not_grow_with_elapsed_simulation_time():
-    """La caché de la línea temporal crece con la sesión. Este test detecta
-    que esa caché degrade a comportamiento cuadrático en sesiones largas."""
+def _median_chunk_s(engine, reps: int = 25) -> float:
+    """Mediana de varias generaciones, para que el ruido del reloj no mande."""
+    return statistics.median(
+        elapsed_s(lambda: engine.generate(REALTIME_CHUNK_SAMPLES))
+        for _ in range(reps)
+    )
+
+
+def test_generation_cost_does_not_grow_over_a_long_session():
+    """La línea temporal de los trenes se cachea y crece con la sesión, así
+    que este test existe para detectar que esa caché degrade a comportamiento
+    cuadrático. Por eso recorre los diez minutos de la sesión de referencia,
+    no uno.
+
+    El umbral es relativo de verdad. Compararlo contra un techo absoluto
+    —«que el trozo tardío siga cabiendo en 5 ms»— dejaba pasar una
+    degradación de veinte veces sin decir nada, porque el presupuesto de
+    tiempo real es tan holgado que la absorbe entera. Lo que interesa vigilar
+    aquí no es si cabe, sino si crece."""
     engine = EcgEngine(rhythm_id="sinus_normal", seed=20260725)
-    early = elapsed_s(lambda: engine.generate(REALTIME_CHUNK_SAMPLES))
-    for _ in range(600):  # avanza un minuto de simulación
+    engine.generate(REALTIME_CHUNK_SAMPLES)  # descarta el coste de arranque
+    early_s = _median_chunk_s(engine)
+
+    for _ in range(6000):  # diez minutos de simulación
         engine.generate(REALTIME_CHUNK_SAMPLES)
-    late = elapsed_s(lambda: engine.generate(REALTIME_CHUNK_SAMPLES))
-    assert late < max(early * 10, 0.005)
+
+    late_s = _median_chunk_s(engine)
+    assert late_s < early_s * 4.0, (
+        f"el coste por trozo pasó de {early_s * 1000:.3f} ms a "
+        f"{late_s * 1000:.3f} ms tras diez minutos de simulación"
+    )
 
 
 def test_ten_minutes_of_simulation_produce_finite_values_throughout():
