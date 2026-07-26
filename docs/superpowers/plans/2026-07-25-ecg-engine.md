@@ -2725,15 +2725,25 @@ def grid() -> np.ndarray:
 
 
 def test_time_grid_spacing_matches_the_sample_rate():
-    t = time_grid(0.0, 500, 500)
+    t = time_grid(0, 500, 500)
     assert t.size == 500
     assert t[0] == pytest.approx(0.0)
     assert np.diff(t) == pytest.approx(np.full(499, 1 / 500))
 
 
-def test_time_grid_starts_at_the_requested_offset():
-    t = time_grid(37.5, 10, 500)
+def test_time_grid_starts_at_the_requested_sample():
+    t = time_grid(18750, 10, 500)
     assert t[0] == pytest.approx(37.5)
+
+
+def test_time_grid_chunks_join_bit_for_bit():
+    """La rejilla se construye desde el índice de muestra justamente para
+    esto. Con `t0_s + i/sr` la muestra 2001 sale de dos redondeos distintos
+    según se pida entera o por trozos, y difiere en un ULP; ese error se
+    amplifica al pasar por las gaussianas."""
+    whole = time_grid(0, 2500, 500)
+    tail = time_grid(2000, 500, 500)
+    assert np.array_equal(whole[2000:], tail)
 
 
 def test_render_margin_covers_a_full_t_wave():
@@ -2888,9 +2898,22 @@ DEFAULT_PROJECTIONS: dict[EventKind, LeadProjection] = {
 }
 
 
-def time_grid(t0_s: float, n_samples: int, sample_rate_hz: int) -> np.ndarray:
-    """Rejilla temporal absoluta de `n_samples` muestras desde `t0_s`."""
-    return t0_s + np.arange(n_samples, dtype=np.float64) / float(sample_rate_hz)
+def time_grid(
+    start_index: int, n_samples: int, sample_rate_hz: int
+) -> np.ndarray:
+    """Rejilla temporal absoluta de `n_samples` muestras desde `start_index`.
+
+    Toma el **índice de muestra**, no un instante en segundos, y ese detalle
+    es lo que hace que dos trozos consecutivos empalmen de forma exacta.
+    Construida como `t0_s + i/sr`, la muestra 2001 se calcula como
+    `4,0 + 1/500` dentro de un trozo y como `2001/500` en el render completo:
+    dos redondeos distintos que difieren en un ULP. Calculada como
+    `(índice + i)/sr` la operación es la misma en ambos casos y el resultado
+    es idéntico bit a bit.
+    """
+    return (start_index + np.arange(n_samples, dtype=np.float64)) / float(
+        sample_rate_hz
+    )
 
 
 def _trace_for_event(t_s: np.ndarray, event: CardiacEvent) -> np.ndarray:
@@ -3276,7 +3299,11 @@ class BeatBasedSource:
     def render(
         self, t0_s: float, n_samples: int, sample_rate_hz: int
     ) -> np.ndarray:
-        t_s = time_grid(t0_s, n_samples, sample_rate_hz)
+        # `t0_s` siempre cae sobre la rejilla de muestreo, porque el motor lo
+        # deriva de un contador de muestras. Recuperar ese entero es lo que
+        # permite que los trozos empalmen sin arrastrar error de redondeo.
+        start_index = round(t0_s * sample_rate_hz)
+        t_s = time_grid(start_index, n_samples, sample_rate_hz)
         window_end_s = t0_s + n_samples / float(sample_rate_hz)
         # El margen es imprescindible: la T de un latido anterior a la ventana
         # sigue contribuyendo dentro de ella.
@@ -3340,7 +3367,11 @@ class VentricularFibrillationSource:
     def render(
         self, t0_s: float, n_samples: int, sample_rate_hz: int
     ) -> np.ndarray:
-        t_s = time_grid(t0_s, n_samples, sample_rate_hz)
+        # `t0_s` siempre cae sobre la rejilla de muestreo, porque el motor lo
+        # deriva de un contador de muestras. Recuperar ese entero es lo que
+        # permite que los trozos empalmen sin arrastrar error de redondeo.
+        start_index = round(t0_s * sample_rate_hz)
+        t_s = time_grid(start_index, n_samples, sample_rate_hz)
         trace = np.zeros_like(t_s)
         for phase, detune, weight in zip(
             self._phases, self._detunes, self._weights
@@ -4452,10 +4483,16 @@ def test_consecutive_chunks_join_without_a_discontinuity():
 
 
 def test_chunked_generation_equals_a_single_large_generation():
+    """La tolerancia es física, no de conveniencia. La rejilla se construye
+    desde el índice de muestra, así que los trozos empalman de forma exacta;
+    esta cota deja margen por si alguna ruta futura reintroduce redondeo.
+    Un ECG real de 16 bits tiene un bit menos significativo de unos
+    1,5·10⁻⁷ V, cien veces por encima de este umbral: cualquier diferencia
+    que este test tolere es indetectable en un aparato."""
     whole = engine().generate(2500)
     chunked_engine = engine()
     chunks = [chunked_engine.generate(500) for _ in range(5)]
-    assert np.allclose(whole, np.concatenate(chunks, axis=1), atol=1e-12)
+    assert np.allclose(whole, np.concatenate(chunks, axis=1), atol=1e-9)
 
 
 def test_same_seed_and_params_reproduce_the_signal_bit_for_bit():
@@ -4482,10 +4519,14 @@ def test_update_params_changes_the_rate_without_restarting():
     eng = engine()
     eng.generate(2500)
     t_before = eng.t_s
-    eng.update_params(EngineParams(heart_rate_hz=150 / 60))
+    # 100 lpm está dentro del rango editable del ritmo sinusal normal
+    # (60-100). Pedir más lo recortaría, que es lo que comprueba el test
+    # siguiente: aquí lo que se verifica es que el cambio se aplica sin
+    # reiniciar el reloj.
+    eng.update_params(EngineParams(heart_rate_hz=100 / 60))
     eng.generate(2500)
     assert eng.t_s == pytest.approx(t_before + 5.0)
-    assert eng.params.heart_rate_hz == pytest.approx(150 / 60)
+    assert eng.params.heart_rate_hz == pytest.approx(100 / 60)
 
 
 def test_update_params_clamps_the_rate_to_the_rhythm_range():
@@ -4665,7 +4706,8 @@ class EcgEngine:
             raise ValueError(f"n_samples debe ser positivo, recibido {n_samples}")
         t0_s = self.t_s
         signal = self._source.render(t0_s, n_samples, self._sample_rate_hz)
-        t_s = time_grid(t0_s, n_samples, self._sample_rate_hz)
+        # El orquestador sí tiene el índice a mano, así que lo usa directo.
+        t_s = time_grid(self._sample_index, n_samples, self._sample_rate_hz)
         signal = apply_noise(
             signal,
             t_s,
