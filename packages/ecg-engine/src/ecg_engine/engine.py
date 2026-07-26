@@ -101,7 +101,15 @@ class EcgEngine:
         self._source.set_rate_hz(self._params.heart_rate_hz)
 
     def reset(self) -> None:
-        """Vuelve al origen. Con la misma semilla, repite la señal exacta."""
+        """Devuelve el reloj al origen y reinicia los flujos aleatorios.
+
+        Con la misma semilla repite la señal exacta **si los parámetros no
+        han cambiado**. Lo que se reinicia es el tiempo y la aleatoriedad, no
+        la configuración: si antes hubo un `update_params`, la señal vuelve a
+        empezar con la frecuencia vigente, no con la del catálogo. Es lo que
+        conviene en un simulador —rebobinar sin perder el caso montado— pero
+        conviene no confundirlo con volver al estado de fábrica.
+        """
         self._sample_index = 0
         self._source = self._build_source()
 

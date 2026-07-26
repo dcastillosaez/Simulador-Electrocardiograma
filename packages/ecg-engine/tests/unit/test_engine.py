@@ -113,6 +113,21 @@ def test_reset_returns_the_clock_and_the_signal_to_the_origin():
     assert np.array_equal(eng.generate(1000), first)
 
 
+def test_reset_keeps_the_parameters_in_force():
+    """`reset` rebobina el tiempo y la aleatoriedad, no la configuración. En
+    un simulador eso es lo útil: volver al inicio del caso sin tener que
+    montarlo otra vez. Pero conviene que quede fijado, porque el nombre
+    invita a pensar en un estado de fábrica que no es el que hay."""
+    eng = engine()
+    eng.update_params(EngineParams(heart_rate_hz=100 / 60))
+    eng.generate(1000)
+    eng.reset()
+    assert eng.params.heart_rate_hz == pytest.approx(100 / 60)
+
+    fresh = engine()
+    assert not np.array_equal(eng.generate(1000), fresh.generate(1000))
+
+
 def test_generate_rejects_a_non_positive_sample_count():
     with pytest.raises(ValueError, match="n_samples"):
         engine().generate(0)
