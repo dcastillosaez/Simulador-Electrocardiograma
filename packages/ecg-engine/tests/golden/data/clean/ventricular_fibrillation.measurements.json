@@ -1,0 +1,9 @@
+{
+  "heart_rate_hz": null,
+  "rr_mean_s": null,
+  "rr_std_s": null,
+  "pr_mean_s": null,
+  "qrs_duration_s": null,
+  "qt_s": null,
+  "r_amplitude_lead_ii_v": 0.0004904759184074864
+}
