@@ -81,7 +81,11 @@ class BeatBasedSource:
     def render(
         self, t0_s: float, n_samples: int, sample_rate_hz: int
     ) -> np.ndarray:
-        t_s = time_grid(t0_s, n_samples, sample_rate_hz)
+        # `t0_s` siempre cae sobre la rejilla de muestreo, porque el motor lo
+        # deriva de un contador de muestras. Recuperar ese entero es lo que
+        # permite que los trozos empalmen sin arrastrar error de redondeo.
+        start_index = round(t0_s * sample_rate_hz)
+        t_s = time_grid(start_index, n_samples, sample_rate_hz)
         window_end_s = t0_s + n_samples / float(sample_rate_hz)
         # El margen es imprescindible: la T de un latido anterior a la ventana
         # sigue contribuyendo dentro de ella.
@@ -145,7 +149,11 @@ class VentricularFibrillationSource:
     def render(
         self, t0_s: float, n_samples: int, sample_rate_hz: int
     ) -> np.ndarray:
-        t_s = time_grid(t0_s, n_samples, sample_rate_hz)
+        # `t0_s` siempre cae sobre la rejilla de muestreo, porque el motor lo
+        # deriva de un contador de muestras. Recuperar ese entero es lo que
+        # permite que los trozos empalmen sin arrastrar error de redondeo.
+        start_index = round(t0_s * sample_rate_hz)
+        t_s = time_grid(start_index, n_samples, sample_rate_hz)
         trace = np.zeros_like(t_s)
         for phase, detune, weight in zip(
             self._phases, self._detunes, self._weights

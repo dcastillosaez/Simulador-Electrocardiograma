@@ -45,9 +45,20 @@ DEFAULT_PROJECTIONS: dict[EventKind, LeadProjection] = {
 }
 
 
-def time_grid(t0_s: float, n_samples: int, sample_rate_hz: int) -> np.ndarray:
-    """Rejilla temporal absoluta de `n_samples` muestras desde `t0_s`."""
-    return t0_s + np.arange(n_samples, dtype=np.float64) / float(sample_rate_hz)
+def time_grid(start_index: int, n_samples: int, sample_rate_hz: int) -> np.ndarray:
+    """Rejilla temporal absoluta de `n_samples` muestras desde `start_index`.
+
+    Se construye desde el índice de muestra, `(start_index + i) / sample_rate_hz`,
+    y no desde un tiempo en segundos ya sumado. Es la misma operación tanto si
+    se generan 2500 muestras de una vez como si se generan en cinco trozos de
+    500: el resultado es idéntico bit a bit en la frontera de cada trozo.
+    Construir la rejilla como `t0_s + i / sample_rate_hz` sumaría dos
+    redondeos de punto flotante distintos según la ruta (uno para `t0_s`, otro
+    para el índice dentro del array), y esa diferencia de un ULP se amplifica
+    al pasar por las gaussianas de `waveform.py` y la modulación de
+    `variability.amplitude_scale`.
+    """
+    return (start_index + np.arange(n_samples, dtype=np.float64)) / float(sample_rate_hz)
 
 
 def _trace_for_event(t_s: np.ndarray, event: CardiacEvent) -> np.ndarray:

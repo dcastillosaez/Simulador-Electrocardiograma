@@ -32,19 +32,28 @@ def p_at(t_s: float, index: int = 0) -> CardiacEvent:
 
 @pytest.fixture
 def grid() -> np.ndarray:
-    return time_grid(0.0, 1000, 500)  # 2 s
+    return time_grid(0, 1000, 500)  # 2 s
 
 
 def test_time_grid_spacing_matches_the_sample_rate():
-    t = time_grid(0.0, 500, 500)
+    t = time_grid(0, 500, 500)
     assert t.size == 500
     assert t[0] == pytest.approx(0.0)
     assert np.diff(t) == pytest.approx(np.full(499, 1 / 500))
 
 
-def test_time_grid_starts_at_the_requested_offset():
-    t = time_grid(37.5, 10, 500)
+def test_time_grid_starts_at_the_time_implied_by_the_start_index():
+    t = time_grid(18750, 10, 500)
     assert t[0] == pytest.approx(37.5)
+
+
+def test_time_grid_splices_bit_for_bit_across_chunk_boundaries():
+    """La rejilla se construye desde el índice de muestra: una generación
+    completa y un trozo que arranca en la misma muestra deben coincidir bit a
+    bit, sin el error de redondeo que introducía sumar `t0_s` ya redondeado."""
+    whole = time_grid(0, 2500, 500)
+    chunk = time_grid(2000, 500, 500)
+    assert np.array_equal(whole[2000:], chunk)
 
 
 def test_render_margin_covers_a_full_t_wave():
