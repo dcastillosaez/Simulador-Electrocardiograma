@@ -3377,6 +3377,31 @@ git commit -m "Añadir fuentes de señal por eventos y de fibrilación ventricul
 
 ---
 
+### Frecuencia de mando y pulso
+
+Cada `RhythmDefinition` declara `ventricular_rate_hz` además de su
+`heart_rate_hz`. Coinciden en los ritmos de conducción 1:1 y divergen justo
+donde importa:
+
+| Ritmo | Mando (lpm) | Pulso (lpm) | Por qué difieren |
+|---|---|---|---|
+| Sinusal normal | 70 | 70 | conducción 1:1 |
+| Taquicardia sinusal | 120 | 120 | conducción 1:1 |
+| Bradicardia sinusal | 48 | 48 | conducción 1:1 |
+| Fibrilación auricular | 80 | 80 | el mando ya es la respuesta ventricular |
+| Flutter auricular | 150 | 150 | el mando ya es la respuesta; la aurícula va a 300 |
+| TSV | 180 | 180 | conducción 1:1 |
+| Taquicardia ventricular | 180 | 180 | el foco ventricular es el mando |
+| Fibrilación ventricular | — | 0 | sin frecuencia medible |
+| BAV de 1.er grado | 70 | 70 | conducción 1:1, solo con PR largo |
+| **BAV 2.º Mobitz I** | **75** | **56,25** | cae una P de cada cuatro |
+| **BAV completo** | **75** | **40** | las aurículas no conducen; manda el escape |
+| IAM inferior | 78 | 78 | conducción 1:1 |
+
+Las dos filas en negrita son la razón de que el campo exista.
+
+---
+
 ### Task 13: El catálogo de ritmos
 
 Aquí es donde se comprueba si la arquitectura funciona. Si algún ritmo obliga a escribir un `if`, el diseño ha fallado y hay que arreglarlo antes de seguir.
@@ -3666,7 +3691,22 @@ class ParameterRange:
 
 @dataclass(frozen=True, slots=True)
 class RhythmDefinition:
-    """Contrato completo de un ritmo del catálogo."""
+    """Contrato completo de un ritmo del catálogo.
+
+    `heart_rate_hz`, dentro de `default_parameters` y `editable_parameters`,
+    es la **frecuencia de mando**: el valor que el usuario mueve y que el
+    motor propaga a quien gobierne el ritmo. En los ritmos sinusales es
+    también el pulso del paciente, pero en los bloqueos no: en un Mobitz I
+    manda la frecuencia sinusal y uno de cada cuatro latidos no llega al
+    ventrículo, y en un bloqueo completo las aurículas van a su aire mientras
+    el pulso lo marca el escape.
+
+    `ventricular_rate_hz` es ese pulso: lo que un clínico llama frecuencia
+    cardíaca y lo que una interfaz debe mostrar. Separarlos no es purismo.
+    Mostrar 75 lpm en un bloqueo AV completo —la frecuencia auricular— cuando
+    el paciente tiene un pulso de 40 basta para que un cardiólogo descarte el
+    simulador de un vistazo.
+    """
 
     rhythm_id: str
     display_name: str
@@ -3674,6 +3714,7 @@ class RhythmDefinition:
     build_source: Callable[[np.random.Generator], SignalSource]
     default_parameters: Mapping[str, float]
     editable_parameters: Mapping[str, ParameterRange]
+    ventricular_rate_hz: float
     clinical_description: str
     references: tuple[str, ...]
     allowed_overlays: tuple[str, ...] = field(default=())
