@@ -4207,6 +4207,27 @@ def test_r_amplitude_is_read_from_lead_two():
     )
 
 
+def test_mixed_ventricular_morphologies_report_no_single_qrs():
+    """Si un trazado mezcla latidos conducidos y de escape no existe «el»
+    QRS: hay dos morfologías conviviendo. Devolver la del primero sería un
+    número arbitrario disfrazado de medida, exactamente igual que promediar
+    un PR disociado. La arquitectura ya permite esa mezcla —una política de
+    conducción más un tren de escape en la misma fuente—, así que la medida
+    tiene que estar preparada aunque hoy ningún ritmo del catálogo la use."""
+    events = [
+        CardiacEvent(
+            kind=EventKind.VENTRICULAR, t_s=0.0, template_id="normal_qrst", index=0
+        ),
+        CardiacEvent(
+            kind=EventKind.VENTRICULAR, t_s=1.0, template_id="escape_qrst", index=1
+        ),
+    ]
+    result = measure(events, np.zeros((N_LEADS, 1000)), 500)
+    assert math.isnan(result.qrs_duration_s)
+    assert math.isnan(result.qt_s)
+    assert not math.isnan(result.heart_rate_hz)  # la frecuencia sí es medible
+
+
 def test_measurements_without_events_report_nan_timings():
     """La fibrilación ventricular no tiene eventos discretos que medir."""
     signal = np.zeros((N_LEADS, 5000))
@@ -4334,11 +4355,17 @@ def measure(
     rr_std_s = float(rr.std()) if rr.size else math.nan
 
     ventricular_events = [e for e in events if e.kind is EventKind.VENTRICULAR]
-    if ventricular_events:
-        template = get_template(ventricular_events[0].template_id)
+    template_ids = {e.template_id for e in ventricular_events}
+    if len(template_ids) == 1:
+        template = get_template(next(iter(template_ids)))
         qrs_s = qrs_duration_s(template)
         qt_s = qt_duration_s(template)
     else:
+        # Sin latidos ventriculares no hay nada que medir. Y con latidos de
+        # morfología distinta en el mismo trazado —conducidos y de escape
+        # conviviendo— tampoco existe «el» QRS: hay dos. Devolver el del
+        # primero sería un número arbitrario con apariencia de medida, el
+        # mismo error que el PR evita ante una disociación.
         qrs_s = math.nan
         qt_s = math.nan
 
