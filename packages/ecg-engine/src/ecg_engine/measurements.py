@@ -83,11 +83,17 @@ def measure(
     rr_std_s = float(rr.std()) if rr.size else math.nan
 
     ventricular_events = [e for e in events if e.kind is EventKind.VENTRICULAR]
-    if ventricular_events:
-        template = get_template(ventricular_events[0].template_id)
+    template_ids = {e.template_id for e in ventricular_events}
+    if len(template_ids) == 1:
+        template = get_template(next(iter(template_ids)))
         qrs_s = qrs_duration_s(template)
         qt_s = qt_duration_s(template)
     else:
+        # Sin latidos ventriculares no hay nada que medir. Y con latidos de
+        # morfología distinta en el mismo trazado —conducidos y de escape
+        # conviviendo— tampoco existe «el» QRS: hay dos. Devolver el del
+        # primero sería un número arbitrario con apariencia de medida, el
+        # mismo error que el PR evita ante una disociación.
         qrs_s = math.nan
         qt_s = math.nan
 
