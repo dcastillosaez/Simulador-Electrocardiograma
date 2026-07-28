@@ -1,6 +1,7 @@
 """Requiere Postgres real: `docker compose up -d db` antes de ejecutar."""
 
 import json
+import time
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -169,13 +170,34 @@ def test_second_start_replaces_the_first_session_cleanly():
             second_session_id = second["session_id"]
             assert second_session_id != first_session_id
 
+            # `session_id`/`sequence_number` por sí solos no bastan para
+            # detectar un productor huérfano: `stream_chunks` lee
+            # `manager.session_id` en vivo en cada iteración (así que una
+            # tarea vieja ya escribiría con el `session_id` nuevo tras el
+            # reemplazo) y el incremento de `_sequence_number` es síncrono,
+            # así que sigue siendo monótono y sin duplicados aunque hubiera
+            # dos productores corriendo a la vez. Lo único que delata un
+            # segundo productor huérfano es la CADENCIA: el doble de
+            # productores llenan el outbox al doble de velocidad.
+            start_s = time.monotonic()
             decoded_frames = [decode_frame(ws.receive_bytes()) for _ in range(10)]
+            elapsed_s = time.monotonic() - start_s
+
             session_ids = {str(f.session_id) for f in decoded_frames}
             assert session_ids == {second_session_id}
 
             sequence_numbers = [f.sequence_number for f in decoded_frames]
             assert sequence_numbers == sorted(sequence_numbers)
             assert len(set(sequence_numbers)) == len(sequence_numbers)
+
+            # A ~10 frames/s (CHUNK_INTERVAL_S=0.1s) con un solo productor,
+            # 10 frames tardan ~1,0s reales. Con el productor viejo huérfano
+            # sumándose, tardarían ~0,5s. 0,7s separa ambos casos con margen
+            # de sobra a cada lado para el jitter del scheduler.
+            assert elapsed_s > 0.7, (
+                f"10 frames llegaron en {elapsed_s:.3f}s: sugiere mas de "
+                "un productor escribiendo en el outbox tras el start repetido"
+            )
 
 
 def test_engine_failure_during_streaming_sends_error_and_closes_with_1011():
