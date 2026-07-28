@@ -143,10 +143,22 @@ async def simulation_ws(websocket: WebSocket) -> None:
         # cancelación del cliente), así que si la conexión a la base de
         # datos está realmente muerta, `commit()` colgaría para siempre sin
         # el `fail_after`: mejor fallar en 5 s que no fallar nunca.
-        with anyio.CancelScope(shield=True):
-            with anyio.fail_after(5.0):
-                async with session_factory() as db:
-                    await persist_session(db, manager, settings)
+        try:
+            with anyio.CancelScope(shield=True):
+                with anyio.fail_after(5.0):
+                    async with session_factory() as db:
+                        await persist_session(db, manager, settings)
+        except TimeoutError:
+            # `_maybe_persist()` se llama tanto al recibir `stop` como, otra
+            # vez, en el `finally` de `simulation_ws()`. Si no marcamos
+            # `persisted` aquí, un timeout en el primer intento haría que el
+            # `finally` reintente contra la misma conexión muerta y deje
+            # escapar un segundo `TimeoutError` sin capturar, tumbando el
+            # handler del WebSocket en vez de cerrarlo con gracia.
+            logger.error(
+                "Tiempo de espera agotado al persistir la sesión %s tras 5s",
+                manager.session_id,
+            )
         persisted = True
 
     try:
