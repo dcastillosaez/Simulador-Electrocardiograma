@@ -2559,10 +2559,13 @@ Aquí se conecta todo lo anterior. Dos trampas que conviene conocer antes de toc
 
 **Un fallo del motor a mitad de streaming no llega por el mismo camino que un fallo al despachar un mensaje.** El bucle de producción de chunks corre en una tarea de fondo; si el motor lanza ahí, nadie lo ve hasta que se engancha un `done_callback` a esa tarea. Sin eso, el cliente se quedaría sin datos y sin explicación.
 
+**El arreglo de la trampa anterior tiene un efecto secundario en un test de la Tarea 2.** Fijar `DATABASE_URL`/`ENGINE_COMMIT` en `os.environ` desde `conftest.py` los deja puestos para **todo el proceso** de pytest, no solo para los tests de integración. `test_settings_have_sane_defaults` (Tarea 2) construye `Settings(_env_file=None)` esperando los valores por defecto — `_env_file=None` solo desactiva la lectura de `.env`, no la del entorno, así que ese test empieza a fallar en cuanto corre junto a la suite de integración. Hay que limpiar esas dos variables al principio del test con `monkeypatch.delenv(..., raising=False)`.
+
 **Files:**
 - Create: `apps/api/src/ecg_api/routers/simulation_ws.py`
 - Modify: `apps/api/src/ecg_api/main.py`
 - Modify: `apps/api/tests/integration/conftest.py`
+- Modify: `apps/api/tests/unit/test_config.py`
 - Test: `apps/api/tests/integration/test_simulation_ws.py`
 
 **Interfaces:**
@@ -2605,10 +2608,16 @@ from ecg_api.main import app
 def _next_json_message(ws) -> dict:
     """Descarta cualquier frame binario en tránsito y devuelve el primer
     mensaje de texto (JSON). Tras `stop` puede haber uno o dos frames
-    binarios ya en vuelo antes de que llegue `stopped`."""
+    binarios ya en vuelo antes de que llegue `stopped`.
+
+    Los mensajes que el servidor envía al cliente llevan `type:
+    "websocket.send"` en el sobre ASGI (`"websocket.receive"` es el tipo
+    para los mensajes que el cliente envía al servidor) — de ahí que se
+    compruebe contra `"websocket.send"` y no contra `"websocket.receive"`.
+    """
     while True:
         event = ws.receive()
-        if event.get("type") == "websocket.receive" and "text" in event:
+        if event.get("type") == "websocket.send" and "text" in event:
             return json.loads(event["text"])
 
 
@@ -2675,11 +2684,14 @@ def test_update_changes_the_rate_observably():
             ws.receive_json()
 
             ws.send_json(
-                {"type": "update", "params": {"heart_rate_hz": 2.0}}
+                {"type": "update", "params": {"heart_rate_hz": 1.5}}
             )
             updated = ws.receive_json()
             assert updated["type"] == "updated"
-            assert updated["params"]["heart_rate_hz"] == 2.0
+            # 1,5 Hz = 90 lpm, dentro del rango editable de sinus_normal
+            # (60-100 lpm). 2,0 Hz se recortaría al máximo del ritmo y la
+            # comparación de igualdad nunca sería cierta.
+            assert updated["params"]["heart_rate_hz"] == 1.5
 
 
 def test_pause_stops_frames_and_resume_continues_them():
@@ -3026,6 +3038,25 @@ app.include_router(simulation_ws_router)
 
 Los tests de las Tareas 1 y 5 usan `TestClient(app)` sin bloque `with`, que no dispara el ciclo de vida — y ni `/api/health` ni `/api/rhythms` leen `app.state`, así que siguen en verde sin tocarlos.
 
+Modificar `apps/api/tests/unit/test_config.py`, limpiando las variables de entorno que ahora fija `conftest.py` de integración:
+
+```python
+def test_settings_have_sane_defaults(monkeypatch):
+    # `tests/integration/conftest.py` fija `DATABASE_URL`/`ENGINE_COMMIT` en
+    # el entorno del proceso de pytest para que `lifespan` apunte siempre a
+    # la base de test (ver su comentario). `_env_file=None` solo desactiva
+    # la lectura de `.env`, no la del entorno, así que hace falta limpiarlas
+    # aquí explícitamente para probar los valores por defecto reales cuando
+    # los tests de esta tarea y los de integración corren en la misma sesión.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("ENGINE_COMMIT", raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.engine_commit == "dev"
+    assert "postgresql+asyncpg://" in settings.database_url
+```
+
+El resto del fichero (`test_settings_read_from_environment`) no cambia.
+
 - [ ] **Step 4: Run test to verify it passes**
 
 Primero confirma que nada se rompió:
@@ -3041,7 +3072,7 @@ Expected: PASS, 7 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api/src/ecg_api/routers/simulation_ws.py apps/api/src/ecg_api/main.py apps/api/tests/integration/conftest.py apps/api/tests/integration/test_simulation_ws.py
+git add apps/api/src/ecg_api/routers/simulation_ws.py apps/api/src/ecg_api/main.py apps/api/tests/integration/conftest.py apps/api/tests/unit/test_config.py apps/api/tests/integration/test_simulation_ws.py
 git commit -m "Conectar el websocket de simulacion: la ruta caliente completa"
 ```
 
