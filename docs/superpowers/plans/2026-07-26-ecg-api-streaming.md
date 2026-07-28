@@ -3388,7 +3388,7 @@ def test_full_simulation_lifecycle_end_to_end():
                     "type": "start",
                     "rhythm_id": "sinus_normal",
                     "seed": 20260725,
-                    "params": {"heart_rate_hz": 70 / 60},
+                    "params": {"heart_rate_hz": 60 / 60},
                 }
             )
             started = ws.receive_json()
@@ -3407,17 +3407,22 @@ def test_full_simulation_lifecycle_end_to_end():
             assert sequence_numbers == list(range(10))
 
             # 3. `update` cambia la frecuencia, y el cambio es observable:
-            #    el RR medio de los latidos que siguen se acorta.
+            #    el RR medio de los latidos que siguen se acorta. Se usa
+            #    100 lpm, el extremo superior de editable_parameters para
+            #    sinus_normal (60-100 lpm): 150 lpm queda fuera de rango
+            #    clínico para este ritmo y el motor lo recortaría en
+            #    silencio a 100, haciendo que esta aserción fallase contra
+            #    un valor que el propio catálogo nunca deja aplicar.
             ws.send_json(
-                {"type": "update", "params": {"heart_rate_hz": 150 / 60}}
+                {"type": "update", "params": {"heart_rate_hz": 100 / 60}}
             )
             updated = ws.receive_json()
             assert updated["type"] == "updated"
-            assert updated["params"]["heart_rate_hz"] == 150 / 60
+            assert updated["params"]["heart_rate_hz"] == 100 / 60
 
             more_frames = [decode_frame(ws.receive_bytes()) for _ in range(30)]
             fast_signal = _concat_channel_ii(more_frames)
-            assert _dominant_beat_period_s(fast_signal) < 60 / 150 * 1.5
+            assert _dominant_beat_period_s(fast_signal) < 60 / 100 * 1.5
 
             # 4. `stop` cierra la sesión con una duración positiva.
             ws.send_json({"type": "stop"})
@@ -3447,7 +3452,7 @@ def test_full_simulation_lifecycle_end_to_end():
         assert row is not None
         assert row.rhythm_id == "sinus_normal"
         assert row.seed == 20260725
-        assert row.params["heart_rate_hz"] == 150 / 60
+        assert row.params["heart_rate_hz"] == 100 / 60
         assert float(row.duration_s) > 0.0
 
 
