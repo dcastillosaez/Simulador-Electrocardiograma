@@ -36,6 +36,8 @@ async def test_frames_have_increasing_sequence_numbers_and_the_right_session():
     await _run_briefly(manager, outbox, n_iterations=5)
 
     n_frames = len(outbox)
+    assert n_frames > 0  # si no hay frames, las comprobaciones de abajo son
+    # verdad por vacuidad y el test no prueba nada
     decoded = [decode_frame(await outbox.get()) for _ in range(n_frames)]
     sequence_numbers = [d.sequence_number for d in decoded]
     assert sequence_numbers == sorted(sequence_numbers)
@@ -49,6 +51,7 @@ async def test_paused_manager_produces_no_new_frames():
 
     await _run_briefly(manager, outbox, n_iterations=3)
     frames_before_pause = len(outbox)
+    assert frames_before_pause > 0  # si no, "no crece" no significa nada
     manager.pause()
     await _run_briefly(manager, outbox, n_iterations=3)
 
