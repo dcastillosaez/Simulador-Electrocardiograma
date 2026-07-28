@@ -43,19 +43,35 @@ def alembic_config() -> Config:
     return cfg
 
 
+def _inspect_tables() -> list[str]:
+    engine = create_async_engine(TEST_DATABASE_URL)
+
+    async def _run():
+        async with engine.connect() as conn:
+            return await conn.run_sync(
+                lambda sync_conn: inspect(sync_conn).get_table_names()
+            )
+
+    return asyncio.run(_run())
+
+
 def test_migration_creates_rhythms_and_sessions_tables(alembic_config):
     command.upgrade(alembic_config, "head")
     try:
-        engine = create_async_engine(TEST_DATABASE_URL)
-
-        async def _inspect():
-            async with engine.connect() as conn:
-                return await conn.run_sync(
-                    lambda sync_conn: inspect(sync_conn).get_table_names()
-                )
-
-        tables = asyncio.run(_inspect())
+        tables = _inspect_tables()
         assert "rhythms" in tables
         assert "sessions" in tables
     finally:
         command.downgrade(alembic_config, "base")
+
+
+def test_downgrade_removes_both_tables(alembic_config):
+    """El `finally` de arriba ya ejecuta el downgrade como limpieza, pero
+    limpiar no es lo mismo que verificar: sin este test, un downgrade roto
+    -orden de DROP invertido por la FK, o que no borre nada- pasaría
+    inadvertido."""
+    command.upgrade(alembic_config, "head")
+    command.downgrade(alembic_config, "base")
+    tables = _inspect_tables()
+    assert "rhythms" not in tables
+    assert "sessions" not in tables
