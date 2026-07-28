@@ -8,6 +8,19 @@ que no hace falta volver a migrar ni truncar tablas entre tests.
 
 from __future__ import annotations
 
+import os
+
+# `get_settings()` está cacheada con `lru_cache`: la primera llamada en todo
+# el proceso de pytest fija los valores para el resto de la sesión. Fijar
+# aquí la URL de la base de test, antes de que ningún módulo de la app
+# importe `ecg_api.config`, es lo que garantiza que el WebSocket y los
+# routers REST —que la leen a través del ciclo de vida de la app— apunten
+# siempre a `ecg_simulator_test`, sin importar qué test se ejecute primero.
+os.environ.setdefault(
+    "DATABASE_URL", "postgresql+asyncpg://ecg:ecg@localhost:5432/ecg_simulator_test"
+)
+os.environ.setdefault("ENGINE_COMMIT", "test")
+
 from collections.abc import AsyncIterator
 
 import psycopg2
