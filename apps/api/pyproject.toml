@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "httpx>=0.27"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "httpx>=0.27", "psycopg2-binary>=2.9"]
 
 [tool.uv.sources]
 ecg-engine = { path = "../../packages/ecg-engine", editable = true }
