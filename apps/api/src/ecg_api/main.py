@@ -11,8 +11,10 @@ from fastapi import FastAPI
 
 from .config import get_settings
 from .routers.health import router as health_router
+from .routers.rhythms import router as rhythms_router
 
 app = FastAPI(title="Simulador de ECG — API")
 app.state.settings = get_settings()
 
 app.include_router(health_router)
+app.include_router(rhythms_router)
