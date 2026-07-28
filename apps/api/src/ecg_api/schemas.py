@@ -190,3 +190,23 @@ def stopped_message(*, duration_s: float) -> dict:
 
 def error_message(*, code: str, detail: str) -> dict:
     return {"type": "error", "code": code, "detail": detail}
+
+
+# --- REST: sesiones ---------------------------------------------------------
+
+import datetime as dt
+
+
+class SessionSummary(BaseModel):
+    id: uuid.UUID
+    rhythm_id: str
+    started_at: dt.datetime
+    duration_s: float | None
+
+
+class SessionDetail(SessionSummary):
+    params: dict
+    seed: int
+    engine_semver: str
+    engine_commit: str
+    ended_at: dt.datetime | None

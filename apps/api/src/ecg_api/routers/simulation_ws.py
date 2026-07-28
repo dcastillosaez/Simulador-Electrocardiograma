@@ -12,6 +12,7 @@ import asyncio
 import functools
 import logging
 
+import anyio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ecg_engine.types import DEFAULT_SAMPLE_RATE_HZ
@@ -132,8 +133,15 @@ async def simulation_ws(websocket: WebSocket) -> None:
         nonlocal persisted
         if persisted or not should_persist(manager):
             return
-        async with session_factory() as db:
-            await persist_session(db, manager, settings)
+        # `shield=True`: si el cliente cierra el socket justo tras enviar
+        # `stop` sin esperar el `stopped` de vuelta (como hacen los tests de
+        # REST que solo comprueban la sesión ya persistida), Starlette
+        # cancela esta corrutina al desconectar. Sin blindar la escritura,
+        # esa cancelación puede llegar a mitad de `session.commit()` y la
+        # sesión —que ya cumplió el umbral de 5 s— se pierde en silencio.
+        with anyio.CancelScope(shield=True):
+            async with session_factory() as db:
+                await persist_session(db, manager, settings)
         persisted = True
 
     try:

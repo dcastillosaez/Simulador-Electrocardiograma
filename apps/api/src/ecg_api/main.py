@@ -17,6 +17,7 @@ from .db.base import get_engine
 from .db.seed import seed_catalog
 from .routers.health import router as health_router
 from .routers.rhythms import router as rhythms_router
+from .routers.sessions import router as sessions_router
 from .routers.simulation_ws import router as simulation_ws_router
 
 
@@ -36,4 +37,5 @@ app = FastAPI(title="Simulador de ECG — API", lifespan=lifespan)
 
 app.include_router(health_router)
 app.include_router(rhythms_router)
+app.include_router(sessions_router)
 app.include_router(simulation_ws_router)
