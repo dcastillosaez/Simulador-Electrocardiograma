@@ -1,5 +1,3 @@
-import os
-
 from ecg_api.config import Settings
 
 
