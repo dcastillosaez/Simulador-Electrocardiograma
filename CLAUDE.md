@@ -8,7 +8,15 @@ Proyecto independiente dentro de `F:/Documentos/IA/Medicina/`, sin relación con
 
 **Alcance de análisis:** únicamente el contenido de `F:/Documentos/IA/Medicina/Simulador_Electrocardiograma/`.
 
-**Estado actual:** solo existe la especificación (`Instrucciones.md.txt`). No hay código todavía.
+**Estado actual:** fase 1 implementada. El paquete `packages/ecg-engine/` genera los doce ritmos del MVP en las doce derivaciones, de forma determinista, con 401 tests y una red de golden signals en tres niveles. Faltan la API y el frontend (planes B y C, sin escribir).
+
+Para ver lo que produce el motor sin montar nada más:
+
+```bash
+cd packages/ecg-engine && uv run --extra viz python tools/render_rhythms.py
+```
+
+Escribe los doce trazados en formato de papel de ECG en `tools/output/`.
 
 ## Objetivo del producto
 
