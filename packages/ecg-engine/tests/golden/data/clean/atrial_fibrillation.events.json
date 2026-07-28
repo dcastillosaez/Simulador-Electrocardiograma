@@ -2,7 +2,7 @@
   [
     "atrial",
     0.0,
-    "flutter_f",
+    "af_f",
     0
   ],
   [
@@ -12,501 +12,171 @@
     0
   ],
   [
-    "atrial",
-    0.142857,
-    "flutter_f",
-    1
-  ],
-  [
-    "atrial",
-    0.285714,
-    "flutter_f",
-    2
-  ],
-  [
-    "atrial",
-    0.428571,
-    "flutter_f",
-    3
-  ],
-  [
     "ventricular",
-    0.526336,
+    0.519629,
     "normal_qrst",
     1
   ],
   [
     "atrial",
-    0.571429,
-    "flutter_f",
+    0.600812,
+    "af_f",
+    1
+  ],
+  [
+    "ventricular",
+    0.959734,
+    "normal_qrst",
+    2
+  ],
+  [
+    "atrial",
+    1.237936,
+    "af_f",
+    2
+  ],
+  [
+    "atrial",
+    1.901336,
+    "af_f",
+    3
+  ],
+  [
+    "ventricular",
+    1.974377,
+    "normal_qrst",
+    3
+  ],
+  [
+    "atrial",
+    2.588837,
+    "af_f",
+    4
+  ],
+  [
+    "ventricular",
+    2.644232,
+    "normal_qrst",
     4
   ],
   [
     "atrial",
-    0.714286,
-    "flutter_f",
+    3.226815,
+    "af_f",
+    5
+  ],
+  [
+    "ventricular",
+    3.64535,
+    "normal_qrst",
     5
   ],
   [
     "atrial",
-    0.857143,
-    "flutter_f",
+    3.742668,
+    "af_f",
+    6
+  ],
+  [
+    "ventricular",
+    4.210697,
+    "normal_qrst",
     6
   ],
   [
     "atrial",
-    1.0,
-    "flutter_f",
+    4.710458,
+    "af_f",
+    7
+  ],
+  [
+    "ventricular",
+    5.038311,
+    "normal_qrst",
     7
   ],
   [
     "atrial",
-    1.142857,
-    "flutter_f",
+    5.485587,
+    "af_f",
     8
   ],
   [
     "ventricular",
-    1.245128,
+    5.899483,
     "normal_qrst",
-    2
+    8
   ],
   [
     "atrial",
-    1.285714,
-    "flutter_f",
+    6.279929,
+    "af_f",
+    9
+  ],
+  [
+    "ventricular",
+    6.54075,
+    "normal_qrst",
     9
   ],
   [
     "atrial",
-    1.428571,
-    "flutter_f",
+    6.559536,
+    "af_f",
     10
   ],
   [
     "atrial",
-    1.571429,
-    "flutter_f",
+    7.074676,
+    "af_f",
     11
   ],
   [
     "ventricular",
-    1.575429,
+    7.22262,
     "normal_qrst",
-    3
+    10
   ],
   [
     "atrial",
-    1.714286,
-    "flutter_f",
+    7.537682,
+    "af_f",
     12
   ],
   [
+    "ventricular",
+    7.909768,
+    "normal_qrst",
+    11
+  ],
+  [
     "atrial",
-    1.857143,
-    "flutter_f",
+    7.998504,
+    "af_f",
     13
   ],
   [
     "atrial",
-    2.0,
-    "flutter_f",
+    8.386103,
+    "af_f",
     14
   ],
   [
     "ventricular",
-    2.04413,
+    8.860904,
     "normal_qrst",
-    4
+    12
   ],
   [
     "atrial",
-    2.142857,
-    "flutter_f",
+    9.436159,
+    "af_f",
     15
   ],
   [
-    "atrial",
-    2.285714,
-    "flutter_f",
-    16
-  ],
-  [
-    "atrial",
-    2.428571,
-    "flutter_f",
-    17
-  ],
-  [
-    "atrial",
-    2.571429,
-    "flutter_f",
-    18
-  ],
-  [
-    "atrial",
-    2.714286,
-    "flutter_f",
-    19
-  ],
-  [
-    "atrial",
-    2.857143,
-    "flutter_f",
-    20
-  ],
-  [
     "ventricular",
-    2.889429,
-    "normal_qrst",
-    5
-  ],
-  [
-    "atrial",
-    3.0,
-    "flutter_f",
-    21
-  ],
-  [
-    "atrial",
-    3.142857,
-    "flutter_f",
-    22
-  ],
-  [
-    "atrial",
-    3.285714,
-    "flutter_f",
-    23
-  ],
-  [
-    "atrial",
-    3.428571,
-    "flutter_f",
-    24
-  ],
-  [
-    "atrial",
-    3.571429,
-    "flutter_f",
-    25
-  ],
-  [
-    "ventricular",
-    3.596935,
-    "normal_qrst",
-    6
-  ],
-  [
-    "atrial",
-    3.714286,
-    "flutter_f",
-    26
-  ],
-  [
-    "atrial",
-    3.857143,
-    "flutter_f",
-    27
-  ],
-  [
-    "atrial",
-    4.0,
-    "flutter_f",
-    28
-  ],
-  [
-    "atrial",
-    4.142857,
-    "flutter_f",
-    29
-  ],
-  [
-    "atrial",
-    4.285714,
-    "flutter_f",
-    30
-  ],
-  [
-    "atrial",
-    4.428571,
-    "flutter_f",
-    31
-  ],
-  [
-    "ventricular",
-    4.500096,
-    "normal_qrst",
-    7
-  ],
-  [
-    "atrial",
-    4.571429,
-    "flutter_f",
-    32
-  ],
-  [
-    "atrial",
-    4.714286,
-    "flutter_f",
-    33
-  ],
-  [
-    "atrial",
-    4.857143,
-    "flutter_f",
-    34
-  ],
-  [
-    "atrial",
-    5.0,
-    "flutter_f",
-    35
-  ],
-  [
-    "ventricular",
-    5.043522,
-    "normal_qrst",
-    8
-  ],
-  [
-    "atrial",
-    5.142857,
-    "flutter_f",
-    36
-  ],
-  [
-    "atrial",
-    5.285714,
-    "flutter_f",
-    37
-  ],
-  [
-    "atrial",
-    5.428571,
-    "flutter_f",
-    38
-  ],
-  [
-    "atrial",
-    5.571429,
-    "flutter_f",
-    39
-  ],
-  [
-    "atrial",
-    5.714286,
-    "flutter_f",
-    40
-  ],
-  [
-    "ventricular",
-    5.727096,
-    "normal_qrst",
-    9
-  ],
-  [
-    "atrial",
-    5.857143,
-    "flutter_f",
-    41
-  ],
-  [
-    "atrial",
-    6.0,
-    "flutter_f",
-    42
-  ],
-  [
-    "atrial",
-    6.142857,
-    "flutter_f",
-    43
-  ],
-  [
-    "ventricular",
-    6.181412,
-    "normal_qrst",
-    10
-  ],
-  [
-    "atrial",
-    6.285714,
-    "flutter_f",
-    44
-  ],
-  [
-    "atrial",
-    6.428571,
-    "flutter_f",
-    45
-  ],
-  [
-    "atrial",
-    6.571429,
-    "flutter_f",
-    46
-  ],
-  [
-    "atrial",
-    6.714286,
-    "flutter_f",
-    47
-  ],
-  [
-    "atrial",
-    6.857143,
-    "flutter_f",
-    48
-  ],
-  [
-    "ventricular",
-    6.942129,
-    "normal_qrst",
-    11
-  ],
-  [
-    "atrial",
-    7.0,
-    "flutter_f",
-    49
-  ],
-  [
-    "atrial",
-    7.142857,
-    "flutter_f",
-    50
-  ],
-  [
-    "atrial",
-    7.285714,
-    "flutter_f",
-    51
-  ],
-  [
-    "atrial",
-    7.428571,
-    "flutter_f",
-    52
-  ],
-  [
-    "atrial",
-    7.571429,
-    "flutter_f",
-    53
-  ],
-  [
-    "atrial",
-    7.714286,
-    "flutter_f",
-    54
-  ],
-  [
-    "ventricular",
-    7.76881,
-    "normal_qrst",
-    12
-  ],
-  [
-    "atrial",
-    7.857143,
-    "flutter_f",
-    55
-  ],
-  [
-    "atrial",
-    8.0,
-    "flutter_f",
-    56
-  ],
-  [
-    "atrial",
-    8.142857,
-    "flutter_f",
-    57
-  ],
-  [
-    "atrial",
-    8.285714,
-    "flutter_f",
-    58
-  ],
-  [
-    "atrial",
-    8.428571,
-    "flutter_f",
-    59
-  ],
-  [
-    "atrial",
-    8.571429,
-    "flutter_f",
-    60
-  ],
-  [
-    "atrial",
-    8.714286,
-    "flutter_f",
-    61
-  ],
-  [
-    "atrial",
-    8.857143,
-    "flutter_f",
-    62
-  ],
-  [
-    "ventricular",
-    8.941828,
+    9.739915,
     "normal_qrst",
     13
-  ],
-  [
-    "atrial",
-    9.0,
-    "flutter_f",
-    63
-  ],
-  [
-    "atrial",
-    9.142857,
-    "flutter_f",
-    64
-  ],
-  [
-    "atrial",
-    9.285714,
-    "flutter_f",
-    65
-  ],
-  [
-    "atrial",
-    9.428571,
-    "flutter_f",
-    66
-  ],
-  [
-    "atrial",
-    9.571429,
-    "flutter_f",
-    67
-  ],
-  [
-    "atrial",
-    9.714286,
-    "flutter_f",
-    68
-  ],
-  [
-    "ventricular",
-    9.764727,
-    "normal_qrst",
-    14
-  ],
-  [
-    "atrial",
-    9.857143,
-    "flutter_f",
-    69
   ]
 ]

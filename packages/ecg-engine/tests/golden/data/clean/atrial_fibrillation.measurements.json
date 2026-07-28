@@ -1,9 +1,9 @@
 {
-  "heart_rate_hz": 1.5,
-  "rr_mean_s": 0.6974804763531423,
-  "rr_std_s": 0.21158804747959634,
+  "heart_rate_hz": 1.4,
+  "rr_mean_s": 0.7492242364980982,
+  "rr_std_s": 0.17944586967735207,
   "pr_mean_s": null,
   "qrs_duration_s": 0.0865,
   "qt_s": 0.39975,
-  "r_amplitude_lead_ii_v": 0.0012619107393236628
+  "r_amplitude_lead_ii_v": 0.0010698582014711357
 }

@@ -82,3 +82,26 @@ def test_project_scales_each_lead_by_its_coefficient():
     projected = project(trace, NORMAL_AXIS_PROJECTION)
     for index, coefficient in enumerate(NORMAL_AXIS_PROJECTION.coefficients):
         assert projected[index] == pytest.approx(np.full(3, coefficient))
+
+
+@pytest.mark.parametrize(
+    "projection", [NORMAL_AXIS_PROJECTION, ATRIAL_PROJECTION], ids=["qrs", "p"]
+)
+def test_no_lead_is_perfectly_isoelectric(projection):
+    """Una derivación exactamente plana no existe en ningún paciente, y en un
+    trazado de doce salta a la vista. Ocurría con aVL cuando el eje se ponía
+    a 60° exactos: I y III valían lo mismo y (I − III)/2 daba cero."""
+    assert all(abs(c) > 0.01 for c in projection.coefficients)
+
+
+def test_augmented_leads_follow_their_definitions():
+    """aVR, aVL y aVF no son coeficientes libres: se derivan de las tres
+    derivaciones de miembros. Si alguien retoca I, II o III sin recalcularlas,
+    el trazado deja de ser geométricamente posible."""
+    c = NORMAL_AXIS_PROJECTION.coefficients
+    i, ii, iii, avr, avl, avf = (
+        c[LEAD_ORDER.index(x)] for x in ("I", "II", "III", "aVR", "aVL", "aVF")
+    )
+    assert avr == pytest.approx(-(i + ii) / 2, abs=1e-9)
+    assert avl == pytest.approx((i - iii) / 2, abs=1e-9)
+    assert avf == pytest.approx((ii + iii) / 2, abs=1e-9)

@@ -253,6 +253,35 @@ def test_ventricular_tachycardia_is_genuinely_dissociated():
     assert max(closest) > 0.05
 
 
+def test_fibrillation_waves_are_irregular_unlike_flutter():
+    """Lo que separa una FA de un flutter en el papel no es solo el RR: es la
+    línea de base. El flutter dibuja dientes de sierra a intervalo constante;
+    la FA, una ondulación que llega a destiempo. Con un tren regular las dos
+    salían idénticas salvo por la frecuencia."""
+    def atrial_intervals(rhythm_id):
+        source = get_rhythm(rhythm_id).build_source(np.random.default_rng(7))
+        times = [
+            e.t_s for e in source.events(0.0, 20.0) if e.kind is EventKind.ATRIAL
+        ]
+        return np.diff(times)
+
+    flutter = atrial_intervals("atrial_flutter")
+    fibrillation = atrial_intervals("atrial_fibrillation")
+
+    assert flutter.std() < 1e-9                      # metrónomo
+    assert fibrillation.std() > 0.2 * fibrillation.mean()   # genuinamente irregular
+
+
+def test_fibrillation_waves_are_smaller_than_flutter_waves():
+    """Las ondas f de la FA son de bajo voltaje; las F del flutter, amplias y
+    puntiagudas. Compartir plantilla las hacía indistinguibles."""
+    from ecg_engine.beat import get_template
+
+    f_wave = get_template("af_f").components[0]
+    flutter_wave = get_template("flutter_f").components[0]
+    assert abs(f_wave.amplitude_v) < abs(flutter_wave.amplitude_v) / 2
+
+
 def test_no_rhythm_specific_branching_in_the_engine():
     """Principio arquitectónico 3: cero casos especiales por ritmo.
 

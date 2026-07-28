@@ -133,14 +133,33 @@ def _sinus_like(
 
 
 def _build_atrial_fibrillation(rng: np.random.Generator) -> SignalSource:
+    # Dos generadores hijos independientes, y esto no es un detalle de
+    # estilo. Aquí hay dos fuentes de aleatoriedad —el tren de ondas f y la
+    # conducción irregular del nodo AV— y ambas cachean su línea temporal
+    # hacia adelante. Si compartieran generador, el orden en que se
+    # intercalan sus extracciones dependería de cómo se trocee el render, y
+    # la señal dejaría de ser la misma pidiéndola entera o por trozos.
+    atrial_rng, conduction_rng = rng.spawn(2)
     return BeatBasedSource(
-        # Actividad auricular caótica de alta frecuencia: ondas f, no ondas P.
-        atrial=RegularTrain(
-            kind=EventKind.ATRIAL, template_id="flutter_f", rate_hz=_bpm(420)
+        # Actividad auricular caótica: ondas f que llegan a destiempo, no un
+        # flutter rápido. Con un tren regular la línea de base salía como un
+        # serrucho perfecto —dientes de sierra a intervalo constante—, que es
+        # justo la morfología del flutter y lo contrario de una fibrilación.
+        # El jitter alto es lo que rompe esa regularidad.
+        atrial=EventTrain(
+            kind=EventKind.ATRIAL,
+            template_id="af_f",
+            rate_hz=_bpm(420),
+            variability=VariabilityParams(
+                rsa_fraction=0.0,
+                amplitude_fraction=0.0,
+                rr_jitter_fraction=0.30,
+            ),
+            rng=atrial_rng,
         ),
         conduction=IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.20),
         variability=VariabilityParams(),
-        rng=rng,
+        rng=conduction_rng,
     )
 
 

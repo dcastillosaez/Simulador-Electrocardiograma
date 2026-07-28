@@ -69,6 +69,14 @@ TEMPLATES: dict[str, BeatTemplate] = {
         template_id="flutter_f",
         components=(_p(0.00020, 0.0, 0.018),),
     ),
+    # Onda f de fibrilación auricular: mucho menor que la F del flutter, que
+    # es lo que las distingue en el papel. Su irregularidad no está aquí sino
+    # en el tren que las emite: son las ondas las que llegan a destiempo, no
+    # su forma la que cambia.
+    "af_f": BeatTemplate(
+        template_id="af_f",
+        components=(_p(0.00007, 0.0, 0.013),),
+    ),
     # --- Ventriculares -----------------------------------------------------
     # Las posiciones de Q y S importan tanto como sus anchuras: en un ECG real
     # la Q cae unos 26 ms antes del pico de la R y la S unos 28 ms después.

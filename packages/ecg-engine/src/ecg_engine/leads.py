@@ -52,22 +52,32 @@ def projection_from_mapping(mapping: Mapping[str, float]) -> LeadProjection:
     return LeadProjection(coefficients=tuple(float(mapping[l]) for l in LEAD_ORDER))
 
 
-# Eje cardíaco normal, en torno a +60°. II es la derivación dominante y aVR
+# Eje cardíaco normal, en torno a +50°. II es la derivación dominante y aVR
 # es negativa, como en cualquier ECG bien registrado.
+#
+# El eje está a 50° y no a 60° por un motivo concreto: a 60° exactos, I y III
+# valen lo mismo y aVL = (I − III)/2 sale **cero exacto**. Una derivación
+# perfectamente isoeléctrica en los doce trazados no existe en ningún
+# paciente, y salta a la vista en cuanto se dibuja el ECG en papel. A 50° la
+# aVL queda pequeña y positiva, que es lo normal.
+#
+# En V1 y V2 el complejo es netamente negativo: es el patrón de S dominante
+# en precordiales derechas, con la transición en V3. Con V2 casi en cero el
+# trazado salía plano justo donde un clínico espera la deflexión más ancha.
 NORMAL_AXIS_PROJECTION: LeadProjection = projection_from_mapping(
     {
-        "I": 0.50,
-        "II": 1.00,
-        "III": 0.50,
-        "aVR": -0.75,
-        "aVL": 0.00,
-        "aVF": 0.75,
-        "V1": -0.30,
-        "V2": 0.10,
-        "V3": 0.60,
-        "V4": 1.10,
-        "V5": 1.20,
-        "V6": 0.90,
+        "I": 0.653,
+        "II": 1.000,
+        "III": 0.347,
+        "aVR": -0.8265,
+        "aVL": 0.153,
+        "aVF": 0.6735,
+        "V1": -0.45,
+        "V2": -0.15,
+        "V3": 0.55,
+        "V4": 1.15,
+        "V5": 1.30,
+        "V6": 0.95,
     }
 )
 

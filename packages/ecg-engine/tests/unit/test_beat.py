@@ -11,9 +11,10 @@ from ecg_engine.types import WaveTarget
 from ecg_engine.waveform import fwhm_s
 
 
-def test_registry_contains_the_five_mvp_templates():
+def test_registry_contains_the_mvp_templates():
     assert set(TEMPLATES) == {
-        "sinus_p", "flutter_f", "normal_qrst", "wide_qrst", "escape_qrst",
+        "sinus_p", "flutter_f", "af_f",
+        "normal_qrst", "wide_qrst", "escape_qrst",
     }
 
 
