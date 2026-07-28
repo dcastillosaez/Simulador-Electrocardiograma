@@ -472,12 +472,23 @@ def test_downgrade_removes_both_tables(alembic_config):
     """El `finally` de arriba ya ejecuta el downgrade como limpieza, pero
     limpiar no es lo mismo que verificar: sin este test, un downgrade roto
     -orden de DROP invertido por la FK, o que no borre nada- pasaría
-    inadvertido."""
+    inadvertido.
+
+    Vuelve a dejar el esquema en `head` al terminar. Este fichero gestiona
+    su propio ciclo de upgrade/downgrade con un fixture independiente del
+    `migrated_database` de `conftest.py`; si este test se queda en `base`,
+    cualquier test posterior en la misma sesión que dependa de
+    `migrated_database` (session-scoped, ya inicializado) hereda un esquema
+    inexistente sin que su fixture vuelva a ejecutarse para arreglarlo.
+    """
     command.upgrade(alembic_config, "head")
     command.downgrade(alembic_config, "base")
-    tables = _inspect_tables()
-    assert "rhythms" not in tables
-    assert "sessions" not in tables
+    try:
+        tables = _inspect_tables()
+        assert "rhythms" not in tables
+        assert "sessions" not in tables
+    finally:
+        command.upgrade(alembic_config, "head")
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -3379,7 +3390,14 @@ from ecg_api.frames import decode_frame
 from ecg_api.main import app
 
 
-def test_full_simulation_lifecycle_end_to_end():
+def test_full_simulation_lifecycle_end_to_end(migrated_database):
+    # `migrated_database` no se usa directamente: es session-scoped y
+    # garantiza que el esquema existe antes de que `TestClient(app)`
+    # dispare el `lifespan` y siembre el catálogo. Sin esta dependencia
+    # explícita, pytest recoge los ficheros por orden alfabético y este
+    # test —el único de la carpeta que no pide la fixture— se ejecutaría
+    # antes que `test_migration.py`, fallando con "relation rhythms does
+    # not exist" en vez de ejercitar el flujo que pretende probar.
     with TestClient(app) as client:
         with client.websocket_connect("/ws/simulation") as ws:
             # 1. Conectar y arrancar.
@@ -3420,7 +3438,19 @@ def test_full_simulation_lifecycle_end_to_end():
             assert updated["type"] == "updated"
             assert updated["params"]["heart_rate_hz"] == 100 / 60
 
-            more_frames = [decode_frame(ws.receive_bytes()) for _ in range(30)]
+            # El renderer cachea eventos con `RENDER_MARGIN_S` (0,6 s) de
+            # antelación sobre la ventana que pide cada trozo, así que los
+            # primeros ~10 trozos tras `update` aún contienen algún latido
+            # ya cacheado a la frecuencia vieja (comprobado con un script
+            # de sonda: sin descartar, el periodo dominante medido es 0,958
+            # en vez de 0,6; descartando 10 trozos cae limpio a 0,618).
+            # Eso no es un defecto — el margen es necesario para que la T de
+            # un latido anterior siga sumando en la ventana actual — así que
+            # el test deja asentar la transición antes de medir.
+            warmup_frames = [decode_frame(ws.receive_bytes()) for _ in range(10)]
+            assert len(warmup_frames) == 10  # descartados a propósito
+
+            more_frames = [decode_frame(ws.receive_bytes()) for _ in range(20)]
             fast_signal = _concat_channel_ii(more_frames)
             assert _dominant_beat_period_s(fast_signal) < 60 / 100 * 1.5
 
@@ -3429,7 +3459,11 @@ def test_full_simulation_lifecycle_end_to_end():
             stopped = None
             while stopped is None:
                 event = ws.receive()
-                if event.get("type") == "websocket.receive" and "text" in event:
+                # `WebSocketTestSession.receive()` devuelve el envoltorio
+                # ASGI tal como lo emite el servidor: type="websocket.send"
+                # (la acción que hizo el servidor), no "websocket.receive"
+                # como cabria pensar desde el lado del cliente que lee.
+                if event.get("type") == "websocket.send" and "text" in event:
                     import json
 
                     payload = json.loads(event["text"])

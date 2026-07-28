@@ -69,9 +69,20 @@ def test_downgrade_removes_both_tables(alembic_config):
     """El `finally` de arriba ya ejecuta el downgrade como limpieza, pero
     limpiar no es lo mismo que verificar: sin este test, un downgrade roto
     -orden de DROP invertido por la FK, o que no borre nada- pasaría
-    inadvertido."""
+    inadvertido.
+
+    Vuelve a dejar el esquema en `head` al terminar. Este fichero gestiona
+    su propio ciclo de upgrade/downgrade con un fixture independiente del
+    `migrated_database` de `conftest.py`; si este test se queda en `base`,
+    cualquier test posterior en la misma sesión que dependa de
+    `migrated_database` (session-scoped, ya inicializado) hereda un esquema
+    inexistente sin que su fixture vuelva a ejecutarse para arreglarlo.
+    """
     command.upgrade(alembic_config, "head")
     command.downgrade(alembic_config, "base")
-    tables = _inspect_tables()
-    assert "rhythms" not in tables
-    assert "sessions" not in tables
+    try:
+        tables = _inspect_tables()
+        assert "rhythms" not in tables
+        assert "sessions" not in tables
+    finally:
+        command.upgrade(alembic_config, "head")
