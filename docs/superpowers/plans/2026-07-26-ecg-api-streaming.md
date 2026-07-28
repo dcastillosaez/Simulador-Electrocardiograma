@@ -446,22 +446,38 @@ def alembic_config() -> Config:
     return cfg
 
 
+def _inspect_tables() -> list[str]:
+    engine = create_async_engine(TEST_DATABASE_URL)
+
+    async def _run():
+        async with engine.connect() as conn:
+            return await conn.run_sync(
+                lambda sync_conn: inspect(sync_conn).get_table_names()
+            )
+
+    return asyncio.run(_run())
+
+
 def test_migration_creates_rhythms_and_sessions_tables(alembic_config):
     command.upgrade(alembic_config, "head")
     try:
-        engine = create_async_engine(TEST_DATABASE_URL)
-
-        async def _inspect():
-            async with engine.connect() as conn:
-                return await conn.run_sync(
-                    lambda sync_conn: inspect(sync_conn).get_table_names()
-                )
-
-        tables = asyncio.run(_inspect())
+        tables = _inspect_tables()
         assert "rhythms" in tables
         assert "sessions" in tables
     finally:
         command.downgrade(alembic_config, "base")
+
+
+def test_downgrade_removes_both_tables(alembic_config):
+    """El `finally` de arriba ya ejecuta el downgrade como limpieza, pero
+    limpiar no es lo mismo que verificar: sin este test, un downgrade roto
+    -orden de DROP invertido por la FK, o que no borre nada- pasaría
+    inadvertido."""
+    command.upgrade(alembic_config, "head")
+    command.downgrade(alembic_config, "base")
+    tables = _inspect_tables()
+    assert "rhythms" not in tables
+    assert "sessions" not in tables
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -521,11 +537,20 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from sqlalchemy import BigInteger, ForeignKey, Numeric, String, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Numeric, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
+
+# `Mapped[dt.datetime]` sin más, en SQLAlchemy 2.0, infiere `DateTime()` SIN
+# zona horaria. Como la migración crea las columnas `timestamptz`, dejar el
+# tipo implícito habría hecho que el modelo ORM y el esquema real de
+# Postgres discreparan en `timezone=True/False` — el tipo de desajuste que
+# `alembic revision --autogenerate` detectaría como drift espurio, y que
+# aquí además importa de verdad: `started_at` se construye con
+# `datetime.now(timezone.utc)` (tarea 12), un datetime con zona.
+_TZ_DATETIME = DateTime(timezone=True)
 
 
 class RhythmRow(Base):
@@ -538,7 +563,7 @@ class RhythmRow(Base):
     engine_semver: Mapped[str] = mapped_column(String, nullable=False)
     engine_commit: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
-        nullable=False, server_default=func.now()
+        _TZ_DATETIME, nullable=False, server_default=func.now()
     )
 
 
@@ -553,8 +578,10 @@ class SessionRow(Base):
     seed: Mapped[int] = mapped_column(BigInteger, nullable=False)
     engine_semver: Mapped[str] = mapped_column(String, nullable=False)
     engine_commit: Mapped[str] = mapped_column(String, nullable=False)
-    started_at: Mapped[dt.datetime] = mapped_column(nullable=False)
-    ended_at: Mapped[dt.datetime | None] = mapped_column(nullable=True)
+    started_at: Mapped[dt.datetime] = mapped_column(_TZ_DATETIME, nullable=False)
+    ended_at: Mapped[dt.datetime | None] = mapped_column(
+        _TZ_DATETIME, nullable=True
+    )
     duration_s: Mapped[float | None] = mapped_column(Numeric, nullable=True)
 ```
 
@@ -742,7 +769,7 @@ def downgrade() -> None:
 Con `docker compose up -d db` en marcha:
 
 Run: `cd apps/api && uv run pytest tests/integration/test_migration.py -v`
-Expected: PASS, 1 passed
+Expected: PASS, 2 passed
 
 - [ ] **Step 5: Commit**
 
