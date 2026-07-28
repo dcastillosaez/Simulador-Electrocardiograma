@@ -2082,3 +2082,443 @@ git commit -m "Añadir el SimulationManager que envuelve el motor por conexion"
 ```
 
 ---
+
+### Task 10: `FrameOutbox` — cola acotada con descarte de lo más antiguo
+
+**Files:**
+- Create: `apps/api/src/ecg_api/outbox.py`
+- Test: `apps/api/tests/unit/test_outbox.py`
+
+**Interfaces:**
+- Consumes: nada.
+- Produces: `FrameOutbox(maxsize: int = 20)` con `put(frame: bytes) -> None`, `async get() -> bytes`, `__len__`, `dropped_count: int`.
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `apps/api/tests/unit/test_outbox.py`:
+
+```python
+import asyncio
+
+import pytest
+
+from ecg_api.outbox import FrameOutbox
+
+
+def test_put_and_get_preserve_count_under_capacity():
+    outbox = FrameOutbox(maxsize=5)
+    outbox.put(b"a")
+    outbox.put(b"b")
+    assert len(outbox) == 2
+
+
+def test_put_drops_the_oldest_frame_when_full():
+    outbox = FrameOutbox(maxsize=3)
+    for i in range(5):
+        outbox.put(bytes([i]))
+    assert len(outbox) == 3
+    assert outbox.dropped_count == 2
+
+
+async def test_get_returns_frames_in_fifo_order():
+    outbox = FrameOutbox(maxsize=5)
+    outbox.put(b"first")
+    outbox.put(b"second")
+    assert await outbox.get() == b"first"
+    assert await outbox.get() == b"second"
+
+
+def test_full_outbox_keeps_the_newest_frames_not_the_oldest():
+    """La política es descartar lo más antiguo. Si se descartara lo más
+    nuevo, un cliente lento vería la simulación congelada en el pasado en
+    vez de saltar hacia el presente al ponerse al día."""
+    outbox = FrameOutbox(maxsize=2)
+    outbox.put(b"oldest")
+    outbox.put(b"middle")
+    outbox.put(b"newest")
+    assert list(outbox._frames) == [b"middle", b"newest"]
+
+
+async def test_get_waits_until_a_frame_is_available():
+    outbox = FrameOutbox(maxsize=5)
+
+    async def producer():
+        await asyncio.sleep(0.01)
+        outbox.put(b"delayed")
+
+    task = asyncio.create_task(producer())
+    frame = await outbox.get()
+    await task
+    assert frame == b"delayed"
+
+
+def test_maxsize_must_be_positive():
+    with pytest.raises(ValueError, match="maxsize"):
+        FrameOutbox(maxsize=0)
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd apps/api && uv run pytest tests/unit/test_outbox.py -v`
+Expected: FAIL con `ModuleNotFoundError: No module named 'ecg_api.outbox'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Crear `apps/api/src/ecg_api/outbox.py`:
+
+```python
+"""Cola de salida del streaming: acotada, descarta lo más antiguo.
+
+Existe para que un cliente lento no haga crecer memoria sin límite. Si el
+consumidor no vacía la cola tan rápido como el productor la llena, se
+descarta el frame más antiguo, nunca el más nuevo — el cliente detecta el
+hueco por `sequence_number` y decide qué hacer con él.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections import deque
+
+
+class FrameOutbox:
+    def __init__(self, maxsize: int = 20) -> None:
+        if maxsize < 1:
+            raise ValueError(f"maxsize debe ser positivo, recibido {maxsize}")
+        self._maxsize = maxsize
+        self._frames: deque[bytes] = deque()
+        self._not_empty = asyncio.Event()
+        self.dropped_count = 0
+
+    def __len__(self) -> int:
+        return len(self._frames)
+
+    def put(self, frame: bytes) -> None:
+        self._frames.append(frame)
+        if len(self._frames) > self._maxsize:
+            self._frames.popleft()
+            self.dropped_count += 1
+        self._not_empty.set()
+
+    async def get(self) -> bytes:
+        while not self._frames:
+            self._not_empty.clear()
+            await self._not_empty.wait()
+        return self._frames.popleft()
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd apps/api && uv run pytest tests/unit/test_outbox.py -v`
+Expected: PASS, 6 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api/src/ecg_api/outbox.py apps/api/tests/unit/test_outbox.py
+git commit -m "Añadir la cola de salida con descarte del frame mas antiguo"
+```
+
+---
+
+### Task 11: Bucle de streaming
+
+**Files:**
+- Create: `apps/api/src/ecg_api/streaming.py`
+- Test: `apps/api/tests/unit/test_streaming.py`
+
+**Interfaces:**
+- Consumes: `SimulationManager`, `SimulationState` de la Tarea 9; `FrameOutbox` de la Tarea 10; `encode_frame` de la Tarea 6.
+- Produces: `CHUNK_INTERVAL_S: float` (= 0.1), `async stream_chunks(manager, outbox, sample_rate_hz, *, interval_s=CHUNK_INTERVAL_S) -> None` — corre indefinidamente hasta que se cancele su tarea.
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `apps/api/tests/unit/test_streaming.py`:
+
+```python
+import asyncio
+
+import pytest
+
+from ecg_api.frames import decode_frame
+from ecg_api.outbox import FrameOutbox
+from ecg_api.simulation import SimulationManager
+from ecg_api.streaming import stream_chunks
+
+
+async def _run_briefly(manager, outbox, n_iterations: int, interval_s: float = 0.01):
+    task = asyncio.create_task(
+        stream_chunks(manager, outbox, sample_rate_hz=500, interval_s=interval_s)
+    )
+    await asyncio.sleep(interval_s * n_iterations * 1.5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+async def test_running_manager_produces_frames_at_the_configured_cadence():
+    manager = SimulationManager()
+    manager.start("sinus_normal", None, 1)
+    outbox = FrameOutbox(maxsize=100)
+
+    await _run_briefly(manager, outbox, n_iterations=5)
+
+    assert len(outbox) >= 2  # margen frente al jitter del scheduler
+
+
+async def test_frames_have_increasing_sequence_numbers_and_the_right_session():
+    manager = SimulationManager()
+    session_id = manager.start("sinus_normal", None, 1)
+    outbox = FrameOutbox(maxsize=100)
+
+    await _run_briefly(manager, outbox, n_iterations=5)
+
+    n_frames = len(outbox)
+    decoded = [decode_frame(await outbox.get()) for _ in range(n_frames)]
+    sequence_numbers = [d.sequence_number for d in decoded]
+    assert sequence_numbers == sorted(sequence_numbers)
+    assert all(d.session_id == session_id for d in decoded)
+
+
+async def test_paused_manager_produces_no_new_frames():
+    manager = SimulationManager()
+    manager.start("sinus_normal", None, 1)
+    outbox = FrameOutbox(maxsize=100)
+
+    await _run_briefly(manager, outbox, n_iterations=3)
+    frames_before_pause = len(outbox)
+    manager.pause()
+    await _run_briefly(manager, outbox, n_iterations=3)
+
+    assert len(outbox) == frames_before_pause
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd apps/api && uv run pytest tests/unit/test_streaming.py -v`
+Expected: FAIL con `ModuleNotFoundError: No module named 'ecg_api.streaming'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Crear `apps/api/src/ecg_api/streaming.py`:
+
+```python
+"""Bucle de producción de chunks a intervalo fijo.
+
+Genera un chunk cada `interval_s` mientras `manager.state` sea `RUNNING`; en
+cualquier otro estado se limita a esperar. Pausar la simulación no es más
+que dejar de llamar a `next_chunk`, el mismo principio que ya usa
+`EcgEngine.generate`.
+
+No conoce el WebSocket: escribe en un `FrameOutbox`, que es lo que permite
+testear el bucle con un objeto en memoria en vez de una conexión de red real.
+"""
+
+from __future__ import annotations
+
+import asyncio
+
+from .frames import encode_frame
+from .outbox import FrameOutbox
+from .simulation import SimulationManager, SimulationState
+
+CHUNK_INTERVAL_S = 0.1  # ~10 mensajes/s, la cadencia del diseño
+
+
+async def stream_chunks(
+    manager: SimulationManager,
+    outbox: FrameOutbox,
+    sample_rate_hz: int,
+    *,
+    interval_s: float = CHUNK_INTERVAL_S,
+) -> None:
+    while True:
+        if manager.state is SimulationState.RUNNING:
+            assert manager.session_id is not None
+            chunk = manager.next_chunk()
+            frame = encode_frame(
+                session_id=manager.session_id,
+                sequence_number=chunk.sequence_number,
+                t_start_s=chunk.t_start_s,
+                sample_rate_hz=sample_rate_hz,
+                channels_v=chunk.channels_v,
+            )
+            outbox.put(frame)
+        await asyncio.sleep(interval_s)
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd apps/api && uv run pytest tests/unit/test_streaming.py -v`
+Expected: PASS, 3 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api/src/ecg_api/streaming.py apps/api/tests/unit/test_streaming.py
+git commit -m "Añadir el bucle de streaming de chunks"
+```
+
+---
+
+### Task 12: Persistencia de sesión
+
+**Files:**
+- Create: `apps/api/src/ecg_api/persistence.py`
+- Test: `apps/api/tests/integration/test_persistence.py`
+
+**Interfaces:**
+- Consumes: `SessionRow` de la Tarea 3; `engine_params_to_dict` de la Tarea 7; `SimulationManager` de la Tarea 9; `Settings` de la Tarea 2; `seed_catalog` de la Tarea 4 (solo en el test, para satisfacer la FK).
+- Produces: `MIN_PERSISTABLE_DURATION_S: float` (= 5.0), `async persist_session(session, manager, settings) -> None`, `should_persist(manager) -> bool`.
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `apps/api/tests/integration/test_persistence.py`:
+
+```python
+"""Requiere Postgres real: `docker compose up -d db` antes de ejecutar."""
+
+import datetime as dt
+
+import pytest
+from sqlalchemy import select
+
+from ecg_api.config import Settings
+from ecg_api.db.models import SessionRow
+from ecg_api.db.seed import seed_catalog
+from ecg_api.persistence import persist_session, should_persist
+from ecg_api.simulation import SimulationManager
+
+
+async def _seeded_manager(db_session, rhythm_id: str = "sinus_normal", seed: int = 20260725):
+    settings = Settings(_env_file=None, engine_commit="8c4b92f")
+    await seed_catalog(db_session, settings)  # la FK exige la fila del ritmo
+    manager = SimulationManager()
+    manager.start(rhythm_id, None, seed)
+    return manager, settings
+
+
+async def test_persist_session_writes_the_documented_columns(db_session):
+    manager, settings = await _seeded_manager(db_session)
+    for _ in range(100):  # 100 * 50 muestras / 500 Hz = 10 s simulados
+        manager.next_chunk()
+    manager.stop()
+
+    await persist_session(db_session, manager, settings)
+
+    row = (
+        await db_session.execute(
+            select(SessionRow).where(SessionRow.id == manager.session_id)
+        )
+    ).scalar_one()
+    assert row.rhythm_id == "sinus_normal"
+    assert row.seed == manager.seed
+    assert row.engine_semver.count(".") == 2
+    assert row.engine_commit == "8c4b92f"
+    assert float(row.duration_s) == pytest.approx(10.0)
+    assert row.ended_at == row.started_at + dt.timedelta(seconds=10.0)
+    assert row.params["heart_rate_hz"] == pytest.approx(70 / 60)
+
+
+async def test_should_persist_is_false_under_five_seconds(db_session):
+    manager, _ = await _seeded_manager(db_session)
+    for _ in range(40):  # 4,0 s simulados
+        manager.next_chunk()
+    assert not should_persist(manager)
+
+
+async def test_should_persist_is_true_at_or_above_five_seconds(db_session):
+    manager, _ = await _seeded_manager(db_session)
+    for _ in range(50):  # 5,0 s simulados exactos
+        manager.next_chunk()
+    assert should_persist(manager)
+
+
+async def test_should_persist_is_false_before_starting():
+    manager = SimulationManager()
+    assert not should_persist(manager)
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Con `docker compose up -d db` en marcha:
+
+Run: `cd apps/api && uv run pytest tests/integration/test_persistence.py -v`
+Expected: FAIL con `ModuleNotFoundError: No module named 'ecg_api.persistence'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Crear `apps/api/src/ecg_api/persistence.py`:
+
+```python
+"""Persistencia de sesiones cerradas.
+
+Se llama exactamente una vez por sesión, al final: con `stop` explícito, o
+al desconectar si la sesión llevaba al menos 5 s de tiempo simulado. Nunca
+en la ruta caliente del streaming.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+import ecg_engine
+
+from .config import Settings
+from .db.models import SessionRow
+from .schemas import engine_params_to_dict
+from .simulation import SimulationManager
+
+MIN_PERSISTABLE_DURATION_S = 5.0
+
+
+async def persist_session(
+    session: AsyncSession,
+    manager: SimulationManager,
+    settings: Settings,
+) -> None:
+    assert manager.session_id is not None
+    assert manager.started_at is not None
+    duration_s = manager.duration_s
+    ended_at = manager.started_at + dt.timedelta(seconds=duration_s)
+    session.add(
+        SessionRow(
+            id=manager.session_id,
+            rhythm_id=manager.rhythm_id,
+            params=engine_params_to_dict(manager.params),
+            seed=manager.seed,
+            engine_semver=ecg_engine.__version__,
+            engine_commit=settings.engine_commit,
+            started_at=manager.started_at,
+            ended_at=ended_at,
+            duration_s=duration_s,
+        )
+    )
+    await session.commit()
+
+
+def should_persist(manager: SimulationManager) -> bool:
+    """La regla de las sesiones sin `stop` explícito: se persiste si el
+    cliente desconectó habiendo simulado al menos 5 s. Tiempo simulado, no
+    de reloj de pared — determinista y rápido de testear."""
+    return (
+        manager.session_id is not None
+        and manager.duration_s >= MIN_PERSISTABLE_DURATION_S
+    )
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd apps/api && uv run pytest tests/integration/test_persistence.py -v`
+Expected: PASS, 4 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api/src/ecg_api/persistence.py apps/api/tests/integration/test_persistence.py
+git commit -m "Añadir la persistencia de sesion al cerrarse"
+```
+
+---
