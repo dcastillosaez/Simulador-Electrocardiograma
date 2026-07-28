@@ -754,3 +754,667 @@ git commit -m "Añadir modelos de base de datos y migración inicial de Alembic"
 ```
 
 ---
+
+### Task 4: Fixtures compartidas de integración y seed del catálogo
+
+**Files:**
+- Create: `apps/api/tests/integration/__init__.py`
+- Create: `apps/api/tests/integration/conftest.py`
+- Create: `apps/api/src/ecg_api/db/seed.py`
+- Test: `apps/api/tests/integration/test_seed.py`
+
+**Interfaces:**
+- Consumes: `Settings` de la Tarea 2; `Base`, `RhythmRow` de la Tarea 3; `ecg_engine.list_rhythms()`.
+- Produces: `seed_catalog(session: AsyncSession, settings: Settings) -> None`. Fixtures pytest `migrated_database` (session-scoped) y `db_session` (function-scoped, transacción con rollback), reutilizadas por todas las tareas de integración siguientes.
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `apps/api/tests/integration/__init__.py` (vacío).
+
+Crear `apps/api/tests/integration/conftest.py`:
+
+```python
+"""Fixtures compartidas de los tests de integración.
+
+Requieren Postgres real (`docker compose up -d db`). La base de test se crea
+una sola vez por sesión de pytest y se migra a la última revisión; cada test
+aísla sus cambios con una transacción propia que siempre se revierte, así
+que no hace falta volver a migrar ni truncar tablas entre tests.
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+
+import psycopg2
+import pytest
+import pytest_asyncio
+from alembic import command
+from alembic.config import Config
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+
+TEST_DATABASE_URL = (
+    "postgresql+asyncpg://ecg:ecg@localhost:5432/ecg_simulator_test"
+)
+TEST_DATABASE_URL_SYNC = (
+    "postgresql+psycopg2://ecg:ecg@localhost:5432/ecg_simulator_test"
+)
+
+
+def _ensure_test_database_exists() -> None:
+    try:
+        conn = psycopg2.connect("postgresql://ecg:ecg@localhost:5432/postgres")
+    except psycopg2.OperationalError as exc:
+        raise RuntimeError(
+            "No se pudo conectar a Postgres en localhost:5432. "
+            "Levanta el contenedor con: docker compose up -d db"
+        ) from exc
+    conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM pg_database WHERE datname = 'ecg_simulator_test'"
+            )
+            if cur.fetchone() is None:
+                cur.execute("CREATE DATABASE ecg_simulator_test")
+    finally:
+        conn.close()
+
+
+@pytest.fixture(scope="session")
+def migrated_database() -> AsyncIterator[str]:
+    _ensure_test_database_exists()
+    cfg = Config("alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", TEST_DATABASE_URL_SYNC)
+    command.upgrade(cfg, "head")
+    yield TEST_DATABASE_URL
+    command.downgrade(cfg, "base")
+
+
+@pytest_asyncio.fixture
+async def db_session(migrated_database: str) -> AsyncIterator[AsyncSession]:
+    engine = create_async_engine(migrated_database)
+    connection = await engine.connect()
+    transaction = await connection.begin()
+    session_factory = async_sessionmaker(
+        bind=connection,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+    session = session_factory()
+    try:
+        yield session
+    finally:
+        await session.close()
+        await transaction.rollback()
+        await connection.close()
+        await engine.dispose()
+```
+
+Crear `apps/api/tests/integration/test_seed.py`:
+
+```python
+"""Requiere Postgres real: `docker compose up -d db` antes de ejecutar."""
+
+import ecg_engine
+from sqlalchemy import select
+
+from ecg_api.config import Settings
+from ecg_api.db.models import RhythmRow
+from ecg_api.db.seed import seed_catalog
+
+
+async def test_seed_catalog_inserts_all_twelve_rhythms(db_session):
+    settings = Settings(_env_file=None, engine_commit="8c4b92f")
+    await seed_catalog(db_session, settings)
+
+    rows = (await db_session.execute(select(RhythmRow))).scalars().all()
+    expected_ids = {d.rhythm_id for d in ecg_engine.list_rhythms()}
+    assert {row.id for row in rows} == expected_ids
+    assert len(expected_ids) == 12
+
+
+async def test_seed_catalog_is_idempotent(db_session):
+    settings = Settings(_env_file=None, engine_commit="8c4b92f")
+    await seed_catalog(db_session, settings)
+    await seed_catalog(db_session, settings)  # segunda vez: no duplica, no falla
+
+    rows = (await db_session.execute(select(RhythmRow))).scalars().all()
+    assert len(rows) == 12
+
+
+async def test_seed_catalog_updates_engine_commit_on_reseed(db_session):
+    settings_a = Settings(_env_file=None, engine_commit="aaaaaaa")
+    settings_b = Settings(_env_file=None, engine_commit="bbbbbbb")
+    await seed_catalog(db_session, settings_a)
+    await seed_catalog(db_session, settings_b)
+
+    row = (
+        await db_session.execute(
+            select(RhythmRow).where(RhythmRow.id == "sinus_normal")
+        )
+    ).scalar_one()
+    assert row.engine_commit == "bbbbbbb"
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Añade `psycopg2-binary>=2.9` y `pytest-asyncio>=0.24` a las dependencias `dev` de `apps/api/pyproject.toml` si no están ya (la Tarea 3 ya añadió `psycopg2-binary`; confirma que sigue ahí) y ejecuta `uv sync --extra dev`.
+
+Con `docker compose up -d db` en marcha:
+
+Run: `cd apps/api && uv run pytest tests/integration/test_seed.py -v`
+Expected: FAIL con `ModuleNotFoundError: No module named 'ecg_api.db.seed'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Crear `apps/api/src/ecg_api/db/seed.py`:
+
+```python
+"""Upsert del catálogo de código a la tabla `rhythms`.
+
+La tabla no es la fuente de verdad — lo es `ecg_engine.list_rhythms()` —
+sino el ancla de la FK de `sessions`. Se rellena aquí, al arrancar la
+aplicación, nunca a mano ni desde una migración de datos.
+"""
+
+from __future__ import annotations
+
+import ecg_engine
+from ecg_engine.catalog import RhythmDefinition
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..config import Settings
+from .models import RhythmRow
+
+
+def _rhythm_spec(definition: RhythmDefinition) -> dict:
+    return {
+        "default_parameters": dict(definition.default_parameters),
+        "editable_parameters": {
+            name: {
+                "minimum": r.minimum,
+                "maximum": r.maximum,
+                "default": r.default,
+            }
+            for name, r in definition.editable_parameters.items()
+        },
+        "ventricular_rate_hz": definition.ventricular_rate_hz,
+        "pr_is_measurable": definition.pr_is_measurable,
+        "clinical_description": definition.clinical_description,
+        "references": list(definition.references),
+        "allowed_overlays": list(definition.allowed_overlays),
+    }
+
+
+async def seed_catalog(session: AsyncSession, settings: Settings) -> None:
+    for definition in ecg_engine.list_rhythms():
+        stmt = insert(RhythmRow).values(
+            id=definition.rhythm_id,
+            name=definition.display_name,
+            category=definition.category.value,
+            spec=_rhythm_spec(definition),
+            engine_semver=ecg_engine.__version__,
+            engine_commit=settings.engine_commit,
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[RhythmRow.id],
+            set_={
+                "name": stmt.excluded.name,
+                "category": stmt.excluded.category,
+                "spec": stmt.excluded.spec,
+                "engine_semver": stmt.excluded.engine_semver,
+                "engine_commit": stmt.excluded.engine_commit,
+            },
+        )
+        await session.execute(stmt)
+    await session.commit()
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd apps/api && uv run pytest tests/integration/test_seed.py -v`
+Expected: PASS, 3 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api/
+git commit -m "Añadir seed del catálogo y fixtures compartidas de integración"
+```
+
+---
+
+### Task 5: `GET /api/rhythms`, `GET /api/rhythms/{id}`
+
+Servidos directo de `ecg-engine`, sin tocar la base de datos: el catálogo de código ya es la fuente de verdad versionada con el motor.
+
+**Files:**
+- Create: `apps/api/src/ecg_api/schemas.py`
+- Create: `apps/api/src/ecg_api/routers/rhythms.py`
+- Modify: `apps/api/src/ecg_api/main.py`
+- Test: `apps/api/tests/unit/test_rhythms_router.py`
+
+**Interfaces:**
+- Consumes: `ecg_engine.list_rhythms()`, `ecg_engine.get_rhythm()`, `ecg_engine.catalog.RhythmDefinition`.
+- Produces: `RhythmSummary`, `RhythmDetail`, `ParameterRangePayload` en `ecg_api.schemas`. Rutas `GET /api/rhythms` (lista) y `GET /api/rhythms/{rhythm_id}` (detalle, 404 si no existe).
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `apps/api/tests/unit/test_rhythms_router.py`:
+
+```python
+from fastapi.testclient import TestClient
+
+from ecg_api.main import app
+
+client = TestClient(app)
+
+
+def test_list_rhythms_returns_the_twelve_mvp_rhythms():
+    response = client.get("/api/rhythms")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 12
+    assert {
+        "rhythm_id", "display_name", "category",
+        "ventricular_rate_hz", "pr_is_measurable",
+    } <= body[0].keys()
+
+
+def test_get_rhythm_detail_includes_editable_parameters_and_references():
+    response = client.get("/api/rhythms/sinus_normal")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["rhythm_id"] == "sinus_normal"
+    rate_range = body["editable_parameters"]["heart_rate_hz"]
+    assert rate_range["minimum"] < rate_range["maximum"]
+    assert len(body["references"]) >= 1
+
+
+def test_get_rhythm_detail_404_for_unknown_id():
+    response = client.get("/api/rhythms/no_existe")
+    assert response.status_code == 404
+
+
+def test_third_degree_block_declares_a_fixed_range():
+    """Coherencia con el catálogo: av_block_third tiene frecuencia
+    estructural, minimum == maximum. Si esto falla, algo se desincronizó
+    entre el motor y cómo la API lo expone."""
+    response = client.get("/api/rhythms/av_block_third")
+    rate_range = response.json()["editable_parameters"]["heart_rate_hz"]
+    assert rate_range["minimum"] == rate_range["maximum"]
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd apps/api && uv run pytest tests/unit/test_rhythms_router.py -v`
+Expected: FAIL con 404 en `/api/rhythms` (ruta no registrada) o `ModuleNotFoundError`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Crear `apps/api/src/ecg_api/schemas.py`:
+
+```python
+"""Esquemas Pydantic de la API: REST y WebSocket.
+
+Este módulo crece con cada tarea del plan. Los esquemas REST del catálogo
+van primero; los del WebSocket y las sesiones se añaden en tareas
+posteriores.
+"""
+
+from __future__ import annotations
+
+from pydantic import BaseModel
+
+
+class ParameterRangePayload(BaseModel):
+    minimum: float
+    maximum: float
+    default: float
+
+
+class RhythmSummary(BaseModel):
+    rhythm_id: str
+    display_name: str
+    category: str
+    ventricular_rate_hz: float
+    pr_is_measurable: bool
+
+
+class RhythmDetail(RhythmSummary):
+    default_parameters: dict[str, float]
+    editable_parameters: dict[str, ParameterRangePayload]
+    clinical_description: str
+    references: tuple[str, ...]
+    allowed_overlays: tuple[str, ...]
+```
+
+Crear `apps/api/src/ecg_api/routers/rhythms.py`:
+
+```python
+"""Catálogo de ritmos. Servido directo de ecg-engine, nunca de la base de
+datos: `ecg_engine.list_rhythms()` ya es la fuente de verdad versionada con
+el motor. La tabla `rhythms` de Postgres solo ancla la FK de `sessions`.
+"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, HTTPException
+
+from ecg_engine import get_rhythm as engine_get_rhythm
+from ecg_engine import list_rhythms as engine_list_rhythms
+from ecg_engine.catalog import RhythmDefinition
+
+from ..schemas import ParameterRangePayload, RhythmDetail, RhythmSummary
+
+router = APIRouter(prefix="/api/rhythms", tags=["rhythms"])
+
+
+def _to_summary(definition: RhythmDefinition) -> RhythmSummary:
+    return RhythmSummary(
+        rhythm_id=definition.rhythm_id,
+        display_name=definition.display_name,
+        category=definition.category.value,
+        ventricular_rate_hz=definition.ventricular_rate_hz,
+        pr_is_measurable=definition.pr_is_measurable,
+    )
+
+
+def _to_detail(definition: RhythmDefinition) -> RhythmDetail:
+    return RhythmDetail(
+        **_to_summary(definition).model_dump(),
+        default_parameters=dict(definition.default_parameters),
+        editable_parameters={
+            name: ParameterRangePayload(
+                minimum=r.minimum, maximum=r.maximum, default=r.default
+            )
+            for name, r in definition.editable_parameters.items()
+        },
+        clinical_description=definition.clinical_description,
+        references=definition.references,
+        allowed_overlays=definition.allowed_overlays,
+    )
+
+
+@router.get("", response_model=list[RhythmSummary])
+def list_rhythms_endpoint() -> list[RhythmSummary]:
+    return [_to_summary(d) for d in engine_list_rhythms()]
+
+
+@router.get("/{rhythm_id}", response_model=RhythmDetail)
+def get_rhythm_endpoint(rhythm_id: str) -> RhythmDetail:
+    try:
+        definition = engine_get_rhythm(rhythm_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _to_detail(definition)
+```
+
+Modificar `apps/api/src/ecg_api/main.py`, añadiendo el router nuevo:
+
+```python
+from .config import get_settings
+from .routers.health import router as health_router
+from .routers.rhythms import router as rhythms_router
+
+app = FastAPI(title="Simulador de ECG — API")
+app.state.settings = get_settings()
+
+app.include_router(health_router)
+app.include_router(rhythms_router)
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd apps/api && uv run pytest tests/unit/test_rhythms_router.py -v`
+Expected: PASS, 4 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api/
+git commit -m "Servir el catalogo de ritmos por REST directo desde ecg-engine"
+```
+
+---
+
+### Task 6: Contrato del frame binario
+
+**Files:**
+- Create: `apps/api/src/ecg_api/frames.py`
+- Test: `apps/api/tests/unit/test_frames.py`
+
+**Interfaces:**
+- Consumes: `ecg_engine.types.N_LEADS`.
+- Produces: `HEADER_SIZE: int` (= 40), `encode_frame(*, session_id, sequence_number, t_start_s, sample_rate_hz, channels_v) -> bytes`, `decode_frame(data: bytes) -> DecodedFrame`.
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `apps/api/tests/unit/test_frames.py`:
+
+```python
+import struct
+import uuid
+
+import numpy as np
+import pytest
+
+from ecg_api.frames import HEADER_SIZE, decode_frame, encode_frame
+from ecg_engine.types import N_LEADS
+
+
+def make_channels(n_samples: int = 50) -> np.ndarray:
+    return (
+        np.arange(N_LEADS * n_samples, dtype=np.float64).reshape(N_LEADS, n_samples)
+        * 1e-6
+    )
+
+
+def test_header_is_exactly_forty_bytes():
+    assert HEADER_SIZE == 40
+
+
+def test_encoded_frame_size_matches_header_plus_payload():
+    frame = encode_frame(
+        session_id=uuid.uuid4(), sequence_number=0, t_start_s=0.0,
+        sample_rate_hz=500, channels_v=make_channels(50),
+    )
+    assert len(frame) == 40 + 12 * 50 * 4
+
+
+def test_header_fields_are_little_endian_and_in_order():
+    frame = encode_frame(
+        session_id=uuid.uuid4(), sequence_number=7, t_start_s=1.5,
+        sample_rate_hz=500, channels_v=make_channels(50),
+    )
+    fields = struct.unpack_from("<HHBBHIId", frame, 0)
+    assert fields == (1, 500, 12, 0, 50, 7, 0, 1.5)
+
+
+def test_session_id_bytes_are_not_reordered():
+    session_id = uuid.uuid4()
+    frame = encode_frame(
+        session_id=session_id, sequence_number=0, t_start_s=0.0,
+        sample_rate_hz=500, channels_v=make_channels(10),
+    )
+    assert frame[24:40] == session_id.bytes  # canónico, no .bytes_le
+
+
+def test_payload_is_channel_major_not_interleaved():
+    channels = make_channels(3)
+    frame = encode_frame(
+        session_id=uuid.uuid4(), sequence_number=0, t_start_s=0.0,
+        sample_rate_hz=500, channels_v=channels,
+    )
+    raw = np.frombuffer(frame[HEADER_SIZE:], dtype="<f4")
+    # Las tres primeras posiciones son el canal I completo; las tres
+    # siguientes, el canal II completo. Si estuviera intercalado, la
+    # posición 1 sería la primera muestra de II, no la segunda de I.
+    assert raw[0:3] == pytest.approx(channels[0], abs=1e-9)
+    assert raw[3:6] == pytest.approx(channels[1], abs=1e-9)
+
+
+def test_encode_rejects_wrong_lead_count():
+    with pytest.raises(ValueError, match="12"):
+        encode_frame(
+            session_id=uuid.uuid4(), sequence_number=0, t_start_s=0.0,
+            sample_rate_hz=500, channels_v=np.zeros((6, 50)),
+        )
+
+
+def test_decode_is_the_exact_inverse_of_encode():
+    session_id = uuid.uuid4()
+    channels = make_channels(50)
+    frame = encode_frame(
+        session_id=session_id, sequence_number=42, t_start_s=8.3,
+        sample_rate_hz=500, channels_v=channels,
+    )
+    decoded = decode_frame(frame)
+    assert decoded.version == 1
+    assert decoded.sample_rate_hz == 500
+    assert decoded.n_channels == 12
+    assert decoded.n_samples_per_channel == 50
+    assert decoded.sequence_number == 42
+    assert decoded.t_start_s == pytest.approx(8.3)
+    assert decoded.session_id == session_id
+    assert np.allclose(decoded.channels_v, channels, atol=1e-6)  # precisión float32
+
+
+def test_decode_rejects_a_truncated_frame():
+    frame = encode_frame(
+        session_id=uuid.uuid4(), sequence_number=0, t_start_s=0.0,
+        sample_rate_hz=500, channels_v=make_channels(50),
+    )
+    with pytest.raises(ValueError, match="incompleto"):
+        decode_frame(frame[:-10])
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd apps/api && uv run pytest tests/unit/test_frames.py -v`
+Expected: FAIL con `ModuleNotFoundError: No module named 'ecg_api.frames'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Crear `apps/api/src/ecg_api/frames.py`:
+
+```python
+"""Contrato del frame binario del streaming.
+
+Cabecera fija de 40 bytes, little-endian salvo `session_id`, que va en su
+UUID canónico (orden de red, RFC 4122) sin reordenar en ningún extremo. La
+cabecera de 40 bytes deja el payload alineado a 4, que es lo que exige
+`new Float32Array(buffer, 40, n)` en JavaScript — no es un tamaño arbitrario.
+"""
+
+from __future__ import annotations
+
+import struct
+import uuid
+from dataclasses import dataclass
+
+import numpy as np
+
+from ecg_engine.types import N_LEADS
+
+FRAME_VERSION = 1
+HEADER_FORMAT = "<HHBBHIId16s"
+HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
+
+
+def encode_frame(
+    *,
+    session_id: uuid.UUID,
+    sequence_number: int,
+    t_start_s: float,
+    sample_rate_hz: int,
+    channels_v: np.ndarray,
+) -> bytes:
+    if channels_v.ndim != 2 or channels_v.shape[0] != N_LEADS:
+        raise ValueError(
+            f"channels_v debe tener forma (12, n), recibido {channels_v.shape}"
+        )
+    n_samples = channels_v.shape[1]
+    header = struct.pack(
+        HEADER_FORMAT,
+        FRAME_VERSION,
+        sample_rate_hz,
+        N_LEADS,
+        0,
+        n_samples,
+        sequence_number,
+        0,
+        t_start_s,
+        session_id.bytes,
+    )
+    payload = np.ascontiguousarray(channels_v, dtype="<f4").tobytes()
+    return header + payload
+
+
+@dataclass(frozen=True, slots=True)
+class DecodedFrame:
+    version: int
+    sample_rate_hz: int
+    n_channels: int
+    n_samples_per_channel: int
+    sequence_number: int
+    t_start_s: float
+    session_id: uuid.UUID
+    channels_v: np.ndarray
+
+
+def decode_frame(data: bytes) -> DecodedFrame:
+    if len(data) < HEADER_SIZE:
+        raise ValueError(f"frame demasiado corto: {len(data)} bytes")
+    (
+        version,
+        sample_rate_hz,
+        n_channels,
+        _reserved,
+        n_samples,
+        sequence_number,
+        _reserved2,
+        t_start_s,
+        session_bytes,
+    ) = struct.unpack(HEADER_FORMAT, data[:HEADER_SIZE])
+
+    expected_payload = n_channels * n_samples * 4
+    payload = data[HEADER_SIZE : HEADER_SIZE + expected_payload]
+    if len(payload) != expected_payload:
+        raise ValueError(
+            f"payload incompleto: esperados {expected_payload} bytes, "
+            f"recibidos {len(payload)}"
+        )
+    channels_v = np.frombuffer(payload, dtype="<f4").reshape(n_channels, n_samples)
+    return DecodedFrame(
+        version=version,
+        sample_rate_hz=sample_rate_hz,
+        n_channels=n_channels,
+        n_samples_per_channel=n_samples,
+        sequence_number=sequence_number,
+        t_start_s=t_start_s,
+        session_id=uuid.UUID(bytes=session_bytes),
+        channels_v=channels_v,
+    )
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd apps/api && uv run pytest tests/unit/test_frames.py -v`
+Expected: PASS, 8 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api/src/ecg_api/frames.py apps/api/tests/unit/test_frames.py
+git commit -m "Añadir el codificador y decodificador del frame binario"
+```
+
+---
