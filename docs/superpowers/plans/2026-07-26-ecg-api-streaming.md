@@ -3082,10 +3082,15 @@ git commit -m "Conectar el websocket de simulacion: la ruta caliente completa"
 
 Lectura pura de Postgres. El único escritor es `persist_session`, llamado desde el WebSocket al cerrarse — esta tarea no escribe nada.
 
+**Una condición de carrera real, destapada por los tests de esta tarea.** Los tests de persistencia arrancan una simulación por WebSocket, la dejan superar el umbral de 5 s, envían `stop` y cierran la conexión sin esperar el `stopped` de vuelta — exactamente lo que hace un cliente real cuando la pestaña se cierra o la red cae justo después de parar. Starlette cancela la corrutina del handler al desconectar, y esa cancelación puede llegar a mitad de `await session.commit()` dentro de `persist_session`, perdiendo en silencio una sesión que ya había decidido persistirse. No es un artefacto de test: es un bug de pérdida de datos.
+
+El arreglo blinda esa escritura ya decidida con `anyio.CancelScope(shield=True)` en `_maybe_persist()` de `simulation_ws.py` (tarea 13). Pero blindar contra cancelación tiene un coste que hay que compensar: `shield=True` protege de la *propagación de cancelación*, no de un fallo de I/O — si la conexión estuviera genuinamente muerta en vez de solo "el cliente no esperó", la vía de escape por cancelación del cliente queda bloqueada a propósito, y sin más, `commit()` podría colgarse para siempre en vez de fallar rápido. Por eso el shield lleva dentro un `anyio.fail_after(5.0)`: cambia "pierde la sesión" por "cuelga el handler", no lo deja sin red de seguridad.
+
 **Files:**
 - Modify: `apps/api/src/ecg_api/schemas.py`
 - Create: `apps/api/src/ecg_api/routers/sessions.py`
 - Modify: `apps/api/src/ecg_api/main.py`
+- Modify: `apps/api/src/ecg_api/routers/simulation_ws.py` (tarea 13, ver arriba)
 - Test: `apps/api/tests/integration/test_sessions_router.py`
 
 **Interfaces:**
@@ -3275,15 +3280,55 @@ app.include_router(sessions_router)
 app.include_router(simulation_ws_router)
 ```
 
+Modificar `apps/api/src/ecg_api/routers/simulation_ws.py`: añadir el import de `anyio` y blindar la escritura de `_maybe_persist()` contra la cancelación del cliente al desconectar.
+
+Añadir el import, junto al resto de imports del módulo:
+
+```python
+import anyio
+```
+
+Sustituir el cuerpo de `_maybe_persist`:
+
+```python
+    async def _maybe_persist() -> None:
+        nonlocal persisted
+        if persisted or not should_persist(manager):
+            return
+        # `shield=True`: si el cliente cierra el socket justo tras enviar
+        # `stop` sin esperar el `stopped` de vuelta (un cierre de pestaña, una
+        # caída de red), Starlette cancela esta corrutina al desconectar. Sin
+        # blindar la escritura, esa cancelación puede llegar a mitad de
+        # `session.commit()` y la sesión —que ya cumplió el umbral de 5 s— se
+        # pierde en silencio.
+        #
+        # El shield tiene un coste que hay que compensar: protege de la
+        # cancelación del cliente, no de un fallo de I/O real. Sin el
+        # `fail_after`, una conexión genuinamente muerta colgaría el handler
+        # para siempre en vez de fallar rápido, porque la única vía de escape
+        # —la cancelación externa— queda bloqueada a propósito. Con él, el
+        # peor caso pasa de "cuelga indefinidamente" a "falla en 5 s".
+        with anyio.CancelScope(shield=True):
+            with anyio.fail_after(5.0):
+                async with session_factory() as db:
+                    await persist_session(db, manager, settings)
+        persisted = True
+```
+
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd apps/api && uv run pytest tests/integration/test_sessions_router.py -v`
 Expected: PASS, 4 passed
 
+Y confirma que el WebSocket sigue en verde, porque el cambio toca un fichero de la tarea 13:
+
+Run: `cd apps/api && uv run pytest tests/integration/test_simulation_ws.py -v`
+Expected: PASS, 7 passed
+
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api/src/ecg_api/schemas.py apps/api/src/ecg_api/routers/sessions.py apps/api/src/ecg_api/main.py apps/api/tests/integration/test_sessions_router.py
+git add apps/api/src/ecg_api/schemas.py apps/api/src/ecg_api/routers/sessions.py apps/api/src/ecg_api/main.py apps/api/src/ecg_api/routers/simulation_ws.py apps/api/tests/integration/test_sessions_router.py
 git commit -m "Añadir el historial de sesiones por REST"
 ```
 
