@@ -3601,6 +3601,51 @@ def test_editable_rate_actually_changes_the_ventricular_rate(rhythm_id):
     assert fast > slow
 
 
+@pytest.mark.parametrize(
+    "rhythm_id",
+    ["atrial_fibrillation", "atrial_flutter", "ventricular_tachycardia",
+     "ventricular_fibrillation", "av_block_third"],
+)
+def test_rhythms_without_a_pr_declare_it(rhythm_id):
+    """En estos cinco ritmos no existe intervalo PR. En la FA no hay onda P
+    que medir, en el flutter la relación F-QRS no es lo que nadie llama PR,
+    y en la TV y el bloqueo completo las aurículas van disociadas."""
+    assert not get_rhythm(rhythm_id).pr_is_measurable
+
+
+@pytest.mark.parametrize("rhythm_id", sorted(EXPECTED_IDS))
+def test_declared_pr_matches_what_the_measurement_reports(rhythm_id):
+    """Coherencia entre lo que el catálogo declara y lo que sale medido. Un
+    ritmo que declara no tener PR no puede publicar un número, y uno que
+    declara tenerlo no puede publicar NaN."""
+    definition = get_rhythm(rhythm_id)
+    source = definition.build_source(np.random.default_rng(20260725))
+    events = source.events(0.0, 30.0) if hasattr(source, "events") else []
+    result = measure(
+        events, source.render(0.0, 15000, 500), 500, definition.pr_is_measurable
+    )
+    assert math.isnan(result.pr_mean_s) != definition.pr_is_measurable
+
+
+def test_ventricular_tachycardia_is_genuinely_dissociated():
+    """El hallazgo que distingue una TV de una supraventricular con
+    aberrancia. Con ambos trenes a la misma frecuencia la P caía sobre el
+    pico de la R, le sumaba amplitud y daba un PR de 0 ms: sincronía
+    perfecta donde la descripción promete disociación."""
+    source = get_rhythm("ventricular_tachycardia").build_source(
+        np.random.default_rng(20260725)
+    )
+    events = source.events(0.0, 30.0)
+    atrial = [e.t_s for e in events if e.kind is EventKind.ATRIAL]
+    ventricular = [e.t_s for e in events if e.kind is EventKind.VENTRICULAR]
+
+    assert len(ventricular) > len(atrial) * 2  # el ventrículo va mucho más rápido
+
+    # Ninguna P puede caer sistemáticamente sobre un QRS.
+    closest = [min(abs(v - a) for v in ventricular) for a in atrial]
+    assert max(closest) > 0.05
+
+
 def test_third_degree_block_produces_dissociated_trains():
     source = get_rhythm("av_block_third").build_source(np.random.default_rng(3))
     events = source.events(0.0, 60.0)
@@ -3737,6 +3782,14 @@ class RhythmDefinition:
     Mostrar 75 lpm en un bloqueo AV completo —la frecuencia auricular— cuando
     el paciente tiene un pulso de 40 basta para que un cardiólogo descarte el
     simulador de un vistazo.
+
+    `pr_is_measurable` dice si en este ritmo existe siquiera un intervalo PR.
+    Es un hecho del ritmo, no una propiedad de la señal: en la fibrilación
+    auricular no hay onda P que medir, en el flutter la relación F-QRS no es
+    lo que nadie llama PR, y en la taquicardia ventricular las aurículas van
+    disociadas. Deducirlo de la dispersión de los datos —que fue el primer
+    intento— publicaba un PR de 49,8 ms para una FA y de 140 ms para un
+    flutter: números perfectamente calculados y clínicamente inexistentes.
     """
 
     rhythm_id: str
@@ -3746,6 +3799,7 @@ class RhythmDefinition:
     default_parameters: Mapping[str, float]
     editable_parameters: Mapping[str, ParameterRange]
     ventricular_rate_hz: float
+    pr_is_measurable: bool
     clinical_description: str
     references: tuple[str, ...]
     allowed_overlays: tuple[str, ...] = field(default=())
@@ -3807,10 +3861,17 @@ def _build_atrial_flutter(rng: np.random.Generator) -> SignalSource:
 
 def _build_ventricular_tachycardia(rng: np.random.Generator) -> SignalSource:
     return BeatBasedSource(
-        # En la TV no hay actividad auricular organizada que conduzca: el
-        # tren "auricular" solo marca el paso del foco ventricular.
+        # Las aurículas siguen en ritmo sinusal, a su propio paso y sin
+        # relación con el foco ventricular: eso *es* la disociación
+        # auriculoventricular, el hallazgo que distingue una TV de una
+        # taquicardia supraventricular conducida con aberrancia.
+        #
+        # Ponerlas a la misma frecuencia que el foco las sincronizaba latido
+        # a latido: la P caía exactamente sobre el pico de la R, le sumaba un
+        # 10 % de amplitud y producía un PR de 0 ms. Lo contrario de lo que
+        # la descripción clínica de este ritmo promete.
         atrial=RegularTrain(
-            kind=EventKind.ATRIAL, template_id="sinus_p", rate_hz=_bpm(180)
+            kind=EventKind.ATRIAL, template_id="sinus_p", rate_hz=_bpm(75)
         ),
         conduction=CompleteBlock(),
         escape=RegularTrain(
@@ -4347,8 +4408,16 @@ class Measurements:
 
 
 def _pr_mean_s(
-    atrial_times: np.ndarray, ventricular_times: np.ndarray
+    atrial_times: np.ndarray,
+    ventricular_times: np.ndarray,
+    pr_is_measurable: bool,
 ) -> float:
+    if not pr_is_measurable:
+        # El ritmo no tiene PR por definición. No hay nada que promediar y el
+        # umbral estadístico de abajo no basta: en un flutter la relación
+        # F-QRS es perfectamente regular, así que la dispersión es cero y
+        # cualquier guardarraíl basado en dispersión la daría por buena.
+        return math.nan
     if atrial_times.size == 0 or ventricular_times.size == 0:
         return math.nan
     intervals: list[float] = []
@@ -4367,8 +4436,15 @@ def measure(
     events: Sequence[CardiacEvent],
     signal_v: np.ndarray,
     sample_rate_hz: int,
+    pr_is_measurable: bool = True,
 ) -> Measurements:
-    """Extrae las medidas fisiológicas de una simulación."""
+    """Extrae las medidas fisiológicas de una simulación.
+
+    `pr_is_measurable` lo aporta el catálogo, porque es un hecho del ritmo y
+    no de la señal. Sin él, un flutter publicaría un PR de 140 ms: la
+    relación entre la onda F que conduce y su QRS es regular como un reloj,
+    así que ningún guardarraíl estadístico la delata.
+    """
     atrial = np.array(
         [e.t_s for e in events if e.kind is EventKind.ATRIAL], dtype=np.float64
     )
@@ -4404,7 +4480,7 @@ def measure(
         heart_rate_hz=heart_rate_hz,
         rr_mean_s=rr_mean_s,
         rr_std_s=rr_std_s,
-        pr_mean_s=_pr_mean_s(atrial, ventricular),
+        pr_mean_s=_pr_mean_s(atrial, ventricular, pr_is_measurable),
         qrs_duration_s=qrs_s,
         qt_s=qt_s,
         r_amplitude_lead_ii_v=float(signal_v[LEAD_ORDER.index("II")].max()),
