@@ -10,6 +10,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from .config import get_settings
@@ -34,6 +35,18 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Simulador de ECG — API", lifespan=lifespan)
+
+# El WebSocket no pasa por CORSMiddleware — Starlette solo lo aplica a
+# peticiones HTTP normales, y los navegadores no bloquean conexiones WS
+# entre orígenes distintos por CORS (solo por la cabecera Origin, que el
+# servidor tendría que comprobar él mismo si quisiera restringirlo). Esto
+# cubre las rutas REST: catálogo, sesiones, salud.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_settings().cors_origins_list,
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 
 app.include_router(health_router)
 app.include_router(rhythms_router)

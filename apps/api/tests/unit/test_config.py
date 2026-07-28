@@ -10,14 +10,30 @@ def test_settings_have_sane_defaults(monkeypatch):
     # los tests de esta tarea y los de integración corren en la misma sesión.
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("ENGINE_COMMIT", raising=False)
+    monkeypatch.delenv("CORS_ORIGINS", raising=False)
     settings = Settings(_env_file=None)
     assert settings.engine_commit == "dev"
     assert "postgresql+asyncpg://" in settings.database_url
+    assert settings.cors_origins_list == ["http://localhost:5173"]
 
 
 def test_settings_read_from_environment(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://x:x@host/db")
     monkeypatch.setenv("ENGINE_COMMIT", "8c4b92f")
+    monkeypatch.setenv("CORS_ORIGINS", "http://localhost:5173,https://ecg.example.org")
     settings = Settings(_env_file=None)
     assert settings.database_url == "postgresql+asyncpg://x:x@host/db"
     assert settings.engine_commit == "8c4b92f"
+    assert settings.cors_origins_list == [
+        "http://localhost:5173",
+        "https://ecg.example.org",
+    ]
+
+
+def test_cors_origins_list_ignores_blank_entries(monkeypatch):
+    monkeypatch.setenv("CORS_ORIGINS", "http://localhost:5173, ,https://ecg.example.org,")
+    settings = Settings(_env_file=None)
+    assert settings.cors_origins_list == [
+        "http://localhost:5173",
+        "https://ecg.example.org",
+    ]
