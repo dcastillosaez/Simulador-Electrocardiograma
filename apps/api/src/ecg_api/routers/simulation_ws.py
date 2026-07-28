@@ -139,9 +139,14 @@ async def simulation_ws(websocket: WebSocket) -> None:
         # cancela esta corrutina al desconectar. Sin blindar la escritura,
         # esa cancelación puede llegar a mitad de `session.commit()` y la
         # sesión —que ya cumplió el umbral de 5 s— se pierde en silencio.
+        # El shield bloquea a propósito la única vía de escape (la
+        # cancelación del cliente), así que si la conexión a la base de
+        # datos está realmente muerta, `commit()` colgaría para siempre sin
+        # el `fail_after`: mejor fallar en 5 s que no fallar nunca.
         with anyio.CancelScope(shield=True):
-            async with session_factory() as db:
-                await persist_session(db, manager, settings)
+            with anyio.fail_after(5.0):
+                async with session_factory() as db:
+                    await persist_session(db, manager, settings)
         persisted = True
 
     try:
