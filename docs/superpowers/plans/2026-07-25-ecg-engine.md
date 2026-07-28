@@ -544,7 +544,7 @@ Las plantillas son morfología pura: no saben nada de ritmo ni de frecuencia. Un
 **Interfaces:**
 - Consumes: `BeatTemplate`, `GaussianComponent`, `WaveTarget` de `types.py`; `fwhm_s` de `waveform.py`.
 - Produces:
-  - `TEMPLATES: dict[str, BeatTemplate]` con las claves `"sinus_p"`, `"flutter_f"`, `"normal_qrst"`, `"wide_qrst"`, `"escape_qrst"`.
+  - `TEMPLATES: dict[str, BeatTemplate]` con las claves `"sinus_p"`, `"flutter_f"`, `"af_f"`, `"normal_qrst"`, `"wide_qrst"`, `"escape_qrst"`.
   - `get_template(template_id: str) -> BeatTemplate` — lanza `KeyError` con mensaje explícito si no existe.
   - `target_extent_s(template: BeatTemplate, target: WaveTarget) -> tuple[float, float]` — extensión (inicio, fin) del target a ±2,5σ, relativa al instante del evento.
   - `qrs_duration_s(template: BeatTemplate) -> float`
@@ -568,9 +568,10 @@ from ecg_engine.types import WaveTarget
 from ecg_engine.waveform import fwhm_s
 
 
-def test_registry_contains_the_five_mvp_templates():
+def test_registry_contains_the_mvp_templates():
     assert set(TEMPLATES) == {
-        "sinus_p", "flutter_f", "normal_qrst", "wide_qrst", "escape_qrst",
+        "sinus_p", "flutter_f", "af_f",
+        "normal_qrst", "wide_qrst", "escape_qrst",
     }
 
 
@@ -721,11 +722,20 @@ TEMPLATES: dict[str, BeatTemplate] = {
         template_id="sinus_p",
         components=(_p(0.00012, 0.0, 0.011),),
     ),
+    # (las plantillas auriculares siguen abajo)
     # Onda F de flutter: más amplia y puntiaguda, sin línea isoeléctrica
     # entre ondas cuando el tren va a 300/min.
     "flutter_f": BeatTemplate(
         template_id="flutter_f",
         components=(_p(0.00020, 0.0, 0.018),),
+    ),
+    # Onda f de fibrilación auricular: mucho menor que la F del flutter, que
+    # es lo que las distingue en el papel. Su irregularidad no está aquí sino
+    # en el tren que las emite: son las ondas las que llegan a destiempo, no
+    # su forma la que cambia.
+    "af_f": BeatTemplate(
+        template_id="af_f",
+        components=(_p(0.00007, 0.0, 0.013),),
     ),
     # --- Ventriculares -----------------------------------------------------
     # Las posiciones de Q y S importan tanto como sus anchuras: en un ECG real
@@ -886,6 +896,29 @@ def test_atrial_projection_differs_from_ventricular():
     assert ATRIAL_PROJECTION.coefficients != NORMAL_AXIS_PROJECTION.coefficients
 
 
+@pytest.mark.parametrize(
+    "projection", [NORMAL_AXIS_PROJECTION, ATRIAL_PROJECTION], ids=["qrs", "p"]
+)
+def test_no_lead_is_perfectly_isoelectric(projection):
+    """Una derivación exactamente plana no existe en ningún paciente, y en un
+    trazado de doce salta a la vista. Ocurría con aVL cuando el eje se ponía
+    a 60° exactos: I y III valían lo mismo y (I − III)/2 daba cero."""
+    assert all(abs(c) > 0.01 for c in projection.coefficients)
+
+
+def test_augmented_leads_follow_their_definitions():
+    """aVR, aVL y aVF no son coeficientes libres: se derivan de las tres
+    derivaciones de miembros. Si alguien retoca I, II o III sin recalcularlas,
+    el trazado deja de ser geométricamente posible."""
+    c = NORMAL_AXIS_PROJECTION.coefficients
+    i, ii, iii, avr, avl, avf = (
+        c[LEAD_ORDER.index(x)] for x in ("I", "II", "III", "aVR", "aVL", "aVF")
+    )
+    assert avr == pytest.approx(-(i + ii) / 2, abs=1e-9)
+    assert avl == pytest.approx((i - iii) / 2, abs=1e-9)
+    assert avf == pytest.approx((ii + iii) / 2, abs=1e-9)
+
+
 def test_projection_from_mapping_orders_by_canonical_lead_order():
     mapping = {lead: float(i) for i, lead in enumerate(LEAD_ORDER)}
     projection = projection_from_mapping(mapping)
@@ -982,22 +1015,32 @@ def projection_from_mapping(mapping: Mapping[str, float]) -> LeadProjection:
     return LeadProjection(coefficients=tuple(float(mapping[l]) for l in LEAD_ORDER))
 
 
-# Eje cardíaco normal, en torno a +60°. II es la derivación dominante y aVR
+# Eje cardíaco normal, en torno a +50°. II es la derivación dominante y aVR
 # es negativa, como en cualquier ECG bien registrado.
+#
+# El eje está a 50° y no a 60° por un motivo concreto: a 60° exactos, I y III
+# valen lo mismo y aVL = (I − III)/2 sale **cero exacto**. Una derivación
+# perfectamente isoeléctrica en los doce trazados no existe en ningún
+# paciente, y salta a la vista en cuanto se dibuja el ECG en papel. A 50° la
+# aVL queda pequeña y positiva, que es lo normal.
+#
+# En V1 y V2 el complejo es netamente negativo: es el patrón de S dominante
+# en precordiales derechas, con la transición en V3. Con V2 casi en cero el
+# trazado salía plano justo donde un clínico espera la deflexión más ancha.
 NORMAL_AXIS_PROJECTION: LeadProjection = projection_from_mapping(
     {
-        "I": 0.50,
-        "II": 1.00,
-        "III": 0.50,
-        "aVR": -0.75,
-        "aVL": 0.00,
-        "aVF": 0.75,
-        "V1": -0.30,
-        "V2": 0.10,
-        "V3": 0.60,
-        "V4": 1.10,
-        "V5": 1.20,
-        "V6": 0.90,
+        "I": 0.653,
+        "II": 1.000,
+        "III": 0.347,
+        "aVR": -0.827,
+        "aVL": 0.153,
+        "aVF": 0.673,
+        "V1": -0.45,
+        "V2": -0.15,
+        "V3": 0.55,
+        "V4": 1.15,
+        "V5": 1.30,
+        "V6": 0.95,
     }
 )
 
@@ -3662,6 +3705,35 @@ def test_atrial_fibrillation_has_irregular_rr():
     assert rr.std() > 0.08
 
 
+def test_fibrillation_waves_are_irregular_unlike_flutter():
+    """Lo que separa una FA de un flutter en el papel no es solo el RR: es la
+    línea de base. El flutter dibuja dientes de sierra a intervalo constante;
+    la FA, una ondulación que llega a destiempo. Con un tren regular las dos
+    salían idénticas salvo por la frecuencia."""
+    def atrial_intervals(rhythm_id):
+        source = get_rhythm(rhythm_id).build_source(np.random.default_rng(7))
+        times = [
+            e.t_s for e in source.events(0.0, 20.0) if e.kind is EventKind.ATRIAL
+        ]
+        return np.diff(times)
+
+    flutter = atrial_intervals("atrial_flutter")
+    fibrillation = atrial_intervals("atrial_fibrillation")
+
+    assert flutter.std() < 1e-9                      # metrónomo
+    assert fibrillation.std() > 0.2 * fibrillation.mean()   # genuinamente irregular
+
+
+def test_fibrillation_waves_are_smaller_than_flutter_waves():
+    """Las ondas f de la FA son de bajo voltaje; las F del flutter, amplias y
+    puntiagudas. Compartir plantilla las hacía indistinguibles."""
+    from ecg_engine.beat import get_template
+
+    f_wave = get_template("af_f").components[0]
+    flutter_wave = get_template("flutter_f").components[0]
+    assert abs(f_wave.amplitude_v) < abs(flutter_wave.amplitude_v) / 2
+
+
 def test_flutter_conducts_a_fraction_of_its_atrial_waves():
     source = get_rhythm("atrial_flutter").build_source(np.random.default_rng(3))
     events = source.events(0.0, 60.0)
@@ -3837,14 +3909,33 @@ def _sinus_like(
 
 
 def _build_atrial_fibrillation(rng: np.random.Generator) -> SignalSource:
+    # Dos generadores hijos independientes, y esto no es un detalle de
+    # estilo. Aquí hay dos fuentes de aleatoriedad —el tren de ondas f y la
+    # conducción irregular del nodo AV— y ambas cachean su línea temporal
+    # hacia adelante. Si compartieran generador, el orden en que se
+    # intercalan sus extracciones dependería de cómo se trocee el render, y
+    # la señal dejaría de ser la misma pidiéndola entera o por trozos.
+    atrial_rng, conduction_rng = rng.spawn(2)
     return BeatBasedSource(
-        # Actividad auricular caótica de alta frecuencia: ondas f, no ondas P.
-        atrial=RegularTrain(
-            kind=EventKind.ATRIAL, template_id="flutter_f", rate_hz=_bpm(420)
+        # Actividad auricular caótica: ondas f que llegan a destiempo, no un
+        # flutter rápido. Con un tren regular la línea de base salía como un
+        # serrucho perfecto —dientes de sierra a intervalo constante—, que es
+        # justo la morfología del flutter y lo contrario de una fibrilación.
+        # El jitter alto es lo que rompe esa regularidad.
+        atrial=EventTrain(
+            kind=EventKind.ATRIAL,
+            template_id="af_f",
+            rate_hz=_bpm(420),
+            variability=VariabilityParams(
+                rsa_fraction=0.0,
+                amplitude_fraction=0.0,
+                rr_jitter_fraction=0.30,
+            ),
+            rng=atrial_rng,
         ),
         conduction=IrregularConduction(mean_rr_s=0.75, rr_spread_s=0.20),
         variability=VariabilityParams(),
-        rng=rng,
+        rng=conduction_rng,
     )
 
 
