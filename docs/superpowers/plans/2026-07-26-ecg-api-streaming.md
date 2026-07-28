@@ -2522,3 +2522,490 @@ git commit -m "Añadir la persistencia de sesion al cerrarse"
 ```
 
 ---
+
+### Task 13: `WS /ws/simulation` — la ruta caliente
+
+Aquí se conecta todo lo anterior. Dos trampas que conviene conocer antes de tocar el código:
+
+**La caché de `get_settings()` fija la base de datos para toda la sesión de tests.** `Settings` usa `lru_cache`: la primera vez que algo llama a `get_settings()` en todo el proceso de pytest, el resultado queda fijado para el resto — no importa qué variable de entorno cambie después. Como el ciclo de vida de la app (`lifespan`) llama a `get_settings()`, hay que fijar `DATABASE_URL` a la base de test **antes** de que ningún test importe `ecg_api.main`, o los tests de esta tarea y la siguiente acabarían escribiendo en la base de desarrollo según qué test corriera primero.
+
+**Un fallo del motor a mitad de streaming no llega por el mismo camino que un fallo al despachar un mensaje.** El bucle de producción de chunks corre en una tarea de fondo; si el motor lanza ahí, nadie lo ve hasta que se engancha un `done_callback` a esa tarea. Sin eso, el cliente se quedaría sin datos y sin explicación.
+
+**Files:**
+- Create: `apps/api/src/ecg_api/routers/simulation_ws.py`
+- Modify: `apps/api/src/ecg_api/main.py`
+- Modify: `apps/api/tests/integration/conftest.py`
+- Test: `apps/api/tests/integration/test_simulation_ws.py`
+
+**Interfaces:**
+- Consumes: todo lo de las Tareas 6-12.
+- Produces: `WS /ws/simulation`. `app.state.settings`, `app.state.session_factory` disponibles desde el arranque de la aplicación (vía `lifespan`).
+
+- [ ] **Step 1: Write the failing test**
+
+Modificar `apps/api/tests/integration/conftest.py`, añadiendo justo después del docstring del módulo:
+
+```python
+import os
+
+# `get_settings()` está cacheada con `lru_cache`: la primera llamada en todo
+# el proceso de pytest fija los valores para el resto de la sesión. Fijar
+# aquí la URL de la base de test, antes de que ningún módulo de la app
+# importe `ecg_api.config`, es lo que garantiza que el WebSocket y los
+# routers REST —que la leen a través del ciclo de vida de la app— apunten
+# siempre a `ecg_simulator_test`, sin importar qué test se ejecute primero.
+os.environ.setdefault(
+    "DATABASE_URL", "postgresql+asyncpg://ecg:ecg@localhost:5432/ecg_simulator_test"
+)
+os.environ.setdefault("ENGINE_COMMIT", "test")
+```
+
+Crear `apps/api/tests/integration/test_simulation_ws.py`:
+
+```python
+"""Requiere Postgres real: `docker compose up -d db` antes de ejecutar."""
+
+import json
+from unittest.mock import patch
+
+from fastapi.testclient import TestClient
+
+from ecg_api.frames import decode_frame
+from ecg_api.main import app
+
+
+def _next_json_message(ws) -> dict:
+    """Descarta cualquier frame binario en tránsito y devuelve el primer
+    mensaje de texto (JSON). Tras `stop` puede haber uno o dos frames
+    binarios ya en vuelo antes de que llegue `stopped`."""
+    while True:
+        event = ws.receive()
+        if event.get("type") == "websocket.receive" and "text" in event:
+            return json.loads(event["text"])
+
+
+def test_start_receives_started_then_binary_frames():
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/simulation") as ws:
+            ws.send_json(
+                {"type": "start", "rhythm_id": "sinus_normal", "seed": 20260725}
+            )
+            started = ws.receive_json()
+            assert started["type"] == "started"
+            assert started["sample_rate_hz"] == 500
+            assert started["channels"] == 12
+
+            decoded = decode_frame(ws.receive_bytes())
+            assert decoded.sample_rate_hz == 500
+            assert decoded.n_channels == 12
+            assert decoded.sequence_number == 0
+            assert str(decoded.session_id) == started["session_id"]
+
+            ws.send_json({"type": "stop"})
+            stopped = _next_json_message(ws)
+            assert stopped["type"] == "stopped"
+            assert "duration_s" in stopped
+
+
+def test_unknown_rhythm_reports_not_found_without_closing():
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/simulation") as ws:
+            ws.send_json({"type": "start", "rhythm_id": "no_existe"})
+            error = ws.receive_json()
+            assert error["type"] == "error"
+            assert error["code"] == "NOT_FOUND"
+
+            # el socket sigue vivo: un start válido a continuación funciona
+            ws.send_json(
+                {"type": "start", "rhythm_id": "sinus_normal", "seed": 1}
+            )
+            started = ws.receive_json()
+            assert started["type"] == "started"
+
+
+def test_update_before_start_reports_invalid_params_without_closing():
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/simulation") as ws:
+            ws.send_json({"type": "update", "params": {"heart_rate_hz": 1.0}})
+            error = ws.receive_json()
+            assert error["type"] == "error"
+            assert error["code"] == "INVALID_PARAMS"
+
+            ws.send_json(
+                {"type": "start", "rhythm_id": "sinus_normal", "seed": 1}
+            )
+            started = ws.receive_json()
+            assert started["type"] == "started"
+
+
+def test_update_changes_the_rate_observably():
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/simulation") as ws:
+            ws.send_json(
+                {"type": "start", "rhythm_id": "sinus_normal", "seed": 1}
+            )
+            ws.receive_json()
+
+            ws.send_json(
+                {"type": "update", "params": {"heart_rate_hz": 2.0}}
+            )
+            updated = ws.receive_json()
+            assert updated["type"] == "updated"
+            assert updated["params"]["heart_rate_hz"] == 2.0
+
+
+def test_pause_stops_frames_and_resume_continues_them():
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/simulation") as ws:
+            ws.send_json(
+                {"type": "start", "rhythm_id": "sinus_normal", "seed": 1}
+            )
+            ws.receive_json()
+            ws.receive_bytes()  # al menos un frame antes de pausar
+
+            ws.send_json({"type": "pause"})
+            paused = ws.receive_json()
+            assert paused["type"] == "paused"
+
+            ws.send_json({"type": "resume"})
+            resumed = ws.receive_json()
+            assert resumed["type"] == "resumed"
+
+            # tras reanudar, vuelven a llegar frames
+            decode_frame(ws.receive_bytes())
+
+
+def test_sequence_number_is_monotonic_across_several_frames():
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/simulation") as ws:
+            ws.send_json(
+                {"type": "start", "rhythm_id": "sinus_normal", "seed": 5}
+            )
+            ws.receive_json()
+
+            sequence_numbers = [
+                decode_frame(ws.receive_bytes()).sequence_number
+                for _ in range(5)
+            ]
+            assert sequence_numbers == sorted(sequence_numbers)
+            assert len(set(sequence_numbers)) == len(sequence_numbers)
+
+            ws.send_json({"type": "stop"})
+            assert _next_json_message(ws)["type"] == "stopped"
+
+
+def test_engine_failure_during_streaming_sends_error_and_closes_with_1011():
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/simulation") as ws:
+            with patch(
+                "ecg_engine.EcgEngine.generate",
+                side_effect=RuntimeError("fallo simulado del motor"),
+            ):
+                ws.send_json(
+                    {"type": "start", "rhythm_id": "sinus_normal", "seed": 1}
+                )
+                ws.receive_json()  # started
+                error = ws.receive_json()
+                assert error["type"] == "error"
+                assert error["code"] == "ENGINE_FAILURE"
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Con `docker compose up -d db` en marcha:
+
+Run: `cd apps/api && uv run pytest tests/integration/test_simulation_ws.py -v`
+Expected: FAIL con `ModuleNotFoundError: No module named 'ecg_api.routers.simulation_ws'` (o 404 al conectar el WebSocket, si el módulo importa pero la ruta no está registrada)
+
+- [ ] **Step 3: Write minimal implementation**
+
+Crear `apps/api/src/ecg_api/routers/simulation_ws.py`:
+
+```python
+"""WS /ws/simulation — la ruta caliente.
+
+Controla el ciclo de vida completo de una simulación: recibe mensajes de
+control en JSON, produce chunks en tareas de fondo, y los envía en binario
+a través de una cola con descarte de lo más antiguo. Persiste la sesión
+exactamente una vez, al cerrarse — nunca durante el streaming.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import functools
+import logging
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+
+from ..errors import SimulationError
+from ..outbox import FrameOutbox
+from ..persistence import persist_session, should_persist
+from ..schemas import (
+    ClientMessageError,
+    PauseMessage,
+    PingMessage,
+    ResumeMessage,
+    StartMessage,
+    StopMessage,
+    UpdateMessage,
+    error_message,
+    parse_client_message,
+    paused_message,
+    resumed_message,
+    started_message,
+    stopped_message,
+    updated_message,
+)
+from ..simulation import SimulationManager
+from ..streaming import stream_chunks
+
+router = APIRouter()
+logger = logging.getLogger("ecg_api.simulation_ws")
+
+OUTBOX_MAXSIZE = 20
+
+
+async def _sender_loop(websocket: WebSocket, outbox: FrameOutbox) -> None:
+    while True:
+        frame = await outbox.get()
+        await websocket.send_bytes(frame)
+
+
+def _log_engine_failure(manager: SimulationManager, exc: BaseException) -> None:
+    logger.error(
+        "fallo del motor: session_id=%s seed=%s",
+        manager.session_id,
+        manager.seed if manager.session_id else None,
+        exc_info=exc,
+    )
+
+
+async def _close_after_engine_failure(websocket: WebSocket, detail: str) -> None:
+    try:
+        await websocket.send_json(
+            error_message(code="ENGINE_FAILURE", detail=detail)
+        )
+    except Exception:  # noqa: BLE001 — el socket puede estar ya cerrado
+        pass
+    try:
+        await websocket.close(code=1011)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _on_background_task_done(
+    task: asyncio.Task, *, websocket: WebSocket, manager: SimulationManager
+) -> None:
+    """Un fallo del motor durante el streaming corre en una tarea de fondo,
+    no en el bucle que despacha mensajes. Sin este enganche, el cliente se
+    quedaría sin datos y sin ningún `error` que lo explique."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is None:
+        return
+    _log_engine_failure(manager, exc)
+    asyncio.create_task(_close_after_engine_failure(websocket, str(exc)))
+
+
+async def _stop_background_tasks(tasks: list[asyncio.Task]) -> None:
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _reject_if_no_active_session(
+    websocket: WebSocket, manager: SimulationManager
+) -> bool:
+    """True si ya se envió un error y el mensaje debe descartarse."""
+    if manager.session_id is not None:
+        return False
+    await websocket.send_json(
+        error_message(
+            code="INVALID_PARAMS",
+            detail="no hay ninguna simulación activa; envía 'start' primero",
+        )
+    )
+    return True
+
+
+@router.websocket("/ws/simulation")
+async def simulation_ws(websocket: WebSocket) -> None:
+    await websocket.accept()
+
+    settings = websocket.app.state.settings
+    session_factory = websocket.app.state.session_factory
+
+    manager = SimulationManager()
+    outbox = FrameOutbox(maxsize=OUTBOX_MAXSIZE)
+    background_tasks: list[asyncio.Task] = []
+    persisted = False
+
+    async def _maybe_persist() -> None:
+        nonlocal persisted
+        if persisted or not should_persist(manager):
+            return
+        async with session_factory() as db:
+            await persist_session(db, manager, settings)
+        persisted = True
+
+    try:
+        while True:
+            raw = await websocket.receive_text()
+
+            try:
+                message = parse_client_message(raw)
+            except ClientMessageError as exc:
+                await websocket.send_json(
+                    error_message(code="INVALID_PARAMS", detail=str(exc))
+                )
+                continue
+
+            if isinstance(message, StartMessage):
+                try:
+                    session_id = manager.start(
+                        message.rhythm_id,
+                        message.params.to_engine_params()
+                        if message.params
+                        else None,
+                        message.seed,
+                    )
+                except SimulationError as exc:
+                    await websocket.send_json(
+                        error_message(code=exc.code, detail=str(exc))
+                    )
+                    continue
+                await websocket.send_json(
+                    started_message(
+                        session_id=session_id,
+                        seed=manager.seed,
+                        sample_rate_hz=settings.sample_rate_hz,
+                        channels=12,
+                    )
+                )
+                producer_task = asyncio.create_task(
+                    stream_chunks(manager, outbox, settings.sample_rate_hz)
+                )
+                sender_task = asyncio.create_task(_sender_loop(websocket, outbox))
+                for task in (producer_task, sender_task):
+                    task.add_done_callback(
+                        functools.partial(
+                            _on_background_task_done,
+                            websocket=websocket,
+                            manager=manager,
+                        )
+                    )
+                background_tasks = [producer_task, sender_task]
+
+            elif isinstance(message, UpdateMessage):
+                if await _reject_if_no_active_session(websocket, manager):
+                    continue
+                applied = manager.update(message.params.to_engine_params())
+                await websocket.send_json(updated_message(params=applied))
+
+            elif isinstance(message, PauseMessage):
+                if await _reject_if_no_active_session(websocket, manager):
+                    continue
+                manager.pause()
+                await websocket.send_json(paused_message())
+
+            elif isinstance(message, ResumeMessage):
+                if await _reject_if_no_active_session(websocket, manager):
+                    continue
+                manager.resume()
+                await websocket.send_json(resumed_message())
+
+            elif isinstance(message, StopMessage):
+                if await _reject_if_no_active_session(websocket, manager):
+                    continue
+                duration_s = manager.stop()
+                await _stop_background_tasks(background_tasks)
+                await websocket.send_json(stopped_message(duration_s=duration_s))
+                await _maybe_persist()
+                return
+
+            elif isinstance(message, PingMessage):
+                continue  # reservado: se reconoce, no se despacha en fase 1
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:  # noqa: BLE001 — cualquier fallo no anticipado en
+        # el bucle principal se trata como ENGINE_FAILURE: el catálogo de
+        # códigos de la spec no distingue más granularidad, y cerrar la
+        # conexión es lo seguro cuando no se sabe en qué estado quedó la
+        # sesión.
+        _log_engine_failure(manager, exc)
+        await _close_after_engine_failure(websocket, str(exc))
+    finally:
+        await _stop_background_tasks(background_tasks)
+        await _maybe_persist()
+```
+
+Modificar `apps/api/src/ecg_api/main.py` por completo:
+
+```python
+"""Punto de entrada de la API.
+
+Un solo worker de uvicorn: el estado de simulación vive en memoria del
+proceso que sostiene cada WebSocket, y varios workers romperían ese
+binding. Es una restricción de despliegue documentada, no un accidente.
+"""
+
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from .config import get_settings
+from .db.base import get_engine
+from .db.seed import seed_catalog
+from .routers.health import router as health_router
+from .routers.rhythms import router as rhythms_router
+from .routers.simulation_ws import router as simulation_ws_router
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings = get_settings()
+    app.state.settings = settings
+    engine = get_engine(settings.database_url)
+    app.state.session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with app.state.session_factory() as session:
+        await seed_catalog(session, settings)
+    yield
+    await engine.dispose()
+
+
+app = FastAPI(title="Simulador de ECG — API", lifespan=lifespan)
+
+app.include_router(health_router)
+app.include_router(rhythms_router)
+app.include_router(simulation_ws_router)
+```
+
+Los tests de las Tareas 1 y 5 usan `TestClient(app)` sin bloque `with`, que no dispara el ciclo de vida — y ni `/api/health` ni `/api/rhythms` leen `app.state`, así que siguen en verde sin tocarlos.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Primero confirma que nada se rompió:
+
+Run: `cd apps/api && uv run pytest tests/unit -v`
+Expected: PASS, todos los tests unitarios en verde
+
+Con `docker compose up -d db` en marcha:
+
+Run: `cd apps/api && uv run pytest tests/integration/test_simulation_ws.py -v`
+Expected: PASS, 7 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api/src/ecg_api/routers/simulation_ws.py apps/api/src/ecg_api/main.py apps/api/tests/integration/conftest.py apps/api/tests/integration/test_simulation_ws.py
+git commit -m "Conectar el websocket de simulacion: la ruta caliente completa"
+```
+
+---
