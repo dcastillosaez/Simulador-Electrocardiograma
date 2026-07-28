@@ -2,7 +2,7 @@
   "heart_rate_hz": 2.5,
   "rr_mean_s": 0.4000000000000001,
   "rr_std_s": 3.284083995358298e-16,
-  "pr_mean_s": 0.14,
+  "pr_mean_s": null,
   "qrs_duration_s": 0.0865,
   "qt_s": 0.39975,
   "r_amplitude_lead_ii_v": 0.0010312343329829967

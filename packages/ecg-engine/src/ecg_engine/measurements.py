@@ -44,8 +44,16 @@ class Measurements:
 
 
 def _pr_mean_s(
-    atrial_times: np.ndarray, ventricular_times: np.ndarray
+    atrial_times: np.ndarray,
+    ventricular_times: np.ndarray,
+    pr_is_measurable: bool,
 ) -> float:
+    if not pr_is_measurable:
+        # El ritmo no tiene PR por definición. No hay nada que promediar y el
+        # umbral estadístico de abajo no basta: en un flutter la relación
+        # F-QRS es perfectamente regular, así que la dispersión es cero y
+        # cualquier guardarraíl basado en dispersión la daría por buena.
+        return math.nan
     if atrial_times.size == 0 or ventricular_times.size == 0:
         return math.nan
     intervals: list[float] = []
@@ -64,8 +72,15 @@ def measure(
     events: Sequence[CardiacEvent],
     signal_v: np.ndarray,
     sample_rate_hz: int,
+    pr_is_measurable: bool = True,
 ) -> Measurements:
-    """Extrae las medidas fisiológicas de una simulación."""
+    """Extrae las medidas fisiológicas de una simulación.
+
+    `pr_is_measurable` lo aporta el catálogo, porque es un hecho del ritmo y
+    no de la señal. Sin él, un flutter publicaría un PR de 140 ms: la
+    relación entre la onda F que conduce y su QRS es regular como un reloj,
+    así que ningún guardarraíl estadístico la delata.
+    """
     atrial = np.array(
         [e.t_s for e in events if e.kind is EventKind.ATRIAL], dtype=np.float64
     )
@@ -101,7 +116,7 @@ def measure(
         heart_rate_hz=heart_rate_hz,
         rr_mean_s=rr_mean_s,
         rr_std_s=rr_std_s,
-        pr_mean_s=_pr_mean_s(atrial, ventricular),
+        pr_mean_s=_pr_mean_s(atrial, ventricular, pr_is_measurable),
         qrs_duration_s=qrs_s,
         qt_s=qt_s,
         r_amplitude_lead_ii_v=float(signal_v[LEAD_ORDER.index("II")].max()),

@@ -10,7 +10,7 @@ import pathlib
 
 import numpy as np
 
-from ecg_engine import EcgEngine, EngineParams, NoiseParams, measure
+from ecg_engine import EcgEngine, EngineParams, NoiseParams, get_rhythm, measure
 
 GOLDEN_SEED: int = 20260725
 GOLDEN_DURATION_S: float = 10.0
@@ -51,7 +51,12 @@ def simulate(rhythm_id: str, noisy: bool) -> dict:
         "events": [
             (e.kind.value, round(e.t_s, 6), e.template_id, e.index) for e in events
         ],
-        "measurements": measure(events, signal, GOLDEN_SAMPLE_RATE_HZ).as_dict(),
+        "measurements": measure(
+            events,
+            signal,
+            GOLDEN_SAMPLE_RATE_HZ,
+            get_rhythm(rhythm_id).pr_is_measurable,
+        ).as_dict(),
     }
 
 

@@ -12,22 +12,10 @@
     0
   ],
   [
-    "atrial",
-    0.333333,
-    "sinus_p",
-    1
-  ],
-  [
     "ventricular",
     0.333333,
     "wide_qrst",
     1
-  ],
-  [
-    "atrial",
-    0.666667,
-    "sinus_p",
-    2
   ],
   [
     "ventricular",
@@ -37,21 +25,15 @@
   ],
   [
     "atrial",
-    1.0,
+    0.8,
     "sinus_p",
-    3
+    1
   ],
   [
     "ventricular",
     1.0,
     "wide_qrst",
     3
-  ],
-  [
-    "atrial",
-    1.333333,
-    "sinus_p",
-    4
   ],
   [
     "ventricular",
@@ -61,9 +43,9 @@
   ],
   [
     "atrial",
-    1.666667,
+    1.6,
     "sinus_p",
-    5
+    2
   ],
   [
     "ventricular",
@@ -72,22 +54,10 @@
     5
   ],
   [
-    "atrial",
-    2.0,
-    "sinus_p",
-    6
-  ],
-  [
     "ventricular",
     2.0,
     "wide_qrst",
     6
-  ],
-  [
-    "atrial",
-    2.333333,
-    "sinus_p",
-    7
   ],
   [
     "ventricular",
@@ -97,21 +67,15 @@
   ],
   [
     "atrial",
-    2.666667,
+    2.4,
     "sinus_p",
-    8
+    3
   ],
   [
     "ventricular",
     2.666667,
     "wide_qrst",
     8
-  ],
-  [
-    "atrial",
-    3.0,
-    "sinus_p",
-    9
   ],
   [
     "ventricular",
@@ -121,21 +85,15 @@
   ],
   [
     "atrial",
-    3.333333,
+    3.2,
     "sinus_p",
-    10
+    4
   ],
   [
     "ventricular",
     3.333333,
     "wide_qrst",
     10
-  ],
-  [
-    "atrial",
-    3.666667,
-    "sinus_p",
-    11
   ],
   [
     "ventricular",
@@ -147,7 +105,7 @@
     "atrial",
     4.0,
     "sinus_p",
-    12
+    5
   ],
   [
     "ventricular",
@@ -156,22 +114,10 @@
     12
   ],
   [
-    "atrial",
-    4.333333,
-    "sinus_p",
-    13
-  ],
-  [
     "ventricular",
     4.333333,
     "wide_qrst",
     13
-  ],
-  [
-    "atrial",
-    4.666667,
-    "sinus_p",
-    14
   ],
   [
     "ventricular",
@@ -181,21 +127,15 @@
   ],
   [
     "atrial",
-    5.0,
+    4.8,
     "sinus_p",
-    15
+    6
   ],
   [
     "ventricular",
     5.0,
     "wide_qrst",
     15
-  ],
-  [
-    "atrial",
-    5.333333,
-    "sinus_p",
-    16
   ],
   [
     "ventricular",
@@ -205,9 +145,9 @@
   ],
   [
     "atrial",
-    5.666667,
+    5.6,
     "sinus_p",
-    17
+    7
   ],
   [
     "ventricular",
@@ -216,22 +156,10 @@
     17
   ],
   [
-    "atrial",
-    6.0,
-    "sinus_p",
-    18
-  ],
-  [
     "ventricular",
     6.0,
     "wide_qrst",
     18
-  ],
-  [
-    "atrial",
-    6.333333,
-    "sinus_p",
-    19
   ],
   [
     "ventricular",
@@ -241,21 +169,15 @@
   ],
   [
     "atrial",
-    6.666667,
+    6.4,
     "sinus_p",
-    20
+    8
   ],
   [
     "ventricular",
     6.666667,
     "wide_qrst",
     20
-  ],
-  [
-    "atrial",
-    7.0,
-    "sinus_p",
-    21
   ],
   [
     "ventricular",
@@ -265,21 +187,15 @@
   ],
   [
     "atrial",
-    7.333333,
+    7.2,
     "sinus_p",
-    22
+    9
   ],
   [
     "ventricular",
     7.333333,
     "wide_qrst",
     22
-  ],
-  [
-    "atrial",
-    7.666667,
-    "sinus_p",
-    23
   ],
   [
     "ventricular",
@@ -291,7 +207,7 @@
     "atrial",
     8.0,
     "sinus_p",
-    24
+    10
   ],
   [
     "ventricular",
@@ -300,22 +216,10 @@
     24
   ],
   [
-    "atrial",
-    8.333333,
-    "sinus_p",
-    25
-  ],
-  [
     "ventricular",
     8.333333,
     "wide_qrst",
     25
-  ],
-  [
-    "atrial",
-    8.666667,
-    "sinus_p",
-    26
   ],
   [
     "ventricular",
@@ -325,21 +229,15 @@
   ],
   [
     "atrial",
-    9.0,
+    8.8,
     "sinus_p",
-    27
+    11
   ],
   [
     "ventricular",
     9.0,
     "wide_qrst",
     27
-  ],
-  [
-    "atrial",
-    9.333333,
-    "sinus_p",
-    28
   ],
   [
     "ventricular",
@@ -349,9 +247,9 @@
   ],
   [
     "atrial",
-    9.666667,
+    9.6,
     "sinus_p",
-    29
+    12
   ],
   [
     "ventricular",

@@ -1,8 +1,11 @@
+import math
+
 import numpy as np
 import pytest
 
 from ecg_engine.catalog import RHYTHM_IDS, get_rhythm, list_rhythms
 from ecg_engine.catalog.definitions import ParameterRange, RhythmCategory
+from ecg_engine.measurements import measure
 from ecg_engine.types import N_LEADS, EventKind
 
 EXPECTED_IDS = {
@@ -203,6 +206,51 @@ def test_blocks_are_the_only_rhythms_where_command_and_pulse_differ(rhythm_id):
         assert diverges
     else:
         assert not diverges
+
+
+@pytest.mark.parametrize(
+    "rhythm_id",
+    ["atrial_fibrillation", "atrial_flutter", "ventricular_tachycardia",
+     "ventricular_fibrillation", "av_block_third"],
+)
+def test_rhythms_without_a_pr_declare_it(rhythm_id):
+    """En estos cinco ritmos no existe intervalo PR. En la FA no hay onda P
+    que medir, en el flutter la relación F-QRS no es lo que nadie llama PR,
+    y en la TV y el bloqueo completo las aurículas van disociadas."""
+    assert not get_rhythm(rhythm_id).pr_is_measurable
+
+
+@pytest.mark.parametrize("rhythm_id", sorted(EXPECTED_IDS))
+def test_declared_pr_matches_what_the_measurement_reports(rhythm_id):
+    """Coherencia entre lo que el catálogo declara y lo que sale medido. Un
+    ritmo que declara no tener PR no puede publicar un número, y uno que
+    declara tenerlo no puede publicar NaN."""
+    definition = get_rhythm(rhythm_id)
+    source = definition.build_source(np.random.default_rng(20260725))
+    events = source.events(0.0, 30.0) if hasattr(source, "events") else []
+    result = measure(
+        events, source.render(0.0, 15000, 500), 500, definition.pr_is_measurable
+    )
+    assert math.isnan(result.pr_mean_s) != definition.pr_is_measurable
+
+
+def test_ventricular_tachycardia_is_genuinely_dissociated():
+    """El hallazgo que distingue una TV de una supraventricular con
+    aberrancia. Con ambos trenes a la misma frecuencia la P caía sobre el
+    pico de la R, le sumaba amplitud y daba un PR de 0 ms: sincronía
+    perfecta donde la descripción promete disociación."""
+    source = get_rhythm("ventricular_tachycardia").build_source(
+        np.random.default_rng(20260725)
+    )
+    events = source.events(0.0, 30.0)
+    atrial = [e.t_s for e in events if e.kind is EventKind.ATRIAL]
+    ventricular = [e.t_s for e in events if e.kind is EventKind.VENTRICULAR]
+
+    assert len(ventricular) > len(atrial) * 2  # el ventrículo va mucho más rápido
+
+    # Ninguna P puede caer sistemáticamente sobre un QRS.
+    closest = [min(abs(v - a) for v in ventricular) for a in atrial]
+    assert max(closest) > 0.05
 
 
 def test_no_rhythm_specific_branching_in_the_engine():
