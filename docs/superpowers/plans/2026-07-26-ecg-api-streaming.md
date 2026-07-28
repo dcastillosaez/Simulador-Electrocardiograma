@@ -1418,3 +1418,667 @@ git commit -m "Añadir el codificador y decodificador del frame binario"
 ```
 
 ---
+
+### Task 7: Esquemas de mensajes del WebSocket
+
+**Files:**
+- Modify: `apps/api/src/ecg_api/schemas.py`
+- Test: `apps/api/tests/unit/test_ws_schemas.py`
+
+**Interfaces:**
+- Consumes: `ecg_engine.EngineParams`, `ecg_engine.NoiseParams`, `ecg_engine.VariabilityParams`.
+- Produces: `StartMessage`, `UpdateMessage`, `PauseMessage`, `ResumeMessage`, `StopMessage`, `PingMessage`, `ClientMessage` (union), `ClientMessageError`, `parse_client_message(raw: str) -> ClientMessage`, `engine_params_to_dict(params: EngineParams) -> dict`, y los constructores de mensajes salientes `started_message`, `updated_message`, `paused_message`, `resumed_message`, `stopped_message`, `error_message`.
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `apps/api/tests/unit/test_ws_schemas.py`:
+
+```python
+import json
+import uuid
+
+import pytest
+
+from ecg_api.schemas import (
+    ClientMessageError,
+    EngineParamsPayload,
+    PauseMessage,
+    PingMessage,
+    ResumeMessage,
+    StartMessage,
+    StopMessage,
+    UpdateMessage,
+    engine_params_to_dict,
+    error_message,
+    parse_client_message,
+    started_message,
+    stopped_message,
+    updated_message,
+)
+from ecg_engine import EngineParams, NoiseParams
+
+
+def test_parse_start_message_with_full_params():
+    raw = json.dumps({
+        "type": "start", "rhythm_id": "sinus_normal", "seed": 20260725,
+        "params": {"heart_rate_hz": 1.2},
+    })
+    message = parse_client_message(raw)
+    assert isinstance(message, StartMessage)
+    assert message.rhythm_id == "sinus_normal"
+    assert message.seed == 20260725
+    assert message.params.heart_rate_hz == 1.2
+
+
+def test_parse_start_message_without_params_defers_to_rhythm_defaults():
+    raw = json.dumps({"type": "start", "rhythm_id": "sinus_normal"})
+    message = parse_client_message(raw)
+    assert message.params is None
+    assert message.seed is None
+
+
+def test_parse_update_message():
+    raw = json.dumps({"type": "update", "params": {"heart_rate_hz": 1.5}})
+    message = parse_client_message(raw)
+    assert isinstance(message, UpdateMessage)
+    assert message.params.heart_rate_hz == 1.5
+
+
+@pytest.mark.parametrize(
+    "type_, cls",
+    [("pause", PauseMessage), ("resume", ResumeMessage), ("stop", StopMessage)],
+)
+def test_parse_control_messages_without_body(type_, cls):
+    message = parse_client_message(json.dumps({"type": type_}))
+    assert isinstance(message, cls)
+
+
+def test_ping_is_recognised_but_reserved():
+    """No se despacha en fase 1, pero el tipo ya existe en el protocolo: se
+    podrá activar sin romper clientes que ya lo envían sin esperar respuesta."""
+    message = parse_client_message(json.dumps({"type": "ping"}))
+    assert isinstance(message, PingMessage)
+
+
+def test_parse_rejects_unknown_type():
+    with pytest.raises(ClientMessageError, match="desconocido"):
+        parse_client_message(json.dumps({"type": "teleport"}))
+
+
+def test_parse_rejects_invalid_json():
+    with pytest.raises(ClientMessageError):
+        parse_client_message("{not json")
+
+
+def test_parse_rejects_update_without_params():
+    with pytest.raises(ClientMessageError):
+        parse_client_message(json.dumps({"type": "update"}))
+
+
+def test_engine_params_payload_round_trips_to_engine_params():
+    payload = EngineParamsPayload(heart_rate_hz=70 / 60)
+    params = payload.to_engine_params()
+    assert isinstance(params, EngineParams)
+    assert params.heart_rate_hz == pytest.approx(70 / 60)
+    assert isinstance(params.noise, NoiseParams)
+
+
+def test_engine_params_to_dict_is_the_inverse_shape():
+    params = EngineParams(heart_rate_hz=1.5)
+    payload = engine_params_to_dict(params)
+    assert payload["heart_rate_hz"] == 1.5
+    assert payload["noise"]["emg_v"] == 0.0
+    assert "rsa_fraction" in payload["variability"]
+
+
+def test_server_message_builders_produce_the_documented_shape():
+    session_id = uuid.uuid4()
+    assert started_message(
+        session_id=session_id, seed=1, sample_rate_hz=500, channels=12
+    ) == {
+        "type": "started", "session_id": str(session_id), "seed": 1,
+        "sample_rate_hz": 500, "channels": 12,
+    }
+    assert stopped_message(duration_s=12.5) == {
+        "type": "stopped", "duration_s": 12.5,
+    }
+    assert error_message(code="NOT_FOUND", detail="x") == {
+        "type": "error", "code": "NOT_FOUND", "detail": "x",
+    }
+    assert (
+        updated_message(params=EngineParams(heart_rate_hz=1.0))["params"][
+            "heart_rate_hz"
+        ]
+        == 1.0
+    )
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd apps/api && uv run pytest tests/unit/test_ws_schemas.py -v`
+Expected: FAIL con `ImportError: cannot import name 'StartMessage' from 'ecg_api.schemas'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Añadir al final de `apps/api/src/ecg_api/schemas.py`:
+
+```python
+# --- WebSocket: parámetros del motor --------------------------------------
+
+import json
+import uuid
+from dataclasses import asdict
+from typing import Literal, Union
+
+from pydantic import Field, ValidationError
+
+from ecg_engine import EngineParams, NoiseParams, VariabilityParams
+
+
+class NoiseParamsPayload(BaseModel):
+    emg_v: float = 0.0
+    mains_v: float = 0.0
+    baseline_v: float = 0.0
+    motion_v: float = 0.0
+    clip_v: float | None = None
+
+
+class VariabilityParamsPayload(BaseModel):
+    respiration_hz: float = 0.25
+    rsa_fraction: float = 0.04
+    amplitude_fraction: float = 0.03
+    rr_jitter_fraction: float = 0.015
+
+
+class EngineParamsPayload(BaseModel):
+    heart_rate_hz: float
+    noise: NoiseParamsPayload = Field(default_factory=NoiseParamsPayload)
+    variability: VariabilityParamsPayload = Field(
+        default_factory=VariabilityParamsPayload
+    )
+
+    def to_engine_params(self) -> EngineParams:
+        return EngineParams(
+            heart_rate_hz=self.heart_rate_hz,
+            noise=NoiseParams(**self.noise.model_dump()),
+            variability=VariabilityParams(**self.variability.model_dump()),
+        )
+
+
+def engine_params_to_dict(params: EngineParams) -> dict:
+    """El sentido inverso de `to_engine_params`, para mensajes salientes y
+    para la columna `params` de la sesión persistida. Sin Pydantic de por
+    medio: `EngineParams` y sus dataclasses anidadas ya son inmutables y
+    completas, no hace falta validarlas otra vez, solo volcarlas."""
+    return {
+        "heart_rate_hz": params.heart_rate_hz,
+        "noise": asdict(params.noise),
+        "variability": asdict(params.variability),
+    }
+
+
+# --- WebSocket: mensajes del cliente ---------------------------------------
+
+class StartMessage(BaseModel):
+    type: Literal["start"]
+    rhythm_id: str
+    params: EngineParamsPayload | None = None
+    seed: int | None = None
+
+
+class UpdateMessage(BaseModel):
+    type: Literal["update"]
+    params: EngineParamsPayload
+
+
+class PauseMessage(BaseModel):
+    type: Literal["pause"]
+
+
+class ResumeMessage(BaseModel):
+    type: Literal["resume"]
+
+
+class StopMessage(BaseModel):
+    type: Literal["stop"]
+
+
+class PingMessage(BaseModel):
+    """Reservado. Se reconoce pero no se despacha en fase 1: la versión del
+    contrato queda lista para medir latencia sin romper clientes existentes
+    cuando haga falta en fase 2."""
+
+    type: Literal["ping"]
+
+
+ClientMessage = Union[
+    StartMessage, UpdateMessage, PauseMessage, ResumeMessage, StopMessage,
+    PingMessage,
+]
+
+_MESSAGE_TYPES: dict[str, type[BaseModel]] = {
+    "start": StartMessage,
+    "update": UpdateMessage,
+    "pause": PauseMessage,
+    "resume": ResumeMessage,
+    "stop": StopMessage,
+    "ping": PingMessage,
+}
+
+
+class ClientMessageError(ValueError):
+    """JSON inválido, tipo desconocido, o el cuerpo no valida contra su
+    esquema. El llamante la traduce a `error {code: "INVALID_PARAMS"}`."""
+
+
+def parse_client_message(raw: str) -> ClientMessage:
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ClientMessageError(f"JSON inválido: {exc}") from exc
+    if not isinstance(payload, dict) or "type" not in payload:
+        raise ClientMessageError("falta el campo 'type'")
+    model = _MESSAGE_TYPES.get(payload["type"])
+    if model is None:
+        raise ClientMessageError(
+            f"tipo de mensaje desconocido: {payload['type']!r}"
+        )
+    try:
+        return model.model_validate(payload)
+    except ValidationError as exc:
+        raise ClientMessageError(str(exc)) from exc
+
+
+# --- WebSocket: mensajes del servidor ---------------------------------------
+
+def started_message(
+    *, session_id: uuid.UUID, seed: int, sample_rate_hz: int, channels: int
+) -> dict:
+    return {
+        "type": "started",
+        "session_id": str(session_id),
+        "seed": seed,
+        "sample_rate_hz": sample_rate_hz,
+        "channels": channels,
+    }
+
+
+def updated_message(*, params: EngineParams) -> dict:
+    return {"type": "updated", "params": engine_params_to_dict(params)}
+
+
+def paused_message() -> dict:
+    return {"type": "paused"}
+
+
+def resumed_message() -> dict:
+    return {"type": "resumed"}
+
+
+def stopped_message(*, duration_s: float) -> dict:
+    return {"type": "stopped", "duration_s": duration_s}
+
+
+def error_message(*, code: str, detail: str) -> dict:
+    return {"type": "error", "code": code, "detail": detail}
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd apps/api && uv run pytest tests/unit/test_ws_schemas.py -v`
+Expected: PASS, 13 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api/src/ecg_api/schemas.py apps/api/tests/unit/test_ws_schemas.py
+git commit -m "Añadir esquemas de mensajes del websocket de simulacion"
+```
+
+---
+
+### Task 8: Errores de dominio
+
+**Files:**
+- Create: `apps/api/src/ecg_api/errors.py`
+- Test: `apps/api/tests/unit/test_errors.py`
+
+**Interfaces:**
+- Consumes: nada.
+- Produces: `SimulationError`, `RhythmNotFoundError` (`code = "NOT_FOUND"`), `InvalidParamsError` (`code = "INVALID_PARAMS"`), `EngineFailureError` (`code = "ENGINE_FAILURE"`).
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `apps/api/tests/unit/test_errors.py`:
+
+```python
+from ecg_api.errors import (
+    EngineFailureError,
+    InvalidParamsError,
+    RhythmNotFoundError,
+    SimulationError,
+)
+
+
+def test_each_error_carries_the_documented_code():
+    assert RhythmNotFoundError("x").code == "NOT_FOUND"
+    assert InvalidParamsError("x").code == "INVALID_PARAMS"
+    assert EngineFailureError("x").code == "ENGINE_FAILURE"
+
+
+def test_all_domain_errors_derive_from_simulation_error():
+    assert issubclass(RhythmNotFoundError, SimulationError)
+    assert issubclass(InvalidParamsError, SimulationError)
+    assert issubclass(EngineFailureError, SimulationError)
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd apps/api && uv run pytest tests/unit/test_errors.py -v`
+Expected: FAIL con `ModuleNotFoundError: No module named 'ecg_api.errors'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Crear `apps/api/src/ecg_api/errors.py`:
+
+```python
+"""Excepciones de dominio del streaming, con su código de error de red.
+
+Se traducen a `error {code, detail}` en el endpoint del WebSocket. Solo
+`EngineFailureError` cierra el socket (código 1011); las otras dos dejan la
+conexión abierta para que el cliente pueda corregir y reintentar sin
+reconectar — no hay bucles de reconexión automática en este proyecto.
+"""
+
+from __future__ import annotations
+
+
+class SimulationError(Exception):
+    code: str = "UNKNOWN"
+
+
+class RhythmNotFoundError(SimulationError):
+    code = "NOT_FOUND"
+
+
+class InvalidParamsError(SimulationError):
+    code = "INVALID_PARAMS"
+
+
+class EngineFailureError(SimulationError):
+    code = "ENGINE_FAILURE"
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd apps/api && uv run pytest tests/unit/test_errors.py -v`
+Expected: PASS, 2 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api/src/ecg_api/errors.py apps/api/tests/unit/test_errors.py
+git commit -m "Añadir las excepciones de dominio del streaming"
+```
+
+---
+
+### Task 9: `SimulationManager`
+
+El envoltorio del motor por conexión. No sabe nada de WebSockets, JSON ni frames binarios: solo el ciclo de vida de una sesión. Esa separación es lo que permite testear toda la lógica sin abrir un socket.
+
+**Files:**
+- Create: `apps/api/src/ecg_api/simulation.py`
+- Test: `apps/api/tests/unit/test_simulation_manager.py`
+
+**Interfaces:**
+- Consumes: `ecg_engine.EcgEngine`, `ecg_engine.EngineParams`; `RhythmNotFoundError` de la Tarea 8.
+- Produces: `SimulationState` (enum: `RUNNING`, `PAUSED`, `STOPPED`), `Chunk` (`sequence_number: int`, `t_start_s: float`, `channels_v: np.ndarray`), `SimulationManager` con `start()`, `update()`, `pause()`, `resume()`, `stop()`, `next_chunk()`, y las propiedades `session_id`, `state`, `started_at`, `rhythm_id`, `seed`, `params`, `duration_s`.
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `apps/api/tests/unit/test_simulation_manager.py`:
+
+```python
+import uuid
+
+import pytest
+
+from ecg_api.errors import RhythmNotFoundError
+from ecg_api.simulation import CHUNK_SAMPLES, SimulationManager, SimulationState
+from ecg_engine import EngineParams
+from ecg_engine.types import N_LEADS
+
+
+def test_start_returns_a_fresh_session_id_and_sets_running():
+    manager = SimulationManager()
+    session_id = manager.start("sinus_normal", None, 20260725)
+    assert isinstance(session_id, uuid.UUID)
+    assert manager.session_id == session_id
+    assert manager.state is SimulationState.RUNNING
+    assert manager.rhythm_id == "sinus_normal"
+    assert manager.seed == 20260725
+
+
+def test_start_without_seed_assigns_one():
+    manager = SimulationManager()
+    manager.start("sinus_normal", None, None)
+    assert isinstance(manager.seed, int)
+
+
+def test_start_without_params_uses_the_rhythm_defaults():
+    manager = SimulationManager()
+    manager.start("sinus_normal", None, 1)
+    assert manager.params.heart_rate_hz == pytest.approx(70 / 60)
+
+
+def test_start_with_unknown_rhythm_raises_the_domain_error():
+    manager = SimulationManager()
+    with pytest.raises(RhythmNotFoundError):
+        manager.start("no_existe", None, 1)
+    assert manager.state is SimulationState.STOPPED  # no quedó a medias
+
+
+def test_next_chunk_has_the_documented_shape():
+    manager = SimulationManager()
+    manager.start("sinus_normal", None, 1)
+    chunk = manager.next_chunk()
+    assert chunk.sequence_number == 0
+    assert chunk.t_start_s == pytest.approx(0.0)
+    assert chunk.channels_v.shape == (N_LEADS, CHUNK_SAMPLES)
+
+
+def test_sequence_number_increments_and_t_start_advances():
+    manager = SimulationManager()
+    manager.start("sinus_normal", None, 1)
+    first = manager.next_chunk()
+    second = manager.next_chunk()
+    assert second.sequence_number == first.sequence_number + 1
+    assert second.t_start_s == pytest.approx(first.t_start_s + CHUNK_SAMPLES / 500)
+
+
+def test_update_clamps_to_the_rhythm_range_like_the_engine_does():
+    manager = SimulationManager()
+    manager.start("sinus_bradycardia", None, 1)
+    applied = manager.update(EngineParams(heart_rate_hz=300 / 60))
+    assert applied.heart_rate_hz <= 60 / 60
+
+
+def test_pause_and_resume_toggle_state_without_touching_the_engine():
+    manager = SimulationManager()
+    manager.start("sinus_normal", None, 1)
+    manager.pause()
+    assert manager.state is SimulationState.PAUSED
+    manager.resume()
+    assert manager.state is SimulationState.RUNNING
+
+
+def test_stop_returns_the_simulated_duration():
+    manager = SimulationManager()
+    manager.start("sinus_normal", None, 1)
+    for _ in range(50):  # 50 chunks * 50 muestras a 500 Hz = 5,0 s simulados
+        manager.next_chunk()
+    duration_s = manager.stop()
+    assert duration_s == pytest.approx(5.0)
+    assert manager.state is SimulationState.STOPPED
+
+
+def test_duration_is_simulated_time_not_wall_clock():
+    """La regla de persistencia (≥5 s) mira tiempo simulado, no tiempo real:
+    por eso este test tarda milisegundos en producir una sesión de 10 s."""
+    manager = SimulationManager()
+    manager.start("sinus_normal", None, 1)
+    assert manager.duration_s == pytest.approx(0.0)
+    for _ in range(100):
+        manager.next_chunk()
+    assert manager.duration_s == pytest.approx(10.0)
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd apps/api && uv run pytest tests/unit/test_simulation_manager.py -v`
+Expected: FAIL con `ModuleNotFoundError: No module named 'ecg_api.simulation'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Crear `apps/api/src/ecg_api/simulation.py`:
+
+```python
+"""Envoltorio del motor por conexión WebSocket.
+
+Un `SimulationManager` no sabe nada de WebSockets, JSON ni frames binarios:
+solo envuelve `EcgEngine` con el ciclo de vida que necesita una sesión y
+produce chunks de señal. Esa separación es la que permite testear toda la
+lógica de sesión sin abrir un solo socket.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import secrets
+import uuid
+from dataclasses import dataclass
+from enum import Enum
+
+import numpy as np
+
+from ecg_engine import EcgEngine, EngineParams
+
+from .errors import RhythmNotFoundError
+
+CHUNK_SAMPLES = 50  # 100 ms a 500 Hz — la cadencia de streaming del diseño
+_SEED_UPPER_BOUND = 2**31
+
+
+class SimulationState(str, Enum):
+    RUNNING = "running"
+    PAUSED = "paused"
+    STOPPED = "stopped"
+
+
+@dataclass(frozen=True, slots=True)
+class Chunk:
+    sequence_number: int
+    t_start_s: float
+    channels_v: np.ndarray
+
+
+class SimulationManager:
+    def __init__(self) -> None:
+        self.session_id: uuid.UUID | None = None
+        self.state: SimulationState = SimulationState.STOPPED
+        self.started_at: dt.datetime | None = None
+        self._engine: EcgEngine | None = None
+        self._sequence_number: int = 0
+
+    def start(
+        self,
+        rhythm_id: str,
+        params: EngineParams | None,
+        seed: int | None,
+    ) -> uuid.UUID:
+        resolved_seed = (
+            seed if seed is not None else secrets.randbelow(_SEED_UPPER_BOUND)
+        )
+        try:
+            self._engine = EcgEngine(
+                rhythm_id=rhythm_id, seed=resolved_seed, params=params
+            )
+        except KeyError as exc:
+            raise RhythmNotFoundError(str(exc)) from exc
+        self.session_id = uuid.uuid4()
+        self.started_at = dt.datetime.now(dt.timezone.utc)
+        self._sequence_number = 0
+        self.state = SimulationState.RUNNING
+        return self.session_id
+
+    @property
+    def rhythm_id(self) -> str:
+        assert self._engine is not None
+        return self._engine.rhythm_id
+
+    @property
+    def seed(self) -> int:
+        assert self._engine is not None
+        return self._engine.seed
+
+    @property
+    def params(self) -> EngineParams:
+        assert self._engine is not None
+        return self._engine.params
+
+    @property
+    def duration_s(self) -> float:
+        """Tiempo de simulación transcurrido, no tiempo de reloj de pared.
+
+        Es lo que permite testear la regla de persistencia (≥ 5 s) sin
+        esperar 5 segundos reales: generar 2500 muestras a 500 Hz produce
+        5,0 s simulados casi al instante.
+        """
+        assert self._engine is not None
+        return self._engine.t_s
+
+    def update(self, params: EngineParams) -> EngineParams:
+        assert self._engine is not None
+        self._engine.update_params(params)
+        return self._engine.params
+
+    def pause(self) -> None:
+        self.state = SimulationState.PAUSED
+
+    def resume(self) -> None:
+        self.state = SimulationState.RUNNING
+
+    def stop(self) -> float:
+        self.state = SimulationState.STOPPED
+        return self.duration_s
+
+    def next_chunk(self) -> Chunk:
+        """Genera el siguiente trozo. El llamante decide cuándo llamar —
+        normalmente solo mientras `state is RUNNING`; pausar no es más que
+        dejar de llamar aquí, igual que en `EcgEngine.generate`."""
+        assert self._engine is not None
+        t_start_s = self._engine.t_s
+        channels_v = self._engine.generate(CHUNK_SAMPLES)
+        chunk = Chunk(
+            sequence_number=self._sequence_number,
+            t_start_s=t_start_s,
+            channels_v=channels_v,
+        )
+        self._sequence_number += 1
+        return chunk
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd apps/api && uv run pytest tests/unit/test_simulation_manager.py -v`
+Expected: PASS, 10 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api/src/ecg_api/simulation.py apps/api/tests/unit/test_simulation_manager.py
+git commit -m "Añadir el SimulationManager que envuelve el motor por conexion"
+```
+
+---
