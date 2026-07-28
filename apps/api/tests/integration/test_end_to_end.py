@@ -18,6 +18,9 @@ from ecg_api.frames import decode_frame
 from ecg_api.main import app
 
 
+_MAX_CONTROL_MESSAGE_ATTEMPTS = 200  # ~4x los ~55 frames que maneja el test
+
+
 def _receive_json_message(ws, expected_type: str) -> dict:
     """Lee mensajes hasta encontrar el JSON de control esperado.
 
@@ -28,13 +31,22 @@ def _receive_json_message(ws, expected_type: str) -> dict:
     ASGI crudo —type="websocket.send" para todo lo que envía el servidor,
     texto o binario— así que hay que mirar el contenido, no solo el tipo de
     evento, para distinguir un frame de un mensaje de control.
+
+    `receive()` bloquea sin timeout (es una llamada síncrona sobre un
+    `anyio.create_memory_object_stream`), así que sin este límite una
+    regresión real en el servidor —justo lo que este test existe para
+    atrapar— colgaría el test para siempre en vez de fallar.
     """
-    while True:
+    for _ in range(_MAX_CONTROL_MESSAGE_ATTEMPTS):
         event = ws.receive()
         if event.get("type") == "websocket.send" and "text" in event:
             payload = json.loads(event["text"])
             if payload.get("type") == expected_type:
                 return payload
+    raise AssertionError(
+        f"No llegó ningún mensaje de tipo {expected_type!r} en "
+        f"{_MAX_CONTROL_MESSAGE_ATTEMPTS} intentos"
+    )
 
 
 def test_full_simulation_lifecycle_end_to_end(migrated_database):

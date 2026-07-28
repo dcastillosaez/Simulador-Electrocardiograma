@@ -3373,6 +3373,8 @@ El que pide la sección 11 de la spec por su nombre: conectar, `start`, validar 
 
 Crear `apps/api/tests/integration/test_end_to_end.py`:
 
+El código de abajo es la versión final, ya corregida: el brief original tenía cinco defectos que solo se manifestaron al ejecutar el test contra Postgres real (150 lpm fuera del rango clínico de `sinus_normal`; el bucle de `stop` comparaba contra el tipo de envoltorio ASGI equivocado y colgaba para siempre; el fetch final reutilizaba `app.state.session_factory` desde un event loop distinto al suyo; el conteo de frames no llegaba al umbral de persistencia de 5 s; y el propio bucle de espera, sin límite de iteraciones, podía colgarse para siempre ante una regresión real del servidor — justo el escenario que este test existe para atrapar). Cada uno se diagnosticó con un script de sonda antes de corregirlo; ver el commit `ab2b7ec` para el detalle.
+
 ```python
 """Requiere Postgres real: `docker compose up -d db` antes de ejecutar.
 
@@ -3382,12 +3384,47 @@ confirmar que la sesión quedó escrita en la base de datos con lo que
 realmente ocurrió.
 """
 
+import asyncio
+import json
+import uuid
+
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ecg_api.db.models import SessionRow
 from ecg_api.frames import decode_frame
 from ecg_api.main import app
+
+
+_MAX_CONTROL_MESSAGE_ATTEMPTS = 200  # ~4x los ~55 frames que maneja el test
+
+
+def _receive_json_message(ws, expected_type: str) -> dict:
+    """Lee mensajes hasta encontrar el JSON de control esperado.
+
+    La tarea de streaming en segundo plano envía frames binarios de forma
+    concurrente al bucle principal que responde a los mensajes de control:
+    nada garantiza que el ack de `update` (o de `start`) llegue antes que un
+    frame ya en cola. `WebSocketTestSession.receive()` expone el envoltorio
+    ASGI crudo —type="websocket.send" para todo lo que envía el servidor,
+    texto o binario— así que hay que mirar el contenido, no solo el tipo de
+    evento, para distinguir un frame de un mensaje de control.
+
+    `receive()` bloquea sin timeout (es una llamada síncrona sobre un
+    `anyio.create_memory_object_stream`), así que sin este límite una
+    regresión real en el servidor —justo lo que este test existe para
+    atrapar— colgaría el test para siempre en vez de fallar.
+    """
+    for _ in range(_MAX_CONTROL_MESSAGE_ATTEMPTS):
+        event = ws.receive()
+        if event.get("type") == "websocket.send" and "text" in event:
+            payload = json.loads(event["text"])
+            if payload.get("type") == expected_type:
+                return payload
+    raise AssertionError(
+        f"No llegó ningún mensaje de tipo {expected_type!r} en "
+        f"{_MAX_CONTROL_MESSAGE_ATTEMPTS} intentos"
+    )
 
 
 def test_full_simulation_lifecycle_end_to_end(migrated_database):
@@ -3409,8 +3446,7 @@ def test_full_simulation_lifecycle_end_to_end(migrated_database):
                     "params": {"heart_rate_hz": 60 / 60},
                 }
             )
-            started = ws.receive_json()
-            assert started["type"] == "started"
+            started = _receive_json_message(ws, "started")
             session_id = started["session_id"]
 
             # 2. La cabecera de los frames es correcta y la secuencia
@@ -3434,53 +3470,55 @@ def test_full_simulation_lifecycle_end_to_end(migrated_database):
             ws.send_json(
                 {"type": "update", "params": {"heart_rate_hz": 100 / 60}}
             )
-            updated = ws.receive_json()
-            assert updated["type"] == "updated"
+            updated = _receive_json_message(ws, "updated")
             assert updated["params"]["heart_rate_hz"] == 100 / 60
 
-            # El renderer cachea eventos con `RENDER_MARGIN_S` (0,6 s) de
-            # antelación sobre la ventana que pide cada trozo, así que los
-            # primeros ~10 trozos tras `update` aún contienen algún latido
-            # ya cacheado a la frecuencia vieja (comprobado con un script
-            # de sonda: sin descartar, el periodo dominante medido es 0,958
-            # en vez de 0,6; descartando 10 trozos cae limpio a 0,618).
-            # Eso no es un defecto — el margen es necesario para que la T de
-            # un latido anterior siga sumando en la ventana actual — así que
-            # el test deja asentar la transición antes de medir.
+            # El tren auricular cachea su línea temporal con
+            # `RENDER_MARGIN_S` (0,6 s) de antelación sobre la ventana que
+            # pide cada trozo (`EventTrain._extend_until` en `rhythm.py`),
+            # así que los primeros ~10 trozos tras `update` aún pueden
+            # contener algún latido ya cacheado a la frecuencia vieja
+            # (comprobado con un script de sonda: sin descartar, el periodo
+            # dominante medido es 0,958 en vez de 0,6; descartando 10 trozos
+            # cae limpio a 0,618). Eso no es un defecto — el margen es
+            # necesario para que la T de un latido anterior siga sumando en
+            # la ventana actual — así que el test deja asentar la
+            # transición antes de medir.
             warmup_frames = [decode_frame(ws.receive_bytes()) for _ in range(10)]
             assert len(warmup_frames) == 10  # descartados a propósito
 
-            more_frames = [decode_frame(ws.receive_bytes()) for _ in range(20)]
+            # 35 trozos de medición (no 20): la persistencia solo se dispara
+            # con >= 5,0 s simulados (`MIN_PERSISTABLE_DURATION_S`). Con 10
+            # iniciales + 10 de calentamiento + 35 de medición son 55 trozos
+            # de 0,1 s = 5,5 s, con margen sobre el umbral en vez de rozarlo.
+            more_frames = [decode_frame(ws.receive_bytes()) for _ in range(35)]
             fast_signal = _concat_channel_ii(more_frames)
             assert _dominant_beat_period_s(fast_signal) < 60 / 100 * 1.5
 
             # 4. `stop` cierra la sesión con una duración positiva.
             ws.send_json({"type": "stop"})
-            stopped = None
-            while stopped is None:
-                event = ws.receive()
-                # `WebSocketTestSession.receive()` devuelve el envoltorio
-                # ASGI tal como lo emite el servidor: type="websocket.send"
-                # (la acción que hizo el servidor), no "websocket.receive"
-                # como cabria pensar desde el lado del cliente que lee.
-                if event.get("type") == "websocket.send" and "text" in event:
-                    import json
-
-                    payload = json.loads(event["text"])
-                    if payload.get("type") == "stopped":
-                        stopped = payload
+            stopped = _receive_json_message(ws, "stopped")
             assert stopped["duration_s"] > 0.0
 
         # 5. La sesión quedó persistida con lo que realmente ocurrió: el
         #    ritmo, la semilla, y la duración total (no la frecuencia
         #    inicial, sino la vigente en el momento del `stop`).
-        session_factory = app.state.session_factory
-
+        #
+        #    No se reutiliza `app.state.session_factory`: sus conexiones
+        #    están atadas al loop de asyncio que `TestClient` arranca en un
+        #    hilo aparte para el `lifespan`. `asyncio.run()` aquí crea OTRO
+        #    loop nuevo en el hilo del test, y asyncpg liga cada conexión al
+        #    loop donde nació — usarla desde un loop distinto revienta con
+        #    "attached to a different loop". Se abre una engine propia,
+        #    igual que hace `db_session` en `conftest.py`.
         async def _fetch() -> SessionRow:
-            async with session_factory() as db:
-                return await db.get(SessionRow, __import__("uuid").UUID(session_id))
-
-        import asyncio
+            engine = create_async_engine(migrated_database)
+            try:
+                session_factory = async_sessionmaker(engine, expire_on_commit=False)
+                async with session_factory() as db:
+                    return await db.get(SessionRow, uuid.UUID(session_id))
+            finally:
+                await engine.dispose()
 
         row = asyncio.run(_fetch())
         assert row is not None
