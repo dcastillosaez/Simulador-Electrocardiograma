@@ -266,7 +266,7 @@ git commit -m "Crear scaffolding de ecg-api con el endpoint de salud"
 
 **Interfaces:**
 - Consumes: nada.
-- Produces: `Settings` (pydantic-settings) en `ecg_api.config`, con `database_url: str`, `engine_commit: str`, `sample_rate_hz: int`. `get_settings() -> Settings`.
+- Produces: `Settings` (pydantic-settings) en `ecg_api.config`, con `database_url: str`, `engine_commit: str`. `get_settings() -> Settings`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -280,7 +280,6 @@ from ecg_api.config import Settings
 
 def test_settings_have_sane_defaults():
     settings = Settings(_env_file=None)
-    assert settings.sample_rate_hz == 500
     assert settings.engine_commit == "dev"
     assert "postgresql+asyncpg://" in settings.database_url
 
@@ -348,7 +347,6 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://ecg:ecg@localhost:5432/ecg_simulator"
     engine_commit: str = "dev"
-    sample_rate_hz: int = 500
 
 
 @lru_cache
@@ -2738,6 +2736,8 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from ecg_engine.types import DEFAULT_SAMPLE_RATE_HZ
+
 from ..errors import SimulationError
 from ..outbox import FrameOutbox
 from ..persistence import persist_session, should_persist
@@ -2764,6 +2764,13 @@ router = APIRouter()
 logger = logging.getLogger("ecg_api.simulation_ws")
 
 OUTBOX_MAXSIZE = 20
+
+# La frecuencia de muestreo no es una opción de configuración: es
+# `DEFAULT_SAMPLE_RATE_HZ` del motor, la misma constante que `EcgEngine` usa
+# quien no le pase `sample_rate_hz` explícito. Convertirla en un valor de
+# `Settings` independiente habría creado dos fuentes de verdad que podían
+# desincronizarse — el servidor anunciando en `started` y en cada cabecera
+# de frame una frecuencia distinta de la que el motor realmente genera.
 
 
 async def _sender_loop(websocket: WebSocket, outbox: FrameOutbox) -> None:
@@ -2881,12 +2888,12 @@ async def simulation_ws(websocket: WebSocket) -> None:
                     started_message(
                         session_id=session_id,
                         seed=manager.seed,
-                        sample_rate_hz=settings.sample_rate_hz,
+                        sample_rate_hz=DEFAULT_SAMPLE_RATE_HZ,
                         channels=12,
                     )
                 )
                 producer_task = asyncio.create_task(
-                    stream_chunks(manager, outbox, settings.sample_rate_hz)
+                    stream_chunks(manager, outbox, DEFAULT_SAMPLE_RATE_HZ)
                 )
                 sender_task = asyncio.create_task(_sender_loop(websocket, outbox))
                 for task in (producer_task, sender_task):
@@ -3009,3 +3016,391 @@ git commit -m "Conectar el websocket de simulacion: la ruta caliente completa"
 ```
 
 ---
+
+### Task 14: `GET /api/sessions`, `GET /api/sessions/{id}`
+
+Lectura pura de Postgres. El único escritor es `persist_session`, llamado desde el WebSocket al cerrarse — esta tarea no escribe nada.
+
+**Files:**
+- Modify: `apps/api/src/ecg_api/schemas.py`
+- Create: `apps/api/src/ecg_api/routers/sessions.py`
+- Modify: `apps/api/src/ecg_api/main.py`
+- Test: `apps/api/tests/integration/test_sessions_router.py`
+
+**Interfaces:**
+- Consumes: `SessionRow` de la Tarea 3.
+- Produces: `SessionSummary`, `SessionDetail` en `ecg_api.schemas`. `GET /api/sessions` (lista, más recientes primero, límite de 50), `GET /api/sessions/{session_id}` (detalle, 404 si no existe o el id no es un UUID válido).
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `apps/api/tests/integration/test_sessions_router.py`:
+
+```python
+"""Requiere Postgres real: `docker compose up -d db` antes de ejecutar."""
+
+from fastapi.testclient import TestClient
+
+from ecg_api.main import app
+
+
+def _start_and_stop_a_session(client, rhythm_id="sinus_normal", seed=1):
+    with client.websocket_connect("/ws/simulation") as ws:
+        ws.send_json({"type": "start", "rhythm_id": rhythm_id, "seed": seed})
+        started = ws.receive_json()
+        for _ in range(60):  # 60 * 100 ms = 6 s simulados, por encima del umbral de 5
+            ws.receive_bytes()
+        ws.send_json({"type": "stop"})
+    return started["session_id"]
+
+
+def test_list_sessions_includes_a_persisted_session():
+    with TestClient(app) as client:
+        session_id = _start_and_stop_a_session(client)
+        response = client.get("/api/sessions")
+        assert response.status_code == 200
+        ids = {row["id"] for row in response.json()}
+        assert session_id in ids
+
+
+def test_get_session_detail_has_the_documented_fields():
+    with TestClient(app) as client:
+        session_id = _start_and_stop_a_session(
+            client, rhythm_id="sinus_bradycardia", seed=7
+        )
+        response = client.get(f"/api/sessions/{session_id}")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["rhythm_id"] == "sinus_bradycardia"
+        assert body["seed"] == 7
+        assert body["engine_semver"].count(".") == 2
+        assert body["duration_s"] >= 5.0
+        assert "params" in body
+
+
+def test_get_session_404_for_unknown_id():
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/sessions/00000000-0000-0000-0000-000000000000"
+        )
+        assert response.status_code == 404
+
+
+def test_get_session_404_for_malformed_id():
+    with TestClient(app) as client:
+        response = client.get("/api/sessions/not-a-uuid")
+        assert response.status_code == 404
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Con `docker compose up -d db` en marcha:
+
+Run: `cd apps/api && uv run pytest tests/integration/test_sessions_router.py -v`
+Expected: FAIL con 404 en `/api/sessions` (ruta no registrada) o `ImportError`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Añadir al final de `apps/api/src/ecg_api/schemas.py`:
+
+```python
+# --- REST: sesiones ---------------------------------------------------------
+
+import datetime as dt
+
+
+class SessionSummary(BaseModel):
+    id: uuid.UUID
+    rhythm_id: str
+    started_at: dt.datetime
+    duration_s: float | None
+
+
+class SessionDetail(SessionSummary):
+    params: dict
+    seed: int
+    engine_semver: str
+    engine_commit: str
+    ended_at: dt.datetime | None
+```
+
+Crear `apps/api/src/ecg_api/routers/sessions.py`:
+
+```python
+"""Historial de sesiones. Lectura pura de Postgres.
+
+El único escritor es `persist_session`, llamado desde el handler del
+WebSocket al cerrarse — esta capa no escribe nada.
+"""
+
+from __future__ import annotations
+
+import uuid
+
+from fastapi import APIRouter, HTTPException, Request
+from sqlalchemy import select
+
+from ..db.models import SessionRow
+from ..schemas import SessionDetail, SessionSummary
+
+router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+
+LIST_LIMIT = 50
+
+
+def _to_summary(row: SessionRow) -> SessionSummary:
+    return SessionSummary(
+        id=row.id,
+        rhythm_id=row.rhythm_id,
+        started_at=row.started_at,
+        duration_s=float(row.duration_s) if row.duration_s is not None else None,
+    )
+
+
+def _to_detail(row: SessionRow) -> SessionDetail:
+    return SessionDetail(
+        **_to_summary(row).model_dump(),
+        params=row.params,
+        seed=row.seed,
+        engine_semver=row.engine_semver,
+        engine_commit=row.engine_commit,
+        ended_at=row.ended_at,
+    )
+
+
+@router.get("", response_model=list[SessionSummary])
+async def list_sessions(request: Request) -> list[SessionSummary]:
+    session_factory = request.app.state.session_factory
+    async with session_factory() as db:
+        rows = (
+            await db.execute(
+                select(SessionRow)
+                .order_by(SessionRow.started_at.desc())
+                .limit(LIST_LIMIT)
+            )
+        ).scalars().all()
+    return [_to_summary(r) for r in rows]
+
+
+@router.get("/{session_id}", response_model=SessionDetail)
+async def get_session(session_id: str, request: Request) -> SessionDetail:
+    try:
+        parsed_id = uuid.UUID(session_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=404, detail="id de sesión inválido"
+        ) from exc
+
+    session_factory = request.app.state.session_factory
+    async with session_factory() as db:
+        row = await db.get(SessionRow, parsed_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="sesión no encontrada")
+    return _to_detail(row)
+```
+
+Modificar `apps/api/src/ecg_api/main.py`, añadiendo el router nuevo:
+
+```python
+from .routers.health import router as health_router
+from .routers.rhythms import router as rhythms_router
+from .routers.sessions import router as sessions_router
+from .routers.simulation_ws import router as simulation_ws_router
+
+...
+
+app.include_router(health_router)
+app.include_router(rhythms_router)
+app.include_router(sessions_router)
+app.include_router(simulation_ws_router)
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd apps/api && uv run pytest tests/integration/test_sessions_router.py -v`
+Expected: PASS, 4 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api/src/ecg_api/schemas.py apps/api/src/ecg_api/routers/sessions.py apps/api/src/ecg_api/main.py apps/api/tests/integration/test_sessions_router.py
+git commit -m "Añadir el historial de sesiones por REST"
+```
+
+---
+
+### Task 15: Test de integración de extremo a extremo
+
+El que pide la sección 11 de la spec por su nombre: conectar, `start`, validar la cabecera de los frames y la monotonía de `sequence_number`, `update` con cambio observable en la señal, `stop`, y verificar la sesión persistida. Las tareas anteriores ya cubren cada pieza por separado; esta las encadena en un único flujo, como lo vería un cliente real.
+
+**Files:**
+- Test: `apps/api/tests/integration/test_end_to_end.py`
+
+**Interfaces:**
+- Consumes: todo lo anterior. No produce interfaces nuevas — es el test que ata el sistema completo.
+
+- [ ] **Step 1: Write the failing test**
+
+Crear `apps/api/tests/integration/test_end_to_end.py`:
+
+```python
+"""Requiere Postgres real: `docker compose up -d db` antes de ejecutar.
+
+Flujo de extremo a extremo, tal como lo vería un cliente real: conectar,
+arrancar, comprobar los frames, cambiar la frecuencia en caliente, parar, y
+confirmar que la sesión quedó escrita en la base de datos con lo que
+realmente ocurrió.
+"""
+
+from fastapi.testclient import TestClient
+from sqlalchemy import select
+
+from ecg_api.db.models import SessionRow
+from ecg_api.frames import decode_frame
+from ecg_api.main import app
+
+
+def test_full_simulation_lifecycle_end_to_end():
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/simulation") as ws:
+            # 1. Conectar y arrancar.
+            ws.send_json(
+                {
+                    "type": "start",
+                    "rhythm_id": "sinus_normal",
+                    "seed": 20260725,
+                    "params": {"heart_rate_hz": 70 / 60},
+                }
+            )
+            started = ws.receive_json()
+            assert started["type"] == "started"
+            session_id = started["session_id"]
+
+            # 2. La cabecera de los frames es correcta y la secuencia
+            #    monótona, sin huecos, en las primeras diez muestras.
+            decoded_frames = [decode_frame(ws.receive_bytes()) for _ in range(10)]
+            for frame in decoded_frames:
+                assert frame.sample_rate_hz == 500
+                assert frame.n_channels == 12
+                assert frame.n_samples_per_channel == 50
+                assert str(frame.session_id) == session_id
+            sequence_numbers = [f.sequence_number for f in decoded_frames]
+            assert sequence_numbers == list(range(10))
+
+            # 3. `update` cambia la frecuencia, y el cambio es observable:
+            #    el RR medio de los latidos que siguen se acorta.
+            ws.send_json(
+                {"type": "update", "params": {"heart_rate_hz": 150 / 60}}
+            )
+            updated = ws.receive_json()
+            assert updated["type"] == "updated"
+            assert updated["params"]["heart_rate_hz"] == 150 / 60
+
+            more_frames = [decode_frame(ws.receive_bytes()) for _ in range(30)]
+            fast_signal = _concat_channel_ii(more_frames)
+            assert _dominant_beat_period_s(fast_signal) < 60 / 150 * 1.5
+
+            # 4. `stop` cierra la sesión con una duración positiva.
+            ws.send_json({"type": "stop"})
+            stopped = None
+            while stopped is None:
+                event = ws.receive()
+                if event.get("type") == "websocket.receive" and "text" in event:
+                    import json
+
+                    payload = json.loads(event["text"])
+                    if payload.get("type") == "stopped":
+                        stopped = payload
+            assert stopped["duration_s"] > 0.0
+
+        # 5. La sesión quedó persistida con lo que realmente ocurrió: el
+        #    ritmo, la semilla, y la duración total (no la frecuencia
+        #    inicial, sino la vigente en el momento del `stop`).
+        session_factory = app.state.session_factory
+
+        async def _fetch() -> SessionRow:
+            async with session_factory() as db:
+                return await db.get(SessionRow, __import__("uuid").UUID(session_id))
+
+        import asyncio
+
+        row = asyncio.run(_fetch())
+        assert row is not None
+        assert row.rhythm_id == "sinus_normal"
+        assert row.seed == 20260725
+        assert row.params["heart_rate_hz"] == 150 / 60
+        assert float(row.duration_s) > 0.0
+
+
+def _concat_channel_ii(frames) -> "list[float]":
+    from ecg_engine.types import LEAD_ORDER
+
+    lead_ii = LEAD_ORDER.index("II")
+    signal: list[float] = []
+    for frame in frames:
+        signal.extend(frame.channels_v[lead_ii].tolist())
+    return signal
+
+
+def _dominant_beat_period_s(signal_v: "list[float]", sample_rate_hz: int = 500) -> float:
+    """Periodo dominante por autocorrelación simple. No hace falta más
+    precisión que la de distinguir 70 lpm (RR≈0,86 s) de 150 lpm (RR≈0,4 s)."""
+    import numpy as np
+
+    signal = np.asarray(signal_v) - np.mean(signal_v)
+    autocorr = np.correlate(signal, signal, mode="full")[len(signal) - 1 :]
+    min_lag = int(0.25 * sample_rate_hz)  # ritmos > 240 lpm quedan fuera de rango
+    peak_lag = min_lag + int(np.argmax(autocorr[min_lag:]))
+    return peak_lag / sample_rate_hz
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Con `docker compose up -d db` en marcha:
+
+Run: `cd apps/api && uv run pytest tests/integration/test_end_to_end.py -v`
+Expected: FAIL si algo de las tareas 1-14 está incompleto. Si todas están hechas, este test debería pasar directamente — es el único de este plan que no introduce código de producción nuevo, solo lo verifica todo junto.
+
+- [ ] **Step 3: Write minimal implementation**
+
+No hay implementación nueva que escribir: si el test falla, el fallo señala qué pieza de una tarea anterior no se comporta como su propio test decía. Vuelve a esa tarea, no añadas código aquí.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd apps/api && uv run pytest tests/integration/test_end_to_end.py -v`
+Expected: PASS, 1 passed
+
+Y la suite completa, para cerrar el plan:
+
+Run: `cd apps/api && uv run pytest -v`
+Expected: PASS, toda la suite en verde (unitarios + integración)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api/tests/integration/test_end_to_end.py
+git commit -m "Añadir el test de integracion de extremo a extremo"
+```
+
+---
+
+## Cierre del plan
+
+Al terminar la tarea 15, `apps/api` cumple la parte de los criterios de aceptación de la fase 1 que le corresponde:
+
+| Criterio | Cubierto por |
+|---|---|
+| 3. Frecuencia cardíaca y ruido modificables en caliente | Tareas 9, 13 |
+| 4. Sesión persistida, reproducible desde `seed` + `params` + `engine_semver` + `engine_commit` | Tareas 3, 12, 14 |
+| Contrato del frame binario, cabecera de 40 bytes, `session_id` sin reordenar | Tarea 6, verificado en 13 y 15 |
+| Manejo de errores: `NOT_FOUND`, `INVALID_PARAMS`, `ENGINE_FAILURE` con cierre 1011 | Tareas 8, 13 |
+| Buffer de envío saturado → descarta lo más antiguo | Tarea 10 |
+| Integración WS de extremo a extremo (spec §11) | Tarea 15 |
+
+Quedan fuera de este plan, por ser del plan C (frontend) o de fases posteriores:
+
+- **Criterio 1** (los doce ritmos correctos): ya cubierto por el plan A: el motor no cambia aquí.
+- **Criterio 2** (60 fps, diez minutos sin fugas): es del cliente. Este plan solo garantiza que el servidor sostiene el streaming sin degradarse (heredado del motor, tarea 17 del plan A); el trazado en pantalla es plan C.
+- **Criterio 7** (revisión clínica): sigue pendiente de los doce trazados, no de la API.
+- **Un solo worker de uvicorn**: restricción de despliegue documentada en las Global Constraints; no hay nada que testear en código, solo que el despliegue real no lance más de uno.
+
+**Siguiente paso tras ejecutar este plan:** escribir el plan C (frontend), con el contrato del frame binario y el protocolo del WebSocket ya verificados en código en vez de sobre el papel.
