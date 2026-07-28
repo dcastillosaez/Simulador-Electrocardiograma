@@ -142,6 +142,42 @@ def test_sequence_number_is_monotonic_across_several_frames():
             assert _next_json_message(ws)["type"] == "stopped"
 
 
+def test_second_start_replaces_the_first_session_cleanly():
+    """Un `start` sobre un socket con una sesión ya activa reemplaza esa
+    sesión en vez de dejar el par de tareas de fondo anterior huérfano.
+
+    Antes del arreglo, la sesión vieja seguía produciendo frames al mismo
+    `outbox` (duplicando la cadencia real de streaming) y los frames que
+    ya estuvieran en cola llegaban después del `started` de la sesión
+    nueva llevando el `session_id` de la sesión vieja horneado en la
+    cabecera."""
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/simulation") as ws:
+            ws.send_json(
+                {"type": "start", "rhythm_id": "sinus_normal", "seed": 1}
+            )
+            first = ws.receive_json()
+            assert first["type"] == "started"
+            first_session_id = first["session_id"]
+            decode_frame(ws.receive_bytes())  # deja que el streaming arranque
+
+            ws.send_json(
+                {"type": "start", "rhythm_id": "sinus_normal", "seed": 2}
+            )
+            second = _next_json_message(ws)
+            assert second["type"] == "started"
+            second_session_id = second["session_id"]
+            assert second_session_id != first_session_id
+
+            decoded_frames = [decode_frame(ws.receive_bytes()) for _ in range(10)]
+            session_ids = {str(f.session_id) for f in decoded_frames}
+            assert session_ids == {second_session_id}
+
+            sequence_numbers = [f.sequence_number for f in decoded_frames]
+            assert sequence_numbers == sorted(sequence_numbers)
+            assert len(set(sequence_numbers)) == len(sequence_numbers)
+
+
 def test_engine_failure_during_streaming_sends_error_and_closes_with_1011():
     with TestClient(app) as client:
         with client.websocket_connect("/ws/simulation") as ws:

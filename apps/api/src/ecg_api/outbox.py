@@ -36,3 +36,14 @@ class FrameOutbox:
             self._not_empty.clear()
             await self._not_empty.wait()
         return self._frames.popleft()
+
+    def clear(self) -> None:
+        """Descarta cualquier frame en cola sin marcarlo como perdido.
+
+        Para cuando una sesión nueva reemplaza a una anterior en el mismo
+        socket: los frames que quedaran en cola llevan horneado el
+        `session_id` de la sesión saliente (`encode_frame` lo fija al
+        codificar), así que entregarlos tras el `started` de la sesión
+        nueva confundiría al cliente con datos de otra sesión.
+        """
+        self._frames.clear()

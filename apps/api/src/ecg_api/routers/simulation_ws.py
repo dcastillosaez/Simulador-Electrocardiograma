@@ -68,20 +68,28 @@ def _log_engine_failure(manager: SimulationManager, exc: BaseException) -> None:
 
 
 async def _close_after_engine_failure(websocket: WebSocket, detail: str) -> None:
-    try:
-        await websocket.send_json(
-            error_message(code="ENGINE_FAILURE", detail=detail)
-        )
-    except Exception:  # noqa: BLE001 — el socket puede estar ya cerrado
-        pass
-    try:
-        await websocket.close(code=1011)
-    except Exception:  # noqa: BLE001
-        pass
+    # Acotado a 5 s: sin `fail_after`, un cliente que dejó de leer bloquea
+    # `send_json`/`close` en el drenaje del transporte para siempre, el
+    # mismo defecto que `_maybe_persist` (tarea 14) ya tuvo que corregir.
+    with anyio.move_on_after(5.0):
+        try:
+            await websocket.send_json(
+                error_message(code="ENGINE_FAILURE", detail=detail)
+            )
+        except Exception:  # noqa: BLE001 — el socket puede estar ya cerrado
+            pass
+        try:
+            await websocket.close(code=1011)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _on_background_task_done(
-    task: asyncio.Task, *, websocket: WebSocket, manager: SimulationManager
+    task: asyncio.Task,
+    *,
+    websocket: WebSocket,
+    manager: SimulationManager,
+    close_tasks: set[asyncio.Task],
 ) -> None:
     """Un fallo del motor durante el streaming corre en una tarea de fondo,
     no en el bucle que despacha mensajes. Sin este enganche, el cliente se
@@ -92,7 +100,16 @@ def _on_background_task_done(
     if exc is None:
         return
     _log_engine_failure(manager, exc)
-    asyncio.create_task(_close_after_engine_failure(websocket, str(exc)))
+    # Se guarda la referencia en `close_tasks` (y se espera en el `finally`
+    # del handler): una tarea de `asyncio.create_task` sin referencia fuerte
+    # es candidata a recolección de basura a mitad de ejecución, así que el
+    # cierre 1011 que exige la especificación podía simplemente no llegar a
+    # ocurrir.
+    close_task = asyncio.create_task(
+        _close_after_engine_failure(websocket, str(exc))
+    )
+    close_tasks.add(close_task)
+    close_task.add_done_callback(close_tasks.discard)
 
 
 async def _stop_background_tasks(tasks: list[asyncio.Task]) -> None:
@@ -127,6 +144,7 @@ async def simulation_ws(websocket: WebSocket) -> None:
     manager = SimulationManager()
     outbox = FrameOutbox(maxsize=OUTBOX_MAXSIZE)
     background_tasks: list[asyncio.Task] = []
+    close_tasks: set[asyncio.Task] = set()
     persisted = False
 
     async def _maybe_persist() -> None:
@@ -176,6 +194,24 @@ async def simulation_ws(websocket: WebSocket) -> None:
                 continue
 
             if isinstance(message, StartMessage):
+                if manager.session_id is not None:
+                    # Un `start` sobre un socket con una sesión ya activa
+                    # reemplaza esa sesión. Sin este bloque, el par de tareas
+                    # de fondo anterior queda huérfano (duplicando la
+                    # cadencia de chunks que llegan al mismo `outbox`,
+                    # renderizándose al doble de la frecuencia real) y la
+                    # sesión saliente, aunque cumpliera el umbral de
+                    # persistencia, se pierde en silencio en cuanto
+                    # `manager.start` reinicie el motor y sobrescriba
+                    # `session_id`. Se para, se persiste si corresponde, y
+                    # se libera `persisted` para el ciclo de vida de la
+                    # sesión nueva.
+                    await _stop_background_tasks(background_tasks)
+                    background_tasks = []
+                    outbox.clear()
+                    await _maybe_persist()
+                    persisted = False
+
                 try:
                     session_id = manager.start(
                         message.rhythm_id,
@@ -207,6 +243,7 @@ async def simulation_ws(websocket: WebSocket) -> None:
                             _on_background_task_done,
                             websocket=websocket,
                             manager=manager,
+                            close_tasks=close_tasks,
                         )
                     )
                 background_tasks = [producer_task, sender_task]
@@ -253,3 +290,5 @@ async def simulation_ws(websocket: WebSocket) -> None:
     finally:
         await _stop_background_tasks(background_tasks)
         await _maybe_persist()
+        if close_tasks:
+            await asyncio.gather(*close_tasks, return_exceptions=True)
