@@ -392,7 +392,7 @@ Expected: `tokens.css generado`, y 4 tests PASS.
 - [ ] **Step 6: Verificar que no se rompió nada**
 
 Run: `cd apps/web && npx tsc -b && npx vitest run`
-Expected: tsc sin salida; 124 tests PASS (120 previos + 4 nuevos).
+Expected: tsc sin salida; la suite completa en verde y sin regresiones. El total absoluto no se fija aqui a proposito: es un numero acumulado que cambia con cada tarea, y un desajuste haria dudar de una implementacion correcta. Lo que importa es que no falle ninguno.
 
 - [ ] **Step 7: Commit**
 
@@ -744,7 +744,7 @@ Comprobar a ojo que `packages/ui-system/tokens/tokens.css` contiene ahora `--ecg
 - [ ] **Step 6: Verificar que no se rompió nada**
 
 Run: `cd apps/web && npx tsc -b && npx vitest run`
-Expected: tsc sin salida; 129 tests PASS.
+Expected: tsc sin salida; la suite completa en verde y sin regresiones. El total absoluto no se fija aqui a proposito: es un numero acumulado que cambia con cada tarea, y un desajuste haria dudar de una implementacion correcta. Lo que importa es que no falle ninguno.
 
 - [ ] **Step 7: Commit**
 
@@ -854,15 +854,21 @@ describe("computeLayoutMetrics", () => {
     );
   });
 
-  it("el caso de referencia de 152px reproduce la suposicion de 96dpi", () => {
-    // Comprobacion que valida el modelo entero: los 152px que fijo el arreglo
-    // I-2 equivalen a 3,8 px/mm, y PX_PER_MM (96/25,4) es 3,7795. Es el mismo
-    // numero, luego aquel valor ya era implicitamente la suposicion de 96dpi.
-    const metrics = computeLayoutMetrics(heightFor(152, 1), 1, GAIN, SPEED);
-    expect(metrics.stripHeightPx).toBeCloseTo(140); // el tope lo limita
-    const suelto = 152 / (2 * STRIP_MARGIN_MV * GAIN);
-    expect(suelto).toBeCloseTo(3.8);
-    expect(suelto).toBeCloseTo(PX_PER_MM, 1);
+  it("el tope de 140px deja la escala vertical justo por debajo de los 96dpi", () => {
+    // La altura de tira que daria exactamente PX_PER_MM es
+    // 2 x margen x ganancia x PX_PER_MM = 151,2px, por encima del tope de 140.
+    // O sea: con el tope actual la escala vertical NUNCA llega del todo a la
+    // suposicion de 96dpi, se queda en 3,5 px/mm. Es una consecuencia real del
+    // tope y no un accidente, asi que conviene que cambiarlo haga saltar esto.
+    const alturaExacta96dpi = 2 * STRIP_MARGIN_MV * GAIN * PX_PER_MM;
+    expect(alturaExacta96dpi).toBeGreaterThan(STRIP_MAX_PX);
+
+    const topeada = computeLayoutMetrics(heightFor(300, 1), 1, GAIN, SPEED);
+    expect(topeada.stripHeightPx).toBe(STRIP_MAX_PX);
+    expect(topeada.viewportScalePxPerMm).toBeCloseTo(
+      STRIP_MAX_PX / (2 * STRIP_MARGIN_MV * GAIN)
+    );
+    expect(topeada.viewportScalePxPerMm).toBeLessThan(PX_PER_MM);
   });
 
   it("la senal de 2mV cabe justo en media tira, sin recortar", () => {
@@ -1238,7 +1244,7 @@ Y hacer lo mismo en `apps/web/src/render/lead-canvas.test.ts`, que llama a `swee
 - [ ] **Step 6: Verificar que no se rompió nada**
 
 Run: `cd apps/web && npx tsc -b && npx vitest run`
-Expected: tsc sin salida; 134 tests PASS.
+Expected: tsc sin salida; la suite completa en verde y sin regresiones. El total absoluto no se fija aqui a proposito: es un numero acumulado que cambia con cada tarea, y un desajuste haria dudar de una implementacion correcta. Lo que importa es que no falle ninguno.
 
 - [ ] **Step 7: Commit**
 
@@ -1520,7 +1526,7 @@ import { getTheme } from "@ui-system/themes/index";
 - [ ] **Step 6: Verificar que no se rompió nada**
 
 Run: `cd apps/web && npx tsc -b && npx vitest run`
-Expected: tsc sin salida; 136 tests PASS.
+Expected: tsc sin salida; la suite completa en verde y sin regresiones. El total absoluto no se fija aqui a proposito: es un numero acumulado que cambia con cada tarea, y un desajuste haria dudar de una implementacion correcta. Lo que importa es que no falle ninguno.
 
 - [ ] **Step 7: Commit**
 
@@ -1868,7 +1874,7 @@ export class OverlayLayer {
 ```
 
 Run: `cd apps/web && npx tsc -b && npx vitest run`
-Expected: tsc sin salida; 141 tests PASS (136 previos + 1 de banda en mm + 2 de tema centinela, y los 12 de lead-canvas adaptados siguen contando igual).
+Expected: tsc sin salida; la suite completa en verde y sin regresiones. El total absoluto no se fija aqui a proposito: es un numero acumulado que cambia con cada tarea, y un desajuste haria dudar de una implementacion correcta. Lo que importa es que no falle ninguno.
 
 - [ ] **Step 6: Verificar a mano que no queda ningún literal de color en render/**
 
@@ -2196,7 +2202,7 @@ Si el primer test falla por diferencia en las uniones, la causa casi segura es q
 - [ ] **Step 5: Verificar que no se rompió nada**
 
 Run: `cd apps/web && npx tsc -b && npx vitest run`
-Expected: tsc sin salida; 147 tests PASS.
+Expected: tsc sin salida; la suite completa en verde y sin regresiones. El total absoluto no se fija aqui a proposito: es un numero acumulado que cambia con cada tarea, y un desajuste haria dudar de una implementacion correcta. Lo que importa es que no falle ninguno.
 
 - [ ] **Step 6: Commit**
 
@@ -2521,7 +2527,7 @@ Expected: 6 tests PASS.
 - [ ] **Step 6: Verificar que no se rompió nada**
 
 Run: `cd apps/web && npx tsc -b && npx vitest run`
-Expected: tsc sin salida; 153 tests PASS.
+Expected: tsc sin salida; la suite completa en verde y sin regresiones. El total absoluto no se fija aqui a proposito: es un numero acumulado que cambia con cada tarea, y un desajuste haria dudar de una implementacion correcta. Lo que importa es que no falle ninguno.
 
 - [ ] **Step 7: Commit**
 
@@ -3006,12 +3012,12 @@ export * from "./components/data/index";
 - [ ] **Step 5: Ejecutar los tests para verificar que pasan**
 
 Run: `cd apps/web && npx vitest run ../../packages/ui-system/components/`
-Expected: 14 tests PASS (6 de foundation + 4 de surface + 4 de data... contar: surface tiene 4, data tiene 6, total 16).
+Expected: los 4 tests de `surface.test.tsx` y los 6 de `data.test.tsx` PASS, y los de `foundation.test.tsx` siguen en verde.
 
 - [ ] **Step 6: Verificar que no se rompió nada**
 
 Run: `cd apps/web && npx tsc -b && npx vitest run`
-Expected: tsc sin salida; 163 tests PASS.
+Expected: tsc sin salida; la suite completa en verde y sin regresiones. El total absoluto no se fija aqui a proposito: es un numero acumulado que cambia con cada tarea, y un desajuste haria dudar de una implementacion correcta. Lo que importa es que no falle ninguno.
 
 - [ ] **Step 7: Commit**
 
@@ -3060,7 +3066,7 @@ Los cuatro controles del panel de escenario. `SegmentedControl` es la pieza que 
 `packages/ui-system/components/controls/controls.test.tsx`:
 
 ```tsx
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Select, SegmentedControl, Slider, Stepper } from "./index";
@@ -3114,20 +3120,19 @@ describe("Slider", () => {
     expect(screen.getByRole("slider", { name: "EMG" })).toBeInTheDocument();
   });
 
-  it("propaga el valor como numero, no como texto", async () => {
+  it("propaga el valor como numero, no como el texto del input", () => {
+    // El valor de un input siempre llega como string. Sin el Number() del
+    // componente, el motor recibiria "4" y los parametros de ruido viajarian
+    // como texto al backend. `fireEvent` y no `userEvent`: arrastrar un
+    // input[type=range] no es algo que userEvent sepa simular.
     const onChange = vi.fn();
-    render(
-      <Slider label="EMG" value={0} min={0} max={10} step={1} onChange={onChange} />
-    );
+    render(<Slider label="EMG" value={0} min={0} max={10} step={1} onChange={onChange} />);
 
-    const slider = screen.getByRole("slider", { name: "EMG" });
-    await userEvent.clear(slider).catch(() => undefined);
-    // userEvent no arrastra un range: se dispara el cambio directamente.
-    slider.setAttribute("value", "4");
-    await userEvent.type(slider, "{arrowright}");
+    fireEvent.change(screen.getByRole("slider", { name: "EMG" }), {
+      target: { value: "4" },
+    });
 
-    expect(onChange).toHaveBeenCalled();
-    expect(typeof onChange.mock.calls[0][0]).toBe("number");
+    expect(onChange).toHaveBeenCalledWith(4);
   });
 });
 
@@ -3607,20 +3612,12 @@ export * from "./components/controls/index";
 - [ ] **Step 5: Ejecutar los tests para verificar que pasan**
 
 Run: `cd apps/web && npx vitest run ../../packages/ui-system/components/controls`
-Expected: 10 tests PASS. Si el segundo test de `Slider` da problemas por cómo `userEvent` trata un `input[type=range]`, sustituirlo por un cambio directo:
-
-```tsx
-    const slider = screen.getByRole("slider", { name: "EMG" }) as HTMLInputElement;
-    fireEvent.change(slider, { target: { value: "4" } });
-    expect(onChange).toHaveBeenCalledWith(4);
-```
-
-importando `fireEvent` de `@testing-library/react`.
+Expected: los 10 tests del fichero PASS.
 
 - [ ] **Step 6: Verificar que no se rompió nada**
 
 Run: `cd apps/web && npx tsc -b && npx vitest run`
-Expected: tsc sin salida; 173 tests PASS.
+Expected: tsc sin salida; la suite completa en verde y sin regresiones. El total absoluto no se fija aqui a proposito: es un numero acumulado que cambia con cada tarea, y un desajuste haria dudar de una implementacion correcta. Lo que importa es que no falle ninguno.
 
 - [ ] **Step 7: Commit**
 
@@ -3766,7 +3763,13 @@ Expected: FAIL — `Failed to resolve import "./index"`.
       "inspector"
       "status";
     grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr auto auto auto;
+    /* La fila del ECG lleva una altura DEFINIDA, no `1fr`.
+       Con `height: auto`, un `1fr` se dimensiona al contenido; y el contenido
+       son las tiras, cuya altura sale de LayoutMetrics, que sale de la altura
+       medida de este mismo contenedor. Es una dependencia circular: las tiras
+       colapsarian al suelo de 16px o oscilarian entre dos tamanos. En
+       escritorio no ocurre porque `100dvh` acota el grid entero. */
+    grid-template-rows: auto minmax(0, 50dvh) auto auto auto;
     height: auto;
     min-height: 100dvh;
   }
@@ -3994,7 +3997,7 @@ Expected: 3 tests PASS.
 - [ ] **Step 6: Verificar que no se rompió nada**
 
 Run: `cd apps/web && npx tsc -b && npx vitest run`
-Expected: tsc sin salida; 176 tests PASS.
+Expected: tsc sin salida; la suite completa en verde y sin regresiones. El total absoluto no se fija aqui a proposito: es un numero acumulado que cambia con cada tarea, y un desajuste haria dudar de una implementacion correcta. Lo que importa es que no falle ninguno.
 
 - [ ] **Step 7: Commit**
 
@@ -4710,7 +4713,7 @@ describe("contrato de accesibilidad", () => {
 - [ ] **Step 3: Ejecutar el test para verificar que falla**
 
 Run: `cd apps/web && npx vitest run src/ui/accessibility-contract.test.tsx`
-Expected: FAIL — `Unable to find a label with the text of: Derivaciones visibles` no falla todavía (existe), pero sí falla el test de 12 derivaciones porque `getByRole("radio", { name: "12" })` aún no existe con ese nombre en el `LayoutPicker` sin estilo. Anotar el fallo real que aparezca.
+Expected: FAIL. El `ECGWorkspace` actual todavía renderiza el `LayoutPicker` con radios nativos, cuyo nombre accesible es el número (`"12"`), así que ese test concreto puede pasar ya; los que fallan con seguridad son los de `lead-canvas-*`, porque el workspace de este momento solo monta un canvas por derivación sin el envoltorio nuevo, y el de los sliders del panel avanzado, que aún viven en un `fieldset` crudo. Basta con que **alguno** falle: el test se escribe antes de la migración precisamente para que la migración lo ponga en verde.
 
 - [ ] **Step 4: Migrar los controles al ui-system**
 
@@ -5014,17 +5017,9 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
     <AppShell
       header={
         <Header title="Simulador de electrocardiograma">
-          <SegmentedControl
-            label="Derivaciones visibles"
-            value={layout}
-            options={[
-              { value: "1", label: "1" },
-              { value: "3", label: "3" },
-              { value: "6", label: "6" },
-              { value: "12", label: "12" },
-            ]}
-            onChange={setLayout}
-          />
+          {/* LayoutPicker y no un SegmentedControl inline: el array de opciones
+              vive en un solo sitio y el componente sigue teniendo su test. */}
+          <LayoutPicker value={layout} onChange={setLayout} />
           <SegmentedControl
             label="Aspecto"
             value={themeName}
@@ -5121,7 +5116,7 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
 }
 ```
 
-Nótese que `LayoutPicker` deja de usarse aquí: el selector de derivaciones vive ahora en el `Header`. El fichero se conserva porque su test propio sigue siendo válido y documenta el componente.
+`LayoutPicker` se monta dentro del `Header` en vez de duplicar su array de opciones ahí: el selector cambia de sitio en pantalla, no de dueño. Así el array vive en un solo fichero y los 3 tests de `LayoutPicker.test.tsx` siguen siendo válidos sin tocarlos.
 
 - [ ] **Step 6: Adaptar el mock de canvas del test existente**
 
@@ -5162,7 +5157,7 @@ Además, ahora cada tira tiene **dos** canvas y el `data-testid` está en el de 
 - [ ] **Step 7: Ejecutar toda la suite**
 
 Run: `cd apps/web && npx tsc -b && npx vitest run`
-Expected: tsc sin salida; 181 tests PASS (176 previos + 5 del contrato de accesibilidad).
+Expected: tsc sin salida; la suite completa en verde y sin regresiones. El total absoluto no se fija aqui a proposito: es un numero acumulado que cambia con cada tarea, y un desajuste haria dudar de una implementacion correcta. Lo que importa es que no falle ninguno.
 
 Si algún test de `ECGWorkspace.test.tsx` falla por el tamaño de los canvas (en jsdom el `ResizeObserver` es un doble y no dispara, así que las métricas se quedan en el respaldo de 800x600), comprobar que el respaldo de `useLayoutMetrics` da una altura de tira dibujable — con 6 derivaciones y 600px son 96px, dentro de la banda normal.
 
