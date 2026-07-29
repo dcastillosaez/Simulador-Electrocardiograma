@@ -1,5 +1,9 @@
 import { create } from "zustand";
-import type { SessionRuntime, SessionState } from "../simulation-runtime/session-runtime";
+import type {
+  SessionRuntime,
+  SessionRuntimeEvents,
+  SessionState,
+} from "../simulation-runtime/session-runtime";
 import type { EngineParamsPayload } from "../types/engine-params";
 
 export interface SessionStoreState {
@@ -13,7 +17,14 @@ export interface SessionStoreState {
   framesLost: number;
 
   selectRhythm: (rhythmId: string) => void;
-  attachRuntime: (runtime: SessionRuntime) => void;
+  /** Devuelve una función `detach()` que retira exactamente los listeners
+   * que esta llamada registró. Sin ella, un componente que vuelva a llamar
+   * `attachRuntime` sobre la MISMA instancia de `SessionRuntime` (p. ej.
+   * React StrictMode, que en desarrollo monta→limpia→monta el mismo
+   * efecto sin recrear las dependencias) duplicaría cada listener —
+   * `framesLost` llegaría a contar el doble de tramas perdidas de las
+   * reales. */
+  attachRuntime: (runtime: SessionRuntime) => () => void;
 }
 
 export const useSessionStore = create<SessionStoreState>((set) => ({
@@ -29,11 +40,10 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
   selectRhythm: (rhythmId) => set({ selectedRhythmId: rhythmId }),
 
   attachRuntime: (runtime) => {
-    runtime.on("connected", () => set({ connectionState: "connected" }));
-    runtime.on("disconnected", () =>
-      set({ connectionState: "idle", sessionId: null, seed: null, sampleRateHz: null })
-    );
-    runtime.on("started", (message) =>
+    const onConnected = () => set({ connectionState: "connected" });
+    const onDisconnected = () =>
+      set({ connectionState: "idle", sessionId: null, seed: null, sampleRateHz: null });
+    const onStarted = (message: SessionRuntimeEvents["started"]) =>
       set({
         connectionState: "running",
         sessionId: message.session_id,
@@ -41,19 +51,40 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
         sampleRateHz: message.sample_rate_hz,
         lastError: null,
         framesLost: 0,
-      })
-    );
-    runtime.on("updated", (message) => set({ params: message.params }));
-    runtime.on("paused", () => set({ connectionState: "paused" }));
-    runtime.on("resumed", () => set({ connectionState: "running" }));
-    runtime.on("stopped", () => set({ connectionState: "stopped" }));
-    runtime.on("error", (message) =>
-      set({ lastError: { code: message.code, detail: message.detail } })
-    );
-    runtime.on("frameMeta", (meta) => {
+      });
+    const onUpdated = (message: SessionRuntimeEvents["updated"]) =>
+      set({ params: message.params });
+    const onPaused = () => set({ connectionState: "paused" });
+    const onResumed = () => set({ connectionState: "running" });
+    const onStopped = () => set({ connectionState: "stopped" });
+    const onError = (message: SessionRuntimeEvents["error"]) =>
+      set({ lastError: { code: message.code, detail: message.detail } });
+    const onFrameMeta = (meta: SessionRuntimeEvents["frameMeta"]) => {
       if (meta.lost) {
         set((state) => ({ framesLost: state.framesLost + 1 }));
       }
-    });
+    };
+
+    runtime.on("connected", onConnected);
+    runtime.on("disconnected", onDisconnected);
+    runtime.on("started", onStarted);
+    runtime.on("updated", onUpdated);
+    runtime.on("paused", onPaused);
+    runtime.on("resumed", onResumed);
+    runtime.on("stopped", onStopped);
+    runtime.on("error", onError);
+    runtime.on("frameMeta", onFrameMeta);
+
+    return () => {
+      runtime.off("connected", onConnected);
+      runtime.off("disconnected", onDisconnected);
+      runtime.off("started", onStarted);
+      runtime.off("updated", onUpdated);
+      runtime.off("paused", onPaused);
+      runtime.off("resumed", onResumed);
+      runtime.off("stopped", onStopped);
+      runtime.off("error", onError);
+      runtime.off("frameMeta", onFrameMeta);
+    };
   },
 }));

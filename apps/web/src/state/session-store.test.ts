@@ -99,6 +99,34 @@ describe("useSessionStore", () => {
     });
   });
 
+  it("attachRuntime devuelve detach: llamarlo dos veces sobre la misma instancia sin desuscribir duplicaria framesLost", () => {
+    // Reproduce lo que hace React StrictMode en desarrollo: monta, limpia,
+    // vuelve a montar el mismo efecto sobre la MISMA instancia de
+    // SessionRuntime. Sin desuscribir entre medias, cada evento quedaria
+    // con el doble de listeners.
+    const fake = new FakeWebSocket();
+    const runtime = new SessionRuntime("ws://test", () => fake as unknown as WebSocket);
+
+    const detachFirst = useSessionStore.getState().attachRuntime(runtime);
+    detachFirst();
+    useSessionStore.getState().attachRuntime(runtime);
+
+    runtime.emit("frameMeta", { sequenceNumber: 1, lost: true, sessionId: "x" });
+
+    expect(useSessionStore.getState().framesLost).toBe(1);
+  });
+
+  it("tras detach(), el runtime deja de actualizar el store", () => {
+    const fake = new FakeWebSocket();
+    const runtime = new SessionRuntime("ws://test", () => fake as unknown as WebSocket);
+    const detach = useSessionStore.getState().attachRuntime(runtime);
+
+    detach();
+    runtime.emit("frameMeta", { sequenceNumber: 1, lost: true, sessionId: "x" });
+
+    expect(useSessionStore.getState().framesLost).toBe(0);
+  });
+
   it("al desconectar limpia session_id/seed pero conserva selectedRhythmId", () => {
     const fake = new FakeWebSocket();
     const runtime = new SessionRuntime("ws://test", () => fake as unknown as WebSocket);

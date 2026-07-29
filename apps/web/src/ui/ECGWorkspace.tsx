@@ -44,9 +44,16 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
   const gridCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
-    useSessionStore.getState().attachRuntime(runtime);
+    // `attachRuntime` devuelve `detach`: sin desuscribir en el cleanup,
+    // React StrictMode (monta→limpia→monta el mismo efecto en dev, sin
+    // recrear `runtime`) reataca los mismos listeners sobre la misma
+    // instancia y duplica los eventos — `framesLost` contaría el doble.
+    const detach = useSessionStore.getState().attachRuntime(runtime);
     runtime.connect();
-    return () => runtime.disconnect();
+    return () => {
+      detach();
+      runtime.disconnect();
+    };
   }, [runtime]);
 
   useEffect(() => {

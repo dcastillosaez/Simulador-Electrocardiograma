@@ -1998,6 +1998,34 @@ describe("useSessionStore", () => {
     expect(state.sessionId).toBeNull();
     expect(state.selectedRhythmId).toBe("sinus_normal");
   });
+
+  it("attachRuntime devuelve detach: llamarlo dos veces sobre la misma instancia sin desuscribir duplicaria framesLost", () => {
+    // Reproduce lo que hace React StrictMode en desarrollo: monta, limpia,
+    // vuelve a montar el mismo efecto sobre la MISMA instancia de
+    // SessionRuntime. Sin desuscribir entre medias, cada evento quedaria
+    // con el doble de listeners.
+    const fake = new FakeWebSocket();
+    const runtime = new SessionRuntime("ws://test", () => fake as unknown as WebSocket);
+
+    const detachFirst = useSessionStore.getState().attachRuntime(runtime);
+    detachFirst();
+    useSessionStore.getState().attachRuntime(runtime);
+
+    runtime.emit("frameMeta", { sequenceNumber: 1, lost: true, sessionId: "x" });
+
+    expect(useSessionStore.getState().framesLost).toBe(1);
+  });
+
+  it("tras detach(), el runtime deja de actualizar el store", () => {
+    const fake = new FakeWebSocket();
+    const runtime = new SessionRuntime("ws://test", () => fake as unknown as WebSocket);
+    const detach = useSessionStore.getState().attachRuntime(runtime);
+
+    detach();
+    runtime.emit("frameMeta", { sequenceNumber: 1, lost: true, sessionId: "x" });
+
+    expect(useSessionStore.getState().framesLost).toBe(0);
+  });
 });
 ```
 
@@ -2010,7 +2038,11 @@ Expected: FAIL — el módulo `./session-store` no existe
 
 ```ts
 import { create } from "zustand";
-import type { SessionRuntime, SessionState } from "../simulation-runtime/session-runtime";
+import type {
+  SessionRuntime,
+  SessionRuntimeEvents,
+  SessionState,
+} from "../simulation-runtime/session-runtime";
 import type { EngineParamsPayload } from "../types/engine-params";
 
 export interface SessionStoreState {
@@ -2024,7 +2056,14 @@ export interface SessionStoreState {
   framesLost: number;
 
   selectRhythm: (rhythmId: string) => void;
-  attachRuntime: (runtime: SessionRuntime) => void;
+  /** Devuelve una función `detach()` que retira exactamente los listeners
+   * que esta llamada registró. Sin ella, un componente que vuelva a llamar
+   * `attachRuntime` sobre la MISMA instancia de `SessionRuntime` (p. ej.
+   * React StrictMode, que en desarrollo monta→limpia→monta el mismo
+   * efecto sin recrear las dependencias) duplicaría cada listener —
+   * `framesLost` llegaría a contar el doble de tramas perdidas de las
+   * reales. */
+  attachRuntime: (runtime: SessionRuntime) => () => void;
 }
 
 export const useSessionStore = create<SessionStoreState>((set) => ({
@@ -2040,11 +2079,10 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
   selectRhythm: (rhythmId) => set({ selectedRhythmId: rhythmId }),
 
   attachRuntime: (runtime) => {
-    runtime.on("connected", () => set({ connectionState: "connected" }));
-    runtime.on("disconnected", () =>
-      set({ connectionState: "idle", sessionId: null, seed: null, sampleRateHz: null })
-    );
-    runtime.on("started", (message) =>
+    const onConnected = () => set({ connectionState: "connected" });
+    const onDisconnected = () =>
+      set({ connectionState: "idle", sessionId: null, seed: null, sampleRateHz: null });
+    const onStarted = (message: SessionRuntimeEvents["started"]) =>
       set({
         connectionState: "running",
         sessionId: message.session_id,
@@ -2052,20 +2090,41 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
         sampleRateHz: message.sample_rate_hz,
         lastError: null,
         framesLost: 0,
-      })
-    );
-    runtime.on("updated", (message) => set({ params: message.params }));
-    runtime.on("paused", () => set({ connectionState: "paused" }));
-    runtime.on("resumed", () => set({ connectionState: "running" }));
-    runtime.on("stopped", () => set({ connectionState: "stopped" }));
-    runtime.on("error", (message) =>
-      set({ lastError: { code: message.code, detail: message.detail } })
-    );
-    runtime.on("frameMeta", (meta) => {
+      });
+    const onUpdated = (message: SessionRuntimeEvents["updated"]) =>
+      set({ params: message.params });
+    const onPaused = () => set({ connectionState: "paused" });
+    const onResumed = () => set({ connectionState: "running" });
+    const onStopped = () => set({ connectionState: "stopped" });
+    const onError = (message: SessionRuntimeEvents["error"]) =>
+      set({ lastError: { code: message.code, detail: message.detail } });
+    const onFrameMeta = (meta: SessionRuntimeEvents["frameMeta"]) => {
       if (meta.lost) {
         set((state) => ({ framesLost: state.framesLost + 1 }));
       }
-    });
+    };
+
+    runtime.on("connected", onConnected);
+    runtime.on("disconnected", onDisconnected);
+    runtime.on("started", onStarted);
+    runtime.on("updated", onUpdated);
+    runtime.on("paused", onPaused);
+    runtime.on("resumed", onResumed);
+    runtime.on("stopped", onStopped);
+    runtime.on("error", onError);
+    runtime.on("frameMeta", onFrameMeta);
+
+    return () => {
+      runtime.off("connected", onConnected);
+      runtime.off("disconnected", onDisconnected);
+      runtime.off("started", onStarted);
+      runtime.off("updated", onUpdated);
+      runtime.off("paused", onPaused);
+      runtime.off("resumed", onResumed);
+      runtime.off("stopped", onStopped);
+      runtime.off("error", onError);
+      runtime.off("frameMeta", onFrameMeta);
+    };
   },
 }));
 ```
@@ -2073,7 +2132,7 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd apps/web && npx vitest run src/state/session-store.test.ts`
-Expected: PASS, 5 passed
+Expected: PASS, 7 passed
 
 - [ ] **Step 5: Commit**
 
@@ -3448,9 +3507,16 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
   const gridCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
-    useSessionStore.getState().attachRuntime(runtime);
+    // `attachRuntime` devuelve `detach`: sin desuscribir en el cleanup,
+    // React StrictMode (monta→limpia→monta el mismo efecto en dev, sin
+    // recrear `runtime`) reataca los mismos listeners sobre la misma
+    // instancia y duplica los eventos — `framesLost` contaría el doble.
+    const detach = useSessionStore.getState().attachRuntime(runtime);
     runtime.connect();
-    return () => runtime.disconnect();
+    return () => {
+      detach();
+      runtime.disconnect();
+    };
   }, [runtime]);
 
   useEffect(() => {
