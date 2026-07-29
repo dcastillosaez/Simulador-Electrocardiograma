@@ -45,7 +45,15 @@ export function drawSweepSegment(
     : 0;
 
   sweep.push(newSamples);
-  eraseBandAhead(ctx, sweep.writeCursor * pxPerSample, sweepWidthPx, heightPx);
+  // La banda borrada debe cubrir COMO MÍNIMO el tramo que se va a dibujar
+  // ahora mismo (startIndex..writeCursor), no solo un hueco fijo por
+  // delante del cursor nuevo: con trozos reales de 100ms (50 muestras) el
+  // cursor avanza ~9,45px por tick, más que ERASE_BAND_PX (8px) — una banda
+  // más estrecha que el avance deja sin limpiar la cola de cada trozo, y el
+  // trazo de la vuelta anterior se queda ahí, mezclado con el nuevo, en
+  // cuanto se completa una vuelta.
+  const eraseWidthPx = newSamples.length * pxPerSample + ERASE_BAND_PX;
+  eraseBandAhead(ctx, startIndex * pxPerSample, eraseWidthPx, sweepWidthPx, heightPx);
 
   ctx.strokeStyle = "#000000";
   ctx.lineWidth = 1;
@@ -71,15 +79,16 @@ export function drawSweepSegment(
   ctx.stroke();
 }
 
-/** Limpia una banda estrecha justo por delante del cursor, envolviendo al
+/** Limpia una banda de `bandWidthPx` a partir de `cursorX`, envolviendo al
  * borde derecho si no cabe entera. */
 function eraseBandAhead(
   ctx: CanvasRenderingContext2D,
   cursorX: number,
+  bandWidthPx: number,
   sweepWidthPx: number,
   heightPx: number
 ): void {
-  const bandPx = Math.min(ERASE_BAND_PX, sweepWidthPx);
+  const bandPx = Math.min(bandWidthPx, sweepWidthPx);
   const overflowPx = cursorX + bandPx - sweepWidthPx;
   if (overflowPx > 0) {
     ctx.clearRect(cursorX, 0, bandPx - overflowPx, heightPx);

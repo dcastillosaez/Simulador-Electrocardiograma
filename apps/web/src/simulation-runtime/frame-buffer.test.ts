@@ -56,6 +56,19 @@ describe("FrameBuffer", () => {
     expect(buffer.bufferedDurationS).toBeGreaterThan(0.5 - 0.1 - 1e-9);
   });
 
+  it("no descarta nada por debajo del maximo, aunque ya se haya superado el objetivo", () => {
+    // El disparador del overrun es superar `maxS`, no `targetS` -- sin este
+    // test, cambiar la condicion de `push()` a `> targetS` habria dejado
+    // pasar los dos tests de arriba igual (ambos superan tambien `maxS`).
+    const buffer = new FrameBuffer({ targetS: 0.5, minS: 0.3, maxS: 0.7 });
+    // 6 trozos de 100ms = 0,6s: por encima de targetS (0,5s), por debajo de
+    // maxS (0,7s).
+    for (let i = 0; i < 6; i++) {
+      buffer.push(makeFrame({ sequenceNumber: i }));
+    }
+    expect(buffer.bufferedDurationS).toBeCloseTo(0.6);
+  });
+
   it("advance() consume trozos completos y respeta los parciales", () => {
     // `targetS` explícito y pequeño para aislar la mecánica de consumo de la
     // del pre-roll (que se cubre en sus propios tests).

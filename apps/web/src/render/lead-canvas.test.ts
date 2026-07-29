@@ -78,7 +78,7 @@ describe("drawSweepSegment", () => {
     expect((ctx.lineTo as any).mock.calls[0][0]).toBeCloseTo(50 * PX_PER_SAMPLE);
   });
 
-  it("borra una banda estrecha por delante del nuevo cursor de escritura", () => {
+  it("borra desde donde empieza a dibujar, con un hueco extra por delante del cursor nuevo", () => {
     const ctx = makeCtx();
     const sweep = new SweepBuffer(sweepCapacitySamples(800, 25, SAMPLE_RATE_HZ));
 
@@ -86,10 +86,45 @@ describe("drawSweepSegment", () => {
 
     expect(ctx.clearRect).toHaveBeenCalled();
     const [x, y, width, height] = (ctx.clearRect as any).mock.calls[0];
-    expect(x).toBeCloseTo(sweep.writeCursor * PX_PER_SAMPLE);
+    // Arranca en el cursor ANTERIOR al push (0, sweep vacío), no en el
+    // nuevo: si arrancara en el cursor nuevo, el tramo recién dibujado
+    // (0..50 muestras) se quedaría sin limpiar.
+    expect(x).toBeCloseTo(0);
     expect(y).toBe(0);
-    expect(width).toBeCloseTo(ERASE_BAND_PX);
+    expect(width).toBeCloseTo(50 * PX_PER_SAMPLE + ERASE_BAND_PX);
     expect(height).toBe(HEIGHT_PX);
+  });
+
+  it("el borrado de cada tick cubre por completo lo que ese mismo tick dibuja encima", () => {
+    // Es la propiedad que motiva el arreglo: con la banda fija anterior
+    // (8px) un trozo real de 100ms (50 muestras, ~9,45px) dejaba sin
+    // limpiar la cola de cada tick, y el trazo de la vuelta anterior se
+    // veía mezclado con el nuevo.
+    const ctx = makeCtx();
+    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25, SAMPLE_RATE_HZ));
+    drawSweepSegment(ctx, sweep, new Float32Array(50), SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
+    (ctx.moveTo as any).mockClear();
+    (ctx.lineTo as any).mockClear();
+    (ctx.clearRect as any).mockClear();
+
+    drawSweepSegment(ctx, sweep, new Float32Array(50), SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
+
+    // Solo los `lineTo` son territorio nuevo de este tick (las 50 muestras
+    // recién empujadas). El `moveTo` inicial de enlace reutiliza el último
+    // punto del tick ANTERIOR (índice 49) -- ya limpiado por el borrado de
+    // aquel tick, no por el de este, así que queda fuera de esta comprobación
+    // a propósito.
+    const drawnXs = xsOf(ctx.lineTo);
+    const clearedRanges = (ctx.clearRect as any).mock.calls.map(
+      ([x, , width]: number[]) => [x, x + width]
+    );
+    for (const drawnX of drawnXs) {
+      expect(
+        clearedRanges.some(
+          ([lo, hi]: number[]) => drawnX >= lo - 1e-6 && drawnX <= hi + 1e-6
+        )
+      ).toBe(true);
+    }
   });
 
   it("nunca borra el canvas entero: el trazo de la vuelta anterior persiste", () => {
@@ -99,7 +134,7 @@ describe("drawSweepSegment", () => {
     drawSweepSegment(ctx, sweep, new Float32Array(50), SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
 
     for (const call of (ctx.clearRect as any).mock.calls) {
-      expect(call[2]).toBeLessThanOrEqual(ERASE_BAND_PX);
+      expect(call[2]).toBeLessThanOrEqual(50 * PX_PER_SAMPLE + ERASE_BAND_PX);
     }
   });
 
@@ -160,8 +195,10 @@ describe("drawSweepSegment", () => {
   });
 
   it("la banda de borrado envuelve al borde derecho en dos trozos", () => {
-    // Cursor a 0,94px del final del anillo: la banda de 8px no cabe entera y
-    // se parte entre la cola y la cabeza, como en un monitor real.
+    // Deja el cursor a 5 muestras del final del anillo (95/100) con un
+    // primer push, y en el segundo empuja 4 muestras mas: la banda de ese
+    // tick (4 muestras + ERASE_BAND_PX) no cabe entera y se parte entre la
+    // cola y la cabeza, como en un monitor real.
     const ctx = makeCtx();
     const sampleRateHz = 100;
     const pxPerSample = (PX_PER_MM * OPTIONS.paperSpeedMmS) / sampleRateHz;
@@ -169,15 +206,18 @@ describe("drawSweepSegment", () => {
     const sweepWidthPx = capacity * pxPerSample;
     const sweep = new SweepBuffer(capacity);
 
-    drawSweepSegment(ctx, sweep, new Float32Array(99), sampleRateHz, OPTIONS, HEIGHT_PX);
+    drawSweepSegment(ctx, sweep, new Float32Array(95), sampleRateHz, OPTIONS, HEIGHT_PX);
+    (ctx.clearRect as any).mockClear();
+
+    drawSweepSegment(ctx, sweep, new Float32Array(4), sampleRateHz, OPTIONS, HEIGHT_PX);
 
     expect(sweep.writeCursor).toBe(99);
     const calls = (ctx.clearRect as any).mock.calls;
     expect(calls.length).toBe(2);
-    expect(calls[0][0]).toBeCloseTo(99 * pxPerSample);
+    expect(calls[0][0]).toBeCloseTo(95 * pxPerSample);
     expect(calls[1][0]).toBe(0);
     const clearedWidth = calls.reduce((sum: number, call: number[]) => sum + call[2], 0);
-    expect(clearedWidth).toBeCloseTo(ERASE_BAND_PX);
+    expect(clearedWidth).toBeCloseTo(4 * pxPerSample + ERASE_BAND_PX);
     for (const call of calls) {
       expect(call[0] + call[2]).toBeLessThanOrEqual(sweepWidthPx + 1e-9);
     }
