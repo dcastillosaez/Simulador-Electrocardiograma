@@ -21,11 +21,21 @@ test("una sesion larga no degrada fps ni acumula memoria sin limite", async ({ p
     await client.send("Performance.enable");
 
     const deadline = Date.now() + REAL_TIME_BUDGET_MS;
-    const memorySamplesBytes: number[] = [];
+    const jsHeapSamplesBytes: number[] = [];
+    // `JSHeapUsedSize` no refleja los ArrayBuffer que respaldan los frames
+    // binarios (viven fuera del heap de objetos JS que V8 contabiliza ahí):
+    // se comprobó empíricamente rompiendo a propósito el descarte del
+    // buffer circular que el resto de tests de este mismo commit sí
+    // ejercitan, y el test seguía en verde con miles de frames retenidos
+    // sin evictar ninguno. `ArrayBufferContents`, de la misma llamada CDP,
+    // sí crece con esa fuga -- es la señal que de verdad hay que vigilar.
+    const arrayBufferSamplesBytes: number[] = [];
     while (Date.now() < deadline) {
       const metrics = await client.send("Performance.getMetrics");
       const jsHeap = metrics.metrics.find((m) => m.name === "JSHeapUsedSize");
-      if (jsHeap) memorySamplesBytes.push(jsHeap.value);
+      const arrayBuffers = metrics.metrics.find((m) => m.name === "ArrayBufferContents");
+      if (jsHeap) jsHeapSamplesBytes.push(jsHeap.value);
+      if (arrayBuffers) arrayBufferSamplesBytes.push(arrayBuffers.value);
       await page.waitForTimeout(500);
     }
 
@@ -33,14 +43,19 @@ test("una sesion larga no degrada fps ni acumula memoria sin limite", async ({ p
     // muestras no debe superar en mas de un 50% a la primera mitad. Un
     // buffer que no evictase nada crecería sin cota con varios minutos de
     // contenido comprimidos en segundos.
-    const half = Math.floor(memorySamplesBytes.length / 2);
-    const earlyAvg = average(memorySamplesBytes.slice(0, half));
-    const lateAvg = average(memorySamplesBytes.slice(half));
-    expect(lateAvg).toBeLessThan(earlyAvg * 1.5);
+    assertDoesNotGrowUnbounded(jsHeapSamplesBytes);
+    assertDoesNotGrowUnbounded(arrayBufferSamplesBytes);
   } finally {
     server.close();
   }
 });
+
+function assertDoesNotGrowUnbounded(samplesBytes: number[]): void {
+  const half = Math.floor(samplesBytes.length / 2);
+  const earlyAvg = average(samplesBytes.slice(0, half));
+  const lateAvg = average(samplesBytes.slice(half));
+  expect(lateAvg).toBeLessThan(earlyAvg * 1.5);
+}
 
 function average(values: number[]): number {
   return values.reduce((sum, v) => sum + v, 0) / values.length;
