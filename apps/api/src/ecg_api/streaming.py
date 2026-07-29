@@ -27,6 +27,7 @@ async def stream_chunks(
     *,
     interval_s: float = CHUNK_INTERVAL_S,
 ) -> None:
+    next_tick = asyncio.get_running_loop().time()
     while True:
         if manager.state is SimulationState.RUNNING:
             assert manager.session_id is not None
@@ -39,4 +40,5 @@ async def stream_chunks(
                 channels_v=chunk.channels_v,
             )
             outbox.put(frame)
-        await asyncio.sleep(interval_s)
+        next_tick += interval_s
+        await asyncio.sleep(max(0.0, next_tick - asyncio.get_running_loop().time()))
