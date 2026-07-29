@@ -9,14 +9,24 @@
 // forma nativa. ui-system no toca el DOM, así que no pierde nada.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { renderTokensCss } from "./css";
-import { space } from "./tokens";
+import { renderTokensCss, TOKEN_CSS_GROUPS } from "./css";
+import { palette } from "./tokens";
 
 describe("renderTokensCss", () => {
-  it("emite una custom property por cada valor de espaciado", () => {
+  it("emite una custom property por cada valor de cada grupo de tokens", () => {
     const css = renderTokensCss();
-    for (const [key, value] of Object.entries(space)) {
-      expect(css).toContain(`--space-${key}: ${value};`);
+    for (const [prefix, group] of TOKEN_CSS_GROUPS) {
+      for (const [key, value] of Object.entries(group)) {
+        expect(css).toContain(`--${prefix}-${key}: ${value};`);
+      }
+    }
+  });
+
+  it("no emite palette (los roles de color son de themes/)", () => {
+    expect(TOKEN_CSS_GROUPS.map(([prefix]) => prefix)).not.toContain("palette");
+    const css = renderTokensCss();
+    for (const key of Object.keys(palette)) {
+      expect(css).not.toContain(`--palette-${key}:`);
     }
   });
 
