@@ -40,8 +40,26 @@ describe("FrameBuffer", () => {
     expect(buffer.bufferedDurationS).toBeLessThanOrEqual(0.7);
   });
 
+  it("el overrun descarta hasta volver al OBJETIVO, no solo hasta el maximo", () => {
+    // Spec §4: "se descarta lo más antiguo hasta recuperar el objetivo".
+    // Parar en `maxS` dejaba el buffer pegado al techo tras cada aluvión
+    // (p. ej. al volver de una pestaña en segundo plano), sin margen para
+    // el siguiente pico de jitter.
+    const buffer = new FrameBuffer({ targetS: 0.5, minS: 0.3, maxS: 0.7 });
+    // 8 trozos de 100ms = 0,8s: el octavo push es el que dispara el overrun.
+    for (let i = 0; i < 8; i++) {
+      buffer.push(makeFrame({ sequenceNumber: i }));
+    }
+    // Con la política antigua (parar en `maxS`) aquí quedarían 0,7s.
+    expect(buffer.bufferedDurationS).toBeLessThanOrEqual(0.5 + 1e-9);
+    // Y no se pasa de frenada: queda dentro de un trozo (0,1s) del objetivo.
+    expect(buffer.bufferedDurationS).toBeGreaterThan(0.5 - 0.1 - 1e-9);
+  });
+
   it("advance() consume trozos completos y respeta los parciales", () => {
-    const buffer = new FrameBuffer();
+    // `targetS` explícito y pequeño para aislar la mecánica de consumo de la
+    // del pre-roll (que se cubre en sus propios tests).
+    const buffer = new FrameBuffer({ targetS: 0.1, minS: 0.05, maxS: 0.7 });
     buffer.push(makeFrame({ sequenceNumber: 0 }));
     buffer.push(makeFrame({ sequenceNumber: 1 }));
     expect(buffer.bufferedDurationS).toBeCloseTo(0.2);
@@ -54,11 +72,70 @@ describe("FrameBuffer", () => {
   });
 
   it("advance() mas alla de lo disponible deja el buffer vacio (underrun)", () => {
-    const buffer = new FrameBuffer();
+    const buffer = new FrameBuffer({ targetS: 0.1, minS: 0.05, maxS: 0.7 });
     buffer.push(makeFrame());
     buffer.advance(10);
     expect(buffer.bufferedDurationS).toBe(0);
     expect(buffer.isUnderrun).toBe(true);
+  });
+
+  it("no reproduce nada hasta hacer pre-roll: por debajo del objetivo, advance() es un no-op", () => {
+    // Sin pre-roll el buffer arranca con el primer trozo que llega y vive
+    // permanentemente al borde del underrun: no tiene reserva que gastar.
+    const buffer = new FrameBuffer({ targetS: 0.5, minS: 0.3, maxS: 0.7 });
+    for (let i = 0; i < 4; i++) {
+      buffer.push(makeFrame({ sequenceNumber: i })); // 0,4s < 0,5s
+    }
+    expect(buffer.isPreRolled).toBe(false);
+
+    buffer.advance(1); // de sobra para drenarlo entero si se reprodujese
+
+    expect(buffer.bufferedDurationS).toBeCloseTo(0.4);
+    expect(buffer.isUnderrun).toBe(false);
+  });
+
+  it("empieza a reproducir en cuanto el buffer alcanza el objetivo", () => {
+    const buffer = new FrameBuffer({ targetS: 0.5, minS: 0.3, maxS: 0.7 });
+    for (let i = 0; i < 5; i++) {
+      buffer.push(makeFrame({ sequenceNumber: i })); // 0,5s = objetivo
+    }
+    expect(buffer.isPreRolled).toBe(true);
+
+    buffer.advance(0.1);
+
+    expect(buffer.bufferedDurationS).toBeCloseTo(0.4);
+  });
+
+  it("tras vaciarse hay que volver a alcanzar el objetivo antes de reanudar", () => {
+    const buffer = new FrameBuffer({ targetS: 0.2, minS: 0.1, maxS: 0.7 });
+    buffer.push(makeFrame({ sequenceNumber: 0 }));
+    buffer.push(makeFrame({ sequenceNumber: 1 })); // 0,2s = objetivo
+    expect(buffer.isPreRolled).toBe(true);
+
+    buffer.advance(1); // lo vacía
+    expect(buffer.isUnderrun).toBe(true);
+    expect(buffer.isPreRolled).toBe(false);
+
+    buffer.push(makeFrame({ sequenceNumber: 2 })); // 0,1s: aún por debajo
+    expect(buffer.isPreRolled).toBe(false);
+    buffer.advance(1);
+    expect(buffer.bufferedDurationS).toBeCloseTo(0.1); // no se consumió nada
+
+    buffer.push(makeFrame({ sequenceNumber: 3 })); // 0,2s: objetivo de nuevo
+    expect(buffer.isPreRolled).toBe(true);
+    buffer.advance(0.1);
+    expect(buffer.bufferedDurationS).toBeCloseTo(0.1);
+  });
+
+  it("clear() vuelve a exigir pre-roll", () => {
+    const buffer = new FrameBuffer({ targetS: 0.2, minS: 0.1, maxS: 0.7 });
+    buffer.push(makeFrame({ sequenceNumber: 0 }));
+    buffer.push(makeFrame({ sequenceNumber: 1 }));
+    expect(buffer.isPreRolled).toBe(true);
+
+    buffer.clear();
+
+    expect(buffer.isPreRolled).toBe(false);
   });
 
   it("advance() acumula el resto entre llamadas: a cadencia real de rAF (~16.7ms) SI drena el buffer", () => {
@@ -82,7 +159,7 @@ describe("FrameBuffer", () => {
   });
 
   it("advance() no acumula deuda tras un underrun: un frame nuevo no se consume al instante", () => {
-    const buffer = new FrameBuffer();
+    const buffer = new FrameBuffer({ targetS: 0.1, minS: 0.05, maxS: 0.7 });
     buffer.push(makeFrame({ sequenceNumber: 0 })); // 0.1s
     buffer.advance(5); // agota el buffer y, si acumulase deuda, dejaria ~4.9s pendientes
     expect(buffer.isUnderrun).toBe(true);
@@ -92,8 +169,10 @@ describe("FrameBuffer", () => {
     expect(buffer.bufferedDurationS).toBeCloseTo(0.1);
   });
 
-  it("getVisibleSamples concatena las muestras del canal pedido, en orden de llegada", () => {
-    const buffer = new FrameBuffer();
+  it("consumeNewSamples devuelve solo lo desalojado por el ultimo advance(), por derivacion y en orden", () => {
+    // 2 muestras a 500Hz = 4ms por trozo; el objetivo se fija a dos trozos
+    // para que el pre-roll no sea el objeto de este test.
+    const buffer = new FrameBuffer({ targetS: 0.008, minS: 0.004, maxS: 0.02 });
     buffer.push(
       makeFrame({
         nChannels: 2,
@@ -103,14 +182,47 @@ describe("FrameBuffer", () => {
     );
     buffer.push(
       makeFrame({
+        sequenceNumber: 1,
         nChannels: 2,
         nSamplesPerChannel: 2,
         channelsV: new Float32Array([3, 4, 30, 40]),
       })
     );
+    expect(buffer.isPreRolled).toBe(true);
 
-    expect(Array.from(buffer.getVisibleSamples(0))).toEqual([1, 2, 3, 4]);
-    expect(Array.from(buffer.getVisibleSamples(1))).toEqual([10, 20, 30, 40]);
+    buffer.advance(0.008); // consume los dos trozos
+
+    expect(Array.from(buffer.consumeNewSamples(0))).toEqual([1, 2, 3, 4]);
+    expect(Array.from(buffer.consumeNewSamples(1))).toEqual([10, 20, 30, 40]);
+  });
+
+  it("consumeNewSamples queda vacio si el ultimo advance() no completo ningun trozo", () => {
+    const buffer = new FrameBuffer({ targetS: 0.008, minS: 0.004, maxS: 0.02 });
+    for (let i = 0; i < 3; i++) {
+      buffer.push(
+        makeFrame({
+          sequenceNumber: i,
+          nChannels: 2,
+          nSamplesPerChannel: 2,
+          channelsV: new Float32Array([1, 2, 10, 20]),
+        })
+      );
+    }
+
+    buffer.advance(0.004); // consume un trozo
+    expect(buffer.consumeNewSamples(0).length).toBe(2);
+
+    buffer.advance(0.001); // menos que un trozo: no completa ninguno
+    expect(buffer.consumeNewSamples(0).length).toBe(0);
+  });
+
+  it("consumeNewSamples queda vacio mientras el buffer no ha hecho pre-roll", () => {
+    const buffer = new FrameBuffer({ targetS: 0.5, minS: 0.3, maxS: 0.7 });
+    buffer.push(makeFrame({ nSamplesPerChannel: 2, channelsV: new Float32Array([1, 2, 10, 20]) }));
+
+    buffer.advance(1);
+
+    expect(buffer.consumeNewSamples(0).length).toBe(0);
   });
 
   it("clear() vacia el buffer", () => {

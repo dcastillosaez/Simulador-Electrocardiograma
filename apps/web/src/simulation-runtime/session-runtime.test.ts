@@ -121,10 +121,16 @@ describe("SessionRuntime", () => {
     const runtime = new SessionRuntime("ws://test", () => fake as unknown as WebSocket);
     runtime.connect();
 
-    fake.dispatch("message", { data: buildFrameBytes({ sequenceNumber: 0 }) });
+    // El buffer no reproduce nada hasta hacer pre-roll (objetivo 0,5s): con
+    // trozos de 2 muestras a 500Hz (4ms) hacen falta 150 para superarlo con
+    // holgura y seguir por debajo del máximo de 0,7s.
+    for (let i = 0; i < 150; i++) {
+      fake.dispatch("message", { data: buildFrameBytes({ sequenceNumber: i }) });
+    }
 
     expect(runtime.buffer.isUnderrun).toBe(false);
-    const samples = Array.from(runtime.buffer.getVisibleSamples(0));
+    runtime.buffer.advance(0.6);
+    const samples = Array.from(runtime.buffer.consumeNewSamples(0));
     expect(samples[0]).toBeCloseTo(0.1);
     expect(samples[1]).toBeCloseTo(0.2);
   });

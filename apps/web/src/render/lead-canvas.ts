@@ -1,40 +1,92 @@
-import { timeToPx, voltageToPx } from "./grid-layer";
+import { PX_PER_MM, voltageToPx } from "./grid-layer";
+import type { SweepBuffer } from "./sweep-buffer";
 
 export interface LeadCanvasOptions {
   paperSpeedMmS: number;
   gainMmPerMv: number;
 }
 
-export function drawLeadTrace(
+/** Ancho del hueco que se borra por delante del cursor de escritura. Es lo
+ * que separa visualmente el trazo nuevo del de la vuelta anterior — el efecto
+ * de barrido de un monitor de cabecera. A 25mm/s son unos 2mm de papel. */
+export const ERASE_BAND_PX = 8;
+
+/** Escribe las muestras nuevas de este tick en el anillo de la derivación y
+ * dibuja SOLO ese segmento, en la posición de píxel que le marca el cursor.
+ *
+ * El canvas nunca se borra entero: el trazo de la vuelta anterior sigue
+ * pintado hasta que el cursor pasa por encima. Por eso escribir en el anillo
+ * y dibujar ocurren aquí juntos — si el llamante empujase por su cuenta, el
+ * cursor y la banda de borrado podrían desincronizarse con lo que se pinta. */
+export function drawSweepSegment(
   ctx: CanvasRenderingContext2D,
-  samples: Float32Array,
+  sweep: SweepBuffer,
+  newSamples: Float32Array,
   sampleRateHz: number,
   options: LeadCanvasOptions,
   heightPx: number
 ): void {
-  ctx.clearRect(0, 0, ctx.canvas.width, heightPx);
-  if (samples.length === 0) {
+  if (newSamples.length === 0) {
     return;
   }
+
+  const pxPerSample = (PX_PER_MM * options.paperSpeedMmS) / sampleRateHz;
+  const capacity = sweep.capacity;
+  const sweepWidthPx = capacity * pxPerSample;
+  const baselineY = heightPx / 2;
+
+  const startIndex = sweep.writeCursor;
+  // El enlace con el segmento del tick anterior solo existe si ya hay trazo
+  // escrito y no acabamos de envolver: unir la posición 0 con la capacity-1
+  // dibujaría una línea atravesando todo el canvas de derecha a izquierda.
+  const linksToPrevious = sweep.hasSamples && startIndex > 0;
+  const previousY = linksToPrevious
+    ? baselineY - voltageToPx(sweep.at(startIndex - 1), options.gainMmPerMv)
+    : 0;
+
+  sweep.push(newSamples);
+  eraseBandAhead(ctx, sweep.writeCursor * pxPerSample, sweepWidthPx, heightPx);
 
   ctx.strokeStyle = "#000000";
   ctx.lineWidth = 1;
   ctx.beginPath();
 
-  const dtS = 1 / sampleRateHz;
-  const baselineY = heightPx / 2;
-
-  for (let i = 0; i < samples.length; i++) {
-    const x = timeToPx(i * dtS, options.paperSpeedMmS);
-    const y = baselineY - voltageToPx(samples[i], options.gainMmPerMv);
-    if (i === 0) {
-      ctx.moveTo(x, y);
-    } else {
+  let penDown = false;
+  if (linksToPrevious) {
+    ctx.moveTo((startIndex - 1) * pxPerSample, previousY);
+    penDown = true;
+  }
+  for (let i = 0; i < newSamples.length; i++) {
+    const ringIndex = (startIndex + i) % capacity;
+    const x = ringIndex * pxPerSample;
+    const y = baselineY - voltageToPx(newSamples[i], options.gainMmPerMv);
+    if (penDown && ringIndex !== 0) {
       ctx.lineTo(x, y);
+    } else {
+      ctx.moveTo(x, y);
+      penDown = true;
     }
   }
 
   ctx.stroke();
+}
+
+/** Limpia una banda estrecha justo por delante del cursor, envolviendo al
+ * borde derecho si no cabe entera. */
+function eraseBandAhead(
+  ctx: CanvasRenderingContext2D,
+  cursorX: number,
+  sweepWidthPx: number,
+  heightPx: number
+): void {
+  const bandPx = Math.min(ERASE_BAND_PX, sweepWidthPx);
+  const overflowPx = cursorX + bandPx - sweepWidthPx;
+  if (overflowPx > 0) {
+    ctx.clearRect(cursorX, 0, bandPx - overflowPx, heightPx);
+    ctx.clearRect(0, 0, overflowPx, heightPx);
+  } else {
+    ctx.clearRect(cursorX, 0, bandPx, heightPx);
+  }
 }
 
 /** Capa superior para medidas e interacción (cursores, calipers). Sin
