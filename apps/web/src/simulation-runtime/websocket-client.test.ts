@@ -17,6 +17,13 @@ class FakeWebSocket {
     this.handlers.set(type, list);
   }
 
+  removeEventListener(type: string, handler: (event: any) => void): void {
+    const list = this.handlers.get(type);
+    if (!list) return;
+    const index = list.indexOf(handler);
+    if (index !== -1) list.splice(index, 1);
+  }
+
   send(data: unknown): void {
     this.sentMessages.push(data);
   }
@@ -120,5 +127,29 @@ describe("WebSocketClient", () => {
     fake.close();
 
     expect(onClose).toHaveBeenCalledWith({ code: 1000, reason: "cierre normal" });
+  });
+
+  it("close() retira los listeners: un evento tardio del socket viejo no llama a los callbacks", () => {
+    // Bajo React StrictMode, close() puede llamarse justo antes de que
+    // connect() abra un socket nuevo sobre la MISMA instancia de
+    // WebSocketClient. El evento "close" del socket viejo llega de forma
+    // asincrona -- si los listeners no se retiran, ese evento tardio
+    // llamaria a onClose() y corromperia el estado que el socket nuevo ya
+    // empezo a construir.
+    const fake = new FakeWebSocket();
+    const client = new WebSocketClient({
+      url: "ws://test",
+      webSocketFactory: () => fake as unknown as WebSocket,
+    });
+    const onClose = vi.fn();
+    client.onClose = onClose;
+
+    client.connect();
+    client.close();
+    // Evento "close" tardio del socket ya cerrado, entregado despues de
+    // que WebSocketClient.close() ya retirase sus listeners.
+    fake.dispatch("close", { code: 1000, reason: "cierre normal" });
+
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

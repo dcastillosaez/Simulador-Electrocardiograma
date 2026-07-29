@@ -60,6 +60,20 @@ export class SessionRuntime extends TypedEventEmitter<SessionRuntimeEvents> {
       this.lastSessionId = null;
       this.emit("disconnected", { code, reason });
     };
+    // `WebSocketClient.onError` estaba definido pero nunca se asignaba: un
+    // socket que nunca llega a abrir, o que falla a mitad de conexión, no
+    // generaba ningún evento observable — el usuario se quedaba mirando un
+    // selector de ritmo que no hacía nada, sin ningún mensaje. El navegador
+    // no da detalle del error (por seguridad, el evento `error` del
+    // WebSocket nunca lleva información), así que solo se puede reportar
+    // que algo falló, no el motivo exacto.
+    this.ws.onError = () => {
+      this.emit("error", {
+        type: "error",
+        code: "CONNECTION_ERROR",
+        detail: "No se pudo conectar con el servidor de simulación",
+      });
+    };
   }
 
   connect(): void {

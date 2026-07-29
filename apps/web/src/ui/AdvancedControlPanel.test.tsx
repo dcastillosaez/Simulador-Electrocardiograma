@@ -28,6 +28,31 @@ describe("AdvancedControlPanel", () => {
     expect(onChange).toHaveBeenCalledWith({ ...noise, emg_v: 0.08 });
   });
 
+  it("el slider de Saturacion al minimo llama a onChange con clip_v: null, no 0", () => {
+    // clip_v recorta la senal a [-clip_v, clip_v] (noise.py): clip_v=0
+    // aplana el trazo entero a una linea recta. El extremo izquierdo del
+    // slider debe significar "sin saturacion" (null), no "recortar a
+    // amplitud cero".
+    const onChange = vi.fn();
+    const noiseWithClip: NoiseParamsPayload = { ...noise, clip_v: 0.002 };
+    render(
+      <AdvancedControlPanel noise={noiseWithClip} onChange={onChange} onSwitchToBasic={vi.fn()} />
+    );
+
+    fireEventChange(screen.getByLabelText("Saturación"), "0");
+
+    expect(onChange).toHaveBeenCalledWith({ ...noiseWithClip, clip_v: null });
+  });
+
+  it("mover el slider de Saturacion a un valor positivo lo aplica tal cual", () => {
+    const onChange = vi.fn();
+    render(<AdvancedControlPanel noise={noise} onChange={onChange} onSwitchToBasic={vi.fn()} />);
+
+    fireEventChange(screen.getByLabelText("Saturación"), "0.002");
+
+    expect(onChange).toHaveBeenCalledWith({ ...noise, clip_v: 0.002 });
+  });
+
   it("volver a modo basico llama a onSwitchToBasic", async () => {
     const onSwitchToBasic = vi.fn();
     render(<AdvancedControlPanel noise={noise} onChange={vi.fn()} onSwitchToBasic={onSwitchToBasic} />);

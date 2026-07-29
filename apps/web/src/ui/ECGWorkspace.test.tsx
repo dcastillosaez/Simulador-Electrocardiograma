@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ECGWorkspace } from "./ECGWorkspace";
 
@@ -13,6 +13,13 @@ class FakeWebSocket {
     const list = this.handlers.get(type) ?? [];
     list.push(handler);
     this.handlers.set(type, list);
+  }
+
+  removeEventListener(type: string, handler: (event: any) => void): void {
+    const list = this.handlers.get(type);
+    if (!list) return;
+    const index = list.indexOf(handler);
+    if (index !== -1) list.splice(index, 1);
   }
 
   send(): void {}
@@ -109,5 +116,45 @@ describe("ECGWorkspace", () => {
     // antes de pulsar "start" confundiría al usuario con un mensaje sobre
     // una señal que nunca se pidió.
     expect(screen.queryByText("Esperando señal…")).not.toBeInTheDocument();
+  });
+
+  it("no muestra 'Desconectado' antes de haberse conectado nunca", async () => {
+    render(
+      <ECGWorkspace
+        wsUrl="ws://test"
+        apiBaseUrl="http://api.test"
+        webSocketFactory={() => fakeSocket as unknown as WebSocket}
+      />
+    );
+
+    await waitFor(() => screen.getByLabelText("Seleccionar ritmo"));
+
+    expect(screen.queryByText("Desconectado")).not.toBeInTheDocument();
+  });
+
+  it("muestra 'Desconectado' si el socket se cierra tras haber estado conectado", async () => {
+    render(
+      <ECGWorkspace
+        wsUrl="ws://test"
+        apiBaseUrl="http://api.test"
+        webSocketFactory={() => fakeSocket as unknown as WebSocket}
+      />
+    );
+
+    await waitFor(() => screen.getByLabelText("Seleccionar ritmo"));
+    // Cada dispatch en su propio act(): sin esto, React 18 agrupa ambas
+    // actualizaciones de Zustand en un unico re-render con el estado FINAL
+    // (idle), sin llegar a comprometer nunca el estado intermedio
+    // "connected" -- el efecto que marca hasConnectedOnce no se dispara.
+    act(() => {
+      fakeSocket.dispatch("open", {});
+    });
+    act(() => {
+      fakeSocket.dispatch("close", { code: 1006, reason: "" });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Desconectado")).toBeInTheDocument();
+    });
   });
 });

@@ -40,6 +40,7 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
   const [advancedMode, setAdvancedMode] = useState(false);
   const [layout, setLayout] = useState<LayoutId>("6");
   const [isUnderrun, setIsUnderrun] = useState(false);
+  const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
   const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
   const gridCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -101,6 +102,12 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
     if (ctx && canvas) drawGrid(ctx, canvas.width, canvas.height);
   }, [layout]);
 
+  useEffect(() => {
+    if (store.connectionState === "connected" || store.connectionState === "running") {
+      setHasConnectedOnce(true);
+    }
+  }, [store.connectionState]);
+
   const handleRhythmSelect = (rhythmId: string, detail: RhythmDetail) => {
     setSelectedRhythm(detail);
     store.selectRhythm(rhythmId);
@@ -128,6 +135,9 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
         <p role="alert">
           {store.lastError.code}: {store.lastError.detail}
         </p>
+      )}
+      {hasConnectedOnce && store.connectionState === "idle" && (
+        <p role="status">Desconectado</p>
       )}
       {isUnderrun && store.connectionState === "running" && (
         <p role="status">Esperando señal…</p>

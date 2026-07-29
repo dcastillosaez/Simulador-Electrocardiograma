@@ -14,6 +14,13 @@ class FakeWebSocket {
     this.handlers.set(type, list);
   }
 
+  removeEventListener(type: string, handler: (event: any) => void): void {
+    const list = this.handlers.get(type);
+    if (!list) return;
+    const index = list.indexOf(handler);
+    if (index !== -1) list.splice(index, 1);
+  }
+
   send(): void {}
   close(): void {
     this.dispatch("close", { code: 1000, reason: "" });

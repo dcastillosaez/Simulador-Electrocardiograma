@@ -18,6 +18,31 @@ export class WebSocketClient {
   private readonly url: string;
   private readonly factory: (url: string) => WebSocket;
 
+  // Referencias estables: `close()` las necesita para poder retirarlas con
+  // `removeEventListener`. Sin esto, el socket que se está cerrando sigue
+  // entregando eventos asíncronos (sobre todo "close") después de que
+  // `this.socket` ya apunte a una conexión NUEVA — bajo React StrictMode
+  // (monta→limpia→monta el mismo efecto), la conexión B recién abierta
+  // recibía un `onClose` espurio disparado por el cierre asíncrono de la
+  // conexión A, reseteando el estado que B ya había empezado a construir.
+  private readonly handleOpen = () => this.onOpen?.();
+
+  private readonly handleMessage = (event: MessageEvent) => {
+    if (typeof event.data === "string") {
+      this.onTextMessage?.(event.data);
+    } else {
+      this.onBinaryMessage?.(event.data as ArrayBuffer);
+    }
+  };
+
+  private readonly handleClose = (event: CloseEvent) => {
+    this.onClose?.({ code: event.code, reason: event.reason });
+  };
+
+  private readonly handleError = (event: Event) => {
+    this.onError?.(event);
+  };
+
   constructor(options: WebSocketClientOptions) {
     this.url = options.url;
     this.factory = options.webSocketFactory ?? ((url) => new WebSocket(url));
@@ -26,20 +51,10 @@ export class WebSocketClient {
   connect(): void {
     const socket = this.factory(this.url);
     socket.binaryType = "arraybuffer";
-    socket.addEventListener("open", () => this.onOpen?.());
-    socket.addEventListener("message", (event: MessageEvent) => {
-      if (typeof event.data === "string") {
-        this.onTextMessage?.(event.data);
-      } else {
-        this.onBinaryMessage?.(event.data as ArrayBuffer);
-      }
-    });
-    socket.addEventListener("close", (event: CloseEvent) => {
-      this.onClose?.({ code: event.code, reason: event.reason });
-    });
-    socket.addEventListener("error", (event: Event) => {
-      this.onError?.(event);
-    });
+    socket.addEventListener("open", this.handleOpen);
+    socket.addEventListener("message", this.handleMessage);
+    socket.addEventListener("close", this.handleClose);
+    socket.addEventListener("error", this.handleError);
     this.socket = socket;
   }
 
@@ -51,7 +66,13 @@ export class WebSocketClient {
   }
 
   close(): void {
-    this.socket?.close();
+    if (this.socket) {
+      this.socket.removeEventListener("open", this.handleOpen);
+      this.socket.removeEventListener("message", this.handleMessage);
+      this.socket.removeEventListener("close", this.handleClose);
+      this.socket.removeEventListener("error", this.handleError);
+      this.socket.close();
+    }
     this.socket = null;
   }
 }

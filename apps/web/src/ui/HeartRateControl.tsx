@@ -16,13 +16,29 @@ export function HeartRateControl({ range, valueHz, onChange }: HeartRateControlP
     onChange(next / 60);
   };
 
+  // El motor documenta este contrato por escrito (catalog/definitions.py):
+  // los ritmos de frecuencia fija (flutter, TV, FV...) declaran
+  // minimum===maximum, y ofrecer un control que no hace nada sería
+  // mentirle al usuario -- hay que deshabilitarlo, no dejarlo pulsable.
+  const isFixed = minBpm === maxBpm;
+
   return (
     <div>
-      <button type="button" aria-label="Bajar frecuencia" onClick={() => step(-STEP_BPM)}>
+      <button
+        type="button"
+        aria-label="Bajar frecuencia"
+        disabled={isFixed}
+        onClick={() => step(-STEP_BPM)}
+      >
         −5
       </button>
-      <span aria-live="polite">{bpm} lpm</span>
-      <button type="button" aria-label="Subir frecuencia" onClick={() => step(STEP_BPM)}>
+      <span aria-live="polite">{bpm} lpm{isFixed ? " (fija)" : ""}</span>
+      <button
+        type="button"
+        aria-label="Subir frecuencia"
+        disabled={isFixed}
+        onClick={() => step(STEP_BPM)}
+      >
         +5
       </button>
     </div>

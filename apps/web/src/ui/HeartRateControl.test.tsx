@@ -47,4 +47,21 @@ describe("HeartRateControl", () => {
 
     expect(onChange).toHaveBeenCalledWith(60 / 60);
   });
+
+  it("deshabilita los botones cuando el ritmo tiene frecuencia fija (minimum===maximum)", async () => {
+    // p.ej. flutter auricular, taquicardia/fibrilacion ventricular: el
+    // motor documenta que un control que no hace nada no debe ser
+    // pulsable, para no confundir al usuario haciendole creer que ajusto
+    // algo cuando el motor ignora el cambio.
+    const onChange = vi.fn();
+    render(
+      <HeartRateControl range={{ minimum: 3.0, maximum: 3.0 }} valueHz={3.0} onChange={onChange} />
+    );
+
+    expect(screen.getByLabelText("Bajar frecuencia")).toBeDisabled();
+    expect(screen.getByLabelText("Subir frecuencia")).toBeDisabled();
+
+    await userEvent.click(screen.getByLabelText("Subir frecuencia"));
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });

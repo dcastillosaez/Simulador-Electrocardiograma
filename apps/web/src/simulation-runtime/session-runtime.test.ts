@@ -15,6 +15,13 @@ class FakeWebSocket {
     this.handlers.set(type, list);
   }
 
+  removeEventListener(type: string, handler: (event: any) => void): void {
+    const list = this.handlers.get(type);
+    if (!list) return;
+    const index = list.indexOf(handler);
+    if (index !== -1) list.splice(index, 1);
+  }
+
   send(data: string): void {
     this.sentMessages.push(data);
   }
@@ -162,6 +169,23 @@ describe("SessionRuntime", () => {
 
     expect(onError).toHaveBeenCalledWith(
       expect.objectContaining({ code: "NOT_FOUND", detail: "ritmo desconocido" })
+    );
+  });
+
+  it("un error de transporte del WebSocket (onError) se emite como evento error", () => {
+    // Antes de este arreglo, WebSocketClient.onError quedaba sin asignar:
+    // un socket que nunca abre o que falla a mitad de conexion no producia
+    // ningun evento observable -- el usuario se quedaba sin ninguna senal.
+    const fake = new FakeWebSocket();
+    const runtime = new SessionRuntime("ws://test", () => fake as unknown as WebSocket);
+    const onError = vi.fn();
+    runtime.on("error", onError);
+    runtime.connect();
+
+    fake.dispatch("error", {});
+
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "error", code: "CONNECTION_ERROR" })
     );
   });
 

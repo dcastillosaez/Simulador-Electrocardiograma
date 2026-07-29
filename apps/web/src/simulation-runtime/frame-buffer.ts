@@ -12,6 +12,7 @@ export class FrameBuffer {
   readonly maxS: number;
 
   private frames: DecodedFrame[] = [];
+  private pendingS = 0;
 
   constructor(options: FrameBufferOptions = {}) {
     this.targetS = options.targetS ?? 0.5;
@@ -40,18 +41,29 @@ export class FrameBuffer {
 
   /** Simula el paso de `elapsedS` segundos de reproducción, descartando los
    * trozos ya consumidos por completo. Determinista: no depende del reloj
-   * real, así que se puede testear sin temporizadores. */
+   * real, así que se puede testear sin temporizadores.
+   *
+   * El resto fraccionario se acumula en `pendingS` de una llamada a la
+   * siguiente. Sin esto, invocado a cadencia de `requestAnimationFrame`
+   * (~16,7ms) contra trozos de 100ms, `duration > remaining` es cierto en
+   * CADA tick y la función nunca consume nada: el buffer no drena jamás
+   * por reproducción, solo por el descarte de `push()` al superar `maxS`,
+   * y el underrun (`isUnderrun`) nunca se detecta en la práctica salvo
+   * antes del primer frame o tras `clear()`. */
   advance(elapsedS: number): void {
-    let remaining = elapsedS;
-    while (remaining > 0 && this.frames.length > 0) {
-      const oldest = this.frames[0];
-      const duration = this.frameDurationS(oldest);
+    let remaining = this.pendingS + elapsedS;
+    while (this.frames.length > 0) {
+      const duration = this.frameDurationS(this.frames[0]);
       if (duration > remaining) {
         break;
       }
       this.frames.shift();
       remaining -= duration;
     }
+    // Si el buffer se vació durante el drenaje, no se acumula deuda: una
+    // parada prolongada del streaming no debe hacer que el primer frame
+    // que llegue después se consuma al instante sin llegar a dibujarse.
+    this.pendingS = this.frames.length > 0 ? remaining : 0;
   }
 
   getVisibleSamples(leadIndex: number): Float32Array {
@@ -74,5 +86,6 @@ export class FrameBuffer {
 
   clear(): void {
     this.frames = [];
+    this.pendingS = 0;
   }
 }

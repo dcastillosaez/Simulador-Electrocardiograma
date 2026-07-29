@@ -61,6 +61,37 @@ describe("FrameBuffer", () => {
     expect(buffer.isUnderrun).toBe(true);
   });
 
+  it("advance() acumula el resto entre llamadas: a cadencia real de rAF (~16.7ms) SI drena el buffer", () => {
+    // Sin acumular el resto, duration(0.1s) > remaining(1/60s) es cierto en
+    // CADA tick y advance() nunca consume nada -- el buffer no drenaria
+    // jamas por reproduccion a la cadencia real con la que ECGWorkspace lo
+    // llama, y el indicador de underrun seria decorativo.
+    const buffer = new FrameBuffer();
+    for (let i = 0; i < 10; i++) {
+      buffer.push(makeFrame({ sequenceNumber: i })); // 10 x 100ms = 1.0s
+    }
+    expect(buffer.bufferedDurationS).toBeGreaterThan(0);
+
+    for (let tick = 0; tick < 70; tick++) {
+      buffer.advance(1 / 60);
+    }
+    // 70 ticks a 1/60s = 1,1667s de reproduccion simulada, mas que
+    // suficiente para drenar 1,0s de contenido sin que llegue nada nuevo.
+    expect(buffer.bufferedDurationS).toBe(0);
+    expect(buffer.isUnderrun).toBe(true);
+  });
+
+  it("advance() no acumula deuda tras un underrun: un frame nuevo no se consume al instante", () => {
+    const buffer = new FrameBuffer();
+    buffer.push(makeFrame({ sequenceNumber: 0 })); // 0.1s
+    buffer.advance(5); // agota el buffer y, si acumulase deuda, dejaria ~4.9s pendientes
+    expect(buffer.isUnderrun).toBe(true);
+
+    buffer.push(makeFrame({ sequenceNumber: 1 })); // llega un frame nuevo tras el underrun
+    expect(buffer.isUnderrun).toBe(false);
+    expect(buffer.bufferedDurationS).toBeCloseTo(0.1);
+  });
+
   it("getVisibleSamples concatena las muestras del canal pedido, en orden de llegada", () => {
     const buffer = new FrameBuffer();
     buffer.push(

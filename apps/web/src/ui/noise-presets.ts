@@ -13,7 +13,10 @@ export const NOISE_PRESETS: Record<ConcretePresetId, NoiseParamsPayload> = {
   urgencias:  { emg_v: 0.02,  mains_v: 0.02,  baseline_v: 0.05, motion_v: 0.03, clip_v: null },
   ambulancia: { emg_v: 0.05,  mains_v: 0.03,  baseline_v: 0.1,  motion_v: 0.15, clip_v: null },
   uci:        { emg_v: 0.015, mains_v: 0.015, baseline_v: 0.03, motion_v: 0.02, clip_v: null },
-  muy_mala:   { emg_v: 0.1,   mains_v: 0.05,  baseline_v: 0.2,  motion_v: 0.3,  clip_v: 0.5 },
+  // clip_v recorta la señal a [-clip_v, clip_v] (ver noise.py); la onda R
+  // real mide ~0,001-0,002V, así que 0,5V no recortaba nada — era un
+  // no-op. 0,0015V sí produce un recorte visible de los picos.
+  muy_mala:   { emg_v: 0.1,   mains_v: 0.05,  baseline_v: 0.2,  motion_v: 0.3,  clip_v: 0.0015 },
 };
 
 export const PRESET_LABELS: Record<PresetId, string> = {
