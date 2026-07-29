@@ -71,4 +71,25 @@ describe("RhythmSelector", () => {
       expect(screen.getByRole("alert")).toHaveTextContent("500");
     });
   });
+
+  it("muestra un error (sin dejar la promesa sin capturar) si getRhythm falla al elegir un ritmo", async () => {
+    const catalogClient = makeCatalogClient({
+      getRhythm: vi.fn().mockRejectedValue(new Error("404")),
+    });
+    const onSelect = vi.fn();
+    render(
+      <RhythmSelector catalogClient={catalogClient} selectedRhythmId={null} onSelect={onSelect} />
+    );
+    await waitFor(() => screen.getByText("Sinusal normal"));
+
+    await userEvent.selectOptions(
+      screen.getByLabelText("Seleccionar ritmo"),
+      "sinus_normal"
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("404");
+    });
+    expect(onSelect).not.toHaveBeenCalled();
+  });
 });

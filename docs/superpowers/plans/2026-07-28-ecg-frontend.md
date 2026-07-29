@@ -2576,6 +2576,27 @@ describe("RhythmSelector", () => {
       expect(screen.getByRole("alert")).toHaveTextContent("500");
     });
   });
+
+  it("muestra un error (sin dejar la promesa sin capturar) si getRhythm falla al elegir un ritmo", async () => {
+    const catalogClient = makeCatalogClient({
+      getRhythm: vi.fn().mockRejectedValue(new Error("404")),
+    });
+    const onSelect = vi.fn();
+    render(
+      <RhythmSelector catalogClient={catalogClient} selectedRhythmId={null} onSelect={onSelect} />
+    );
+    await waitFor(() => screen.getByText("Sinusal normal"));
+
+    await userEvent.selectOptions(
+      screen.getByLabelText("Seleccionar ritmo"),
+      "sinus_normal"
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("404");
+    });
+    expect(onSelect).not.toHaveBeenCalled();
+  });
 });
 ```
 
@@ -2604,6 +2625,7 @@ export function RhythmSelector({
 }: RhythmSelectorProps) {
   const [rhythms, setRhythms] = useState<RhythmSummary[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectError, setSelectError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -2622,8 +2644,16 @@ export function RhythmSelector({
 
   const handleChange = async (rhythmId: string) => {
     if (!rhythmId) return;
-    const detail = await catalogClient.getRhythm(rhythmId);
-    onSelect(rhythmId, detail);
+    setSelectError(null);
+    try {
+      const detail = await catalogClient.getRhythm(rhythmId);
+      onSelect(rhythmId, detail);
+    } catch (err: unknown) {
+      // Sin este catch, un fallo de `getRhythm` (404, red caída) dejaba una
+      // promesa rechazada sin capturar: el <select> no reaccionaba y el
+      // usuario no tenía forma de saber que su elección no se aplicó.
+      setSelectError(String(err));
+    }
   };
 
   if (loadError) {
@@ -2631,20 +2661,25 @@ export function RhythmSelector({
   }
 
   return (
-    <select
-      aria-label="Seleccionar ritmo"
-      value={selectedRhythmId ?? ""}
-      onChange={(event) => void handleChange(event.target.value)}
-    >
-      <option value="" disabled>
-        Selecciona un ritmo
-      </option>
-      {rhythms.map((rhythm) => (
-        <option key={rhythm.rhythm_id} value={rhythm.rhythm_id}>
-          {rhythm.display_name}
+    <>
+      <select
+        aria-label="Seleccionar ritmo"
+        value={selectedRhythmId ?? ""}
+        onChange={(event) => void handleChange(event.target.value)}
+      >
+        <option value="" disabled>
+          Selecciona un ritmo
         </option>
-      ))}
-    </select>
+        {rhythms.map((rhythm) => (
+          <option key={rhythm.rhythm_id} value={rhythm.rhythm_id}>
+            {rhythm.display_name}
+          </option>
+        ))}
+      </select>
+      {selectError && (
+        <p role="alert">No se pudo cargar el detalle del ritmo: {selectError}</p>
+      )}
+    </>
   );
 }
 ```
