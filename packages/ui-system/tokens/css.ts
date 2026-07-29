@@ -1,3 +1,5 @@
+import { getTheme } from "../themes/index";
+import type { Theme } from "../themes/types";
 import {
   font,
   fontSize,
@@ -14,6 +16,26 @@ const BANNER =
 
 function block(prefix: string, values: Record<string, string>): string[] {
   return Object.entries(values).map(([key, value]) => `  --${prefix}-${key}: ${value};`);
+}
+
+function kebab(value: string): string {
+  return value.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+}
+
+/** Aplana los roles del tema a custom properties: `theme.ecg.gridMinor` sale
+ * como `--ecg-grid-minor`. Se recorre el objeto en vez de listar los nombres a
+ * mano para que añadir un rol no obligue a tocar el generador. */
+function themeBlock(theme: Theme): string[] {
+  const groups: Array<[string, Record<string, string>]> = [
+    ["ecg", theme.ecg],
+    ["panel", theme.panel],
+    ["inspector", theme.inspector],
+    ["text", theme.text],
+    ["surface", theme.surface],
+  ];
+  return groups.flatMap(([group, values]) =>
+    Object.entries(values).map(([role, color]) => `  --${group}-${kebab(role)}: ${color};`)
+  );
 }
 
 /** Pares prefijo CSS -> grupo de tokens que `renderTokensCss` emite bajo
@@ -35,15 +57,23 @@ export const TOKEN_CSS_GROUPS: ReadonlyArray<
   ["motion", motion],
 ];
 
-/** Emite las custom properties independientes del tema. Los roles de color los
- * añade `themes/` sobre este mismo fichero: aquí solo vive lo que no cambia al
- * cambiar de tema. */
+/** Emite las custom properties independientes del tema bajo `:root`, y a
+ * continuación los roles de color de cada tema: `dark` dentro del propio
+ * `:root` (juego por defecto) y `light` bajo `:root[data-theme="light"]`. */
 export function renderTokensCss(): string {
   return [
     BANNER,
     "",
     ":root {",
     ...TOKEN_CSS_GROUPS.flatMap(([prefix, group]) => block(prefix, group)),
+    "",
+    ...themeBlock(getTheme("dark")),
+    "}",
+    "",
+    // El selector de atributo gana al `:root` desnudo por especificidad, así
+    // que basta marcar el elemento raíz para intercambiar el juego entero.
+    ':root[data-theme="light"] {',
+    ...themeBlock(getTheme("light")),
     "}",
     "",
   ].join("\n");

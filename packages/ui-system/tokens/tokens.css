@@ -27,4 +27,38 @@
   --motion-fast: 120ms;
   --motion-normal: 200ms;
   --motion-slow: 320ms;
+
+  --ecg-background: #111315;
+  --ecg-grid-minor: #421010;
+  --ecg-grid-major: #6B1C1C;
+  --ecg-trace: #37FF90;
+  --ecg-calibration: #B6BDC8;
+  --ecg-cursor: #37FF90;
+  --panel-background: #181B20;
+  --panel-border: #2E3440;
+  --panel-hover: #2E3440;
+  --inspector-ok: #32D583;
+  --inspector-warning: #FBBF24;
+  --inspector-critical: #EF4444;
+  --text-primary: #F4F5F7;
+  --text-muted: #B6BDC8;
+  --surface-background: #111315;
+}
+
+:root[data-theme="light"] {
+  --ecg-background: #FFFFFF;
+  --ecg-grid-minor: #F4C6C6;
+  --ecg-grid-major: #E08080;
+  --ecg-trace: #000000;
+  --ecg-calibration: #2E3440;
+  --ecg-cursor: #E08080;
+  --panel-background: #FFFFFF;
+  --panel-border: #F4C6C6;
+  --panel-hover: #F4C6C6;
+  --inspector-ok: #32D583;
+  --inspector-warning: #FBBF24;
+  --inspector-critical: #EF4444;
+  --text-primary: #111315;
+  --text-muted: #2E3440;
+  --surface-background: #FFFFFF;
 }
