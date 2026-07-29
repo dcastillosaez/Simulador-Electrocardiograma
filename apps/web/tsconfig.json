@@ -15,7 +15,19 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "@ui-system": ["../../packages/ui-system/index.ts"],
+      "@ui-system/*": ["../../packages/ui-system/*"],
+      // packages/ui-system vive fuera de apps/web y no tiene node_modules
+      // propio (el repo no usa workspaces, a proposito): sin esto, tsc no
+      // encuentra "vitest" al resolver css.test.ts porque la busqueda de
+      // node_modules sube desde el fichero, no desde este tsconfig. Se
+      // mapea solo "vitest" (no un catch-all "*"): un comodin amplio
+      // rompe la resolucion normal de "react"/"react-dom" via exports/main.
+      "vitest": ["./node_modules/vitest"]
+    }
   },
-  "include": ["src"]
+  "include": ["src", "../../packages/ui-system"]
 }

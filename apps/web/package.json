@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "tokens": "vite-node ../../packages/ui-system/tokens/build.ts"
   },
   "dependencies": {
     "react": "^18.3.1",
