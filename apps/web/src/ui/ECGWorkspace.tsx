@@ -7,7 +7,7 @@ import { LayoutPicker } from "./LayoutPicker";
 import { BasicControlPanel } from "./BasicControlPanel";
 import { AdvancedControlPanel } from "./AdvancedControlPanel";
 import { leadsForLayout, leadIndex, type LayoutId, type LeadName } from "../render/layout";
-import { drawGrid } from "../render/grid-layer";
+import { drawGrid, voltageToPx } from "../render/grid-layer";
 import { drawSweepSegment } from "../render/lead-canvas";
 import { SweepBuffer, sweepCapacitySamples } from "../render/sweep-buffer";
 import type { RhythmDetail } from "../types/rhythms";
@@ -23,6 +23,16 @@ const DEFAULT_SAMPLE_RATE_HZ = 500;
 const PAPER_SPEED_MM_S = 25;
 const GAIN_MM_PER_MV = 10;
 const CANVAS_WIDTH_PX = 800;
+
+// V5 es la derivacion con mayor coeficiente de proyeccion del motor
+// (packages/ecg-engine/src/ecg_engine/leads.py, V5 = 1.30): su onda R nominal
+// ya vale ~1.3x R_WAVE_V (~1mV). Con 100px de alto (gain 10mm/mV) el borde
+// del canvas caia en ~1.32mV desde la linea base, así que ruido leve o la
+// propia variabilidad de amplitud bastaban para recortar V4/V5 contra el
+// borde. STRIP_MARGIN_MV fija cuanto margen queda por encima y por debajo de
+// la linea base tras la R mas alta esperada, y de ahí sale el alto real.
+const STRIP_MARGIN_V = 0.002; // 2mV de margen a cada lado de la base
+const STRIP_HEIGHT_PX = Math.ceil(2 * voltageToPx(STRIP_MARGIN_V, GAIN_MM_PER_MV));
 
 export interface ECGWorkspaceProps {
   wsUrl: string;
@@ -208,7 +218,7 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
               canvasRefs.current[lead] = el;
             }}
             width={800}
-            height={100}
+            height={STRIP_HEIGHT_PX}
           />
         ))}
       </div>
