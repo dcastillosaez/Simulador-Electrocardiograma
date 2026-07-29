@@ -24,12 +24,21 @@ export interface StopMessage {
   type: "stop";
 }
 
+export interface PingMessage {
+  // Reservado: el backend lo reconoce pero no lo despacha en fase 1 (mide
+  // latencia de ida y vuelta, hará falta en fase 2). No hay UI que lo
+  // envíe todavía, pero el tipo existe para no romper el contrato cuando
+  // se implemente.
+  type: "ping";
+}
+
 export type ClientMessage =
   | StartMessage
   | UpdateMessage
   | PauseMessage
   | ResumeMessage
-  | StopMessage;
+  | StopMessage
+  | PingMessage;
 
 export interface StartedMessage {
   type: "started";

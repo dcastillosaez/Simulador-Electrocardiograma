@@ -424,7 +424,7 @@ Espejo exacto de los esquemas de `apps/api/src/ecg_api/schemas.py` — nombres d
 - Create: `apps/web/src/types/ws-messages.ts`
 
 **Interfaces:**
-- Produces: `EngineParamsPayload`, `NoiseParamsPayload`, `VariabilityParamsPayload`, `RhythmSummary`, `RhythmDetail`, `ParameterRange`, `ClientMessage` (unión de `StartMessage | UpdateMessage | PauseMessage | ResumeMessage | StopMessage`), `ServerMessage` (unión de `StartedMessage | UpdatedMessage | PausedMessage | ResumedMessage | StoppedMessage | ErrorMessage`).
+- Produces: `EngineParamsPayload`, `NoiseParamsPayload`, `VariabilityParamsPayload`, `RhythmSummary`, `RhythmDetail`, `ParameterRange`, `ClientMessage` (unión de `StartMessage | UpdateMessage | PauseMessage | ResumeMessage | StopMessage | PingMessage`), `ServerMessage` (unión de `StartedMessage | UpdatedMessage | PausedMessage | ResumedMessage | StoppedMessage | ErrorMessage`).
 
 Sin tests: son solo declaraciones de tipo, el compilador de TypeScript es la única verificación (las tareas siguientes los importan y el `tsc -b` de `npm run build` falla si algo no encaja).
 
@@ -510,12 +510,21 @@ export interface StopMessage {
   type: "stop";
 }
 
+export interface PingMessage {
+  // Reservado: el backend lo reconoce pero no lo despacha en fase 1 (mide
+  // latencia de ida y vuelta, hará falta en fase 2). No hay UI que lo
+  // envíe todavía, pero el tipo existe para no romper el contrato cuando
+  // se implemente.
+  type: "ping";
+}
+
 export type ClientMessage =
   | StartMessage
   | UpdateMessage
   | PauseMessage
   | ResumeMessage
-  | StopMessage;
+  | StopMessage
+  | PingMessage;
 
 export interface StartedMessage {
   type: "started";
