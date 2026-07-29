@@ -11,7 +11,14 @@ export class CatalogClient {
 
   constructor(options: CatalogClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    // `fetch` sin enlazar pierde el `this` de `window`/`globalThis` que el
+    // navegador exige (comprobación de "brand" de la spec de WebIDL): al
+    // invocarlo como `this.fetchImpl(...)` (método de la instancia) lanza
+    // "TypeError: Failed to execute 'fetch' on 'Window': Illegal
+    // invocation". Los tests unitarios nunca lo detectaron porque siempre
+    // inyectan un `fetchImpl` de prueba (sin esa comprobación) — solo un
+    // navegador real, como en el benchmark de Playwright, lo revela.
+    this.fetchImpl = options.fetchImpl ?? fetch.bind(globalThis);
   }
 
   async listRhythms(): Promise<RhythmSummary[]> {
