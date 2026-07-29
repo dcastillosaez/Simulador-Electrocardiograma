@@ -4,6 +4,25 @@ import type { Theme, ThemeName } from "./types";
 
 export type { Theme, ThemeName, EcgTheme } from "./types";
 
+/** Un grupo de roles de un tema: el nombre del campo (p.ej. `"ecg"`) junto con
+ * su objeto de valores (p.ej. `{ gridMinor: "#...", ... }`). */
+export type ThemeRoleGroup = [group: string, values: Record<string, string>];
+
+/** Recorre los campos de nivel superior de un tema y devuelve solo los que
+ * son grupos de roles (objetos), descartando los escalares — hoy únicamente
+ * `name: ThemeName`. Es la única fuente de la lista de grupos: tanto
+ * `tokens/css.ts` (para emitir las custom properties) como `themes.test.ts`
+ * (para comparar `dark` y `light`) la consumen, así que añadir un grupo
+ * nuevo a `Theme` no exige tocar ninguno de los dos y ambos ven siempre el
+ * mismo conjunto. Un escalar futuro (string, número, booleano) se ignora
+ * igual que `name`; solo un campo escalar que además fuera un objeto —algo
+ * que no encaja con el propio nombre "escalar"— escaparía a este filtro. */
+export function themeRoleGroups(theme: Theme): ThemeRoleGroup[] {
+  return Object.entries(theme).filter(
+    (entry): entry is ThemeRoleGroup => typeof entry[1] === "object" && entry[1] !== null
+  );
+}
+
 export const THEME_NAMES = ["dark", "light"] as const satisfies readonly ThemeName[];
 
 const THEMES: Record<ThemeName, Theme> = {

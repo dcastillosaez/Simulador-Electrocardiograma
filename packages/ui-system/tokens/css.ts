@@ -1,4 +1,4 @@
-import { getTheme } from "../themes/index";
+import { getTheme, themeRoleGroups } from "../themes/index";
 import type { Theme } from "../themes/types";
 import {
   font,
@@ -23,17 +23,13 @@ function kebab(value: string): string {
 }
 
 /** Aplana los roles del tema a custom properties: `theme.ecg.gridMinor` sale
- * como `--ecg-grid-minor`. Se recorre el objeto en vez de listar los nombres a
- * mano para que añadir un rol no obligue a tocar el generador. */
+ * como `--ecg-grid-minor`. Los grupos salen de `themeRoleGroups`, que recorre
+ * el objeto de tema en vez de listarlos a mano, así que añadir un rol a
+ * `Theme` no obliga a tocar este generador — ver el docstring de
+ * `themeRoleGroups` en `themes/index.ts`, que es también quien usa
+ * `themes.test.ts` para no duplicar esta lista. */
 function themeBlock(theme: Theme): string[] {
-  const groups: Array<[string, Record<string, string>]> = [
-    ["ecg", theme.ecg],
-    ["panel", theme.panel],
-    ["inspector", theme.inspector],
-    ["text", theme.text],
-    ["surface", theme.surface],
-  ];
-  return groups.flatMap(([group, values]) =>
+  return themeRoleGroups(theme).flatMap(([group, values]) =>
     Object.entries(values).map(([role, color]) => `  --${group}-${kebab(role)}: ${color};`)
   );
 }

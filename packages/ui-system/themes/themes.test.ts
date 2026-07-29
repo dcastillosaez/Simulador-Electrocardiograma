@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { activeThemeName, getTheme, setTheme, THEME_NAMES } from "./index";
+import { afterEach, describe, expect, it } from "vitest";
+import { activeThemeName, getTheme, setTheme, THEME_NAMES, themeRoleGroups } from "./index";
 import type { Theme } from "./types";
 
 function allColorStrings(theme: Theme): string[] {
@@ -20,19 +20,17 @@ function allColorStrings(theme: Theme): string[] {
 }
 
 describe("temas", () => {
+  afterEach(() => setTheme("dark"));
+
   it("los dos temas definen exactamente los mismos roles", () => {
     // Sin esto, añadir un rol a `dark` y olvidarlo en `light` no lo detecta
     // nadie hasta que alguien cambia de tema y ve un `undefined` pintado.
+    // `themeRoleGroups` es la misma función que usa el generador de CSS, así
+    // que esta comprobación no puede desincronizarse de lo que se emite.
     const roleKeys = (theme: Theme) =>
       JSON.stringify(
         Object.fromEntries(
-          Object.entries({
-            ecg: theme.ecg,
-            panel: theme.panel,
-            inspector: theme.inspector,
-            text: theme.text,
-            surface: theme.surface,
-          }).map(([group, values]) => [group, Object.keys(values).sort()])
+          themeRoleGroups(theme).map(([group, values]) => [group, Object.keys(values).sort()])
         )
       );
     expect(roleKeys(getTheme("light"))).toBe(roleKeys(getTheme("dark")));
@@ -54,15 +52,10 @@ describe("temas", () => {
     setTheme("light");
     expect(activeThemeName()).toBe("light");
     expect(document.documentElement.dataset.theme).toBe("light");
-
-    setTheme("dark");
-    expect(activeThemeName()).toBe("dark");
-    expect(document.documentElement.dataset.theme).toBe("dark");
   });
 
   it("getTheme sin argumento devuelve el tema activo", () => {
     setTheme("light");
     expect(getTheme().name).toBe("light");
-    setTheme("dark");
   });
 });
