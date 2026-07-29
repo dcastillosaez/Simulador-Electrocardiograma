@@ -1,12 +1,15 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ECGWorkspace } from "./ECGWorkspace";
+import { HEADER_SIZE_BYTES } from "../simulation-runtime/frame-decoder";
 
 class FakeWebSocket {
   static OPEN = 1;
   readyState = FakeWebSocket.OPEN;
   binaryType = "blob";
   closed = false;
+  sentMessages: string[] = [];
   private handlers = new Map<string, ((event: any) => void)[]>();
 
   addEventListener(type: string, handler: (event: any) => void): void {
@@ -22,7 +25,9 @@ class FakeWebSocket {
     if (index !== -1) list.splice(index, 1);
   }
 
-  send(): void {}
+  send(data: string): void {
+    this.sentMessages.push(data);
+  }
 
   close(): void {
     this.closed = true;
@@ -35,8 +40,85 @@ class FakeWebSocket {
   }
 }
 
+interface MockCtx {
+  clearRect: ReturnType<typeof vi.fn>;
+  beginPath: ReturnType<typeof vi.fn>;
+  moveTo: ReturnType<typeof vi.fn>;
+  lineTo: ReturnType<typeof vi.fn>;
+  stroke: ReturnType<typeof vi.fn>;
+  strokeStyle: string;
+  lineWidth: number;
+  canvas: { width: number };
+}
+
+function makeMockCtx(): MockCtx {
+  return {
+    clearRect: vi.fn(),
+    beginPath: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    stroke: vi.fn(),
+    strokeStyle: "",
+    lineWidth: 0,
+    canvas: { width: 800 },
+  };
+}
+
+const RHYTHM_SUMMARY = {
+  rhythm_id: "sinus_normal",
+  display_name: "Sinusal normal",
+  category: "sinus",
+  ventricular_rate_hz: 1.1667,
+  pr_is_measurable: true,
+};
+const RHYTHM_DETAIL = {
+  ...RHYTHM_SUMMARY,
+  default_parameters: { heart_rate_hz: 1.1667 },
+  editable_parameters: { heart_rate_hz: { minimum: 1.0, maximum: 1.6667, default: 1.1667 } },
+  clinical_description: "...",
+  references: [],
+  allowed_overlays: [],
+};
+
+function stubRhythmFetch(): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith("/api/rhythms")) {
+        return Promise.resolve({ ok: true, json: async () => [RHYTHM_SUMMARY] });
+      }
+      return Promise.resolve({ ok: true, json: async () => RHYTHM_DETAIL });
+    })
+  );
+}
+
+/** Mismo formato binario de 40 bytes que produce `frames.py` (ver
+ * `frame-decoder.ts`/`session-runtime.test.ts`): trozos de 50 muestras a
+ * 500Hz (100ms), como los que envía el backend real. */
+function buildFrameBytes(options: { sequenceNumber: number; nChannels: number }): ArrayBuffer {
+  const nSamplesPerChannel = 50;
+  const buffer = new ArrayBuffer(HEADER_SIZE_BYTES + options.nChannels * nSamplesPerChannel * 4);
+  const view = new DataView(buffer);
+  view.setUint16(0, 1, true);
+  view.setUint16(2, 500, true);
+  view.setUint8(4, options.nChannels);
+  view.setUint8(5, 0);
+  view.setUint16(6, nSamplesPerChannel, true);
+  view.setUint32(8, options.sequenceNumber, true);
+  view.setUint32(12, 0, true);
+  view.setFloat64(16, 0, true);
+  new Uint8Array(buffer, 24, 16).fill(0xab);
+  for (let ch = 0; ch < options.nChannels; ch++) {
+    for (let i = 0; i < nSamplesPerChannel; i++) {
+      view.setFloat32(HEADER_SIZE_BYTES + (ch * nSamplesPerChannel + i) * 4, 0.001, true);
+    }
+  }
+  return buffer;
+}
+
 describe("ECGWorkspace", () => {
   let fakeSocket: FakeWebSocket;
+  let canvasContexts: Map<HTMLCanvasElement, MockCtx>;
 
   beforeEach(() => {
     fakeSocket = new FakeWebSocket();
@@ -48,21 +130,25 @@ describe("ECGWorkspace", () => {
       })
     );
     // jsdom no implementa el contexto 2D de Canvas: se sustituye por un
-    // stub inerte para que el bucle de dibujo no falle al montar. No se
-    // guarda la referencia del spy: `ReturnType<typeof vi.spyOn>` sin
-    // parametrizar pierde el overload concreto de `getContext` (colisiona
-    // con la sobrecarga genérica de `vi.spyOn`), y `vi.restoreAllMocks()`
-    // en el `afterEach` restaura este spy igual sin necesitar el tipo.
-    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-      clearRect: vi.fn(),
-      beginPath: vi.fn(),
-      moveTo: vi.fn(),
-      lineTo: vi.fn(),
-      stroke: vi.fn(),
-      strokeStyle: "",
-      lineWidth: 0,
-      canvas: { width: 800 },
-    } as unknown as CanvasRenderingContext2D);
+    // stub inerte por elemento (no uno compartido) para que el bucle de
+    // dibujo no falle al montar y cada canvas se pueda inspeccionar por
+    // separado — necesario para distinguir el trazo de una derivación del
+    // de otra o de la rejilla. No se guarda la referencia del spy:
+    // `ReturnType<typeof vi.spyOn>` sin parametrizar pierde el overload
+    // concreto de `getContext` (colisiona con la sobrecarga genérica de
+    // `vi.spyOn`), y `vi.restoreAllMocks()` en el `afterEach` restaura este
+    // spy igual sin necesitar el tipo.
+    canvasContexts = new Map();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (
+      this: HTMLCanvasElement
+    ) {
+      let ctx = canvasContexts.get(this);
+      if (!ctx) {
+        ctx = makeMockCtx();
+        canvasContexts.set(this, ctx);
+      }
+      return ctx;
+    } as unknown as typeof HTMLCanvasElement.prototype.getContext);
   });
 
   afterEach(() => {
@@ -156,5 +242,104 @@ describe("ECGWorkspace", () => {
     await waitFor(() => {
       expect(screen.getByText("Desconectado")).toBeInTheDocument();
     });
+  });
+
+  it("un frame nuevo produce dibujo incremental en el canvas de la derivacion", async () => {
+    stubRhythmFetch();
+    render(
+      <ECGWorkspace
+        wsUrl="ws://test"
+        apiBaseUrl="http://api.test"
+        webSocketFactory={() => fakeSocket as unknown as WebSocket}
+      />
+    );
+
+    await waitFor(() => screen.getByText("Sinusal normal"));
+    act(() => fakeSocket.dispatch("open", {}));
+    await userEvent.selectOptions(screen.getByLabelText("Seleccionar ritmo"), "sinus_normal");
+    await waitFor(() => expect(fakeSocket.sentMessages.length).toBeGreaterThan(0));
+
+    act(() => {
+      fakeSocket.dispatch("message", {
+        data: JSON.stringify({
+          type: "started",
+          session_id: "11111111-1111-1111-1111-111111111111",
+          seed: 1,
+          sample_rate_hz: 500,
+          channels: 12,
+        }),
+      });
+    });
+
+    const leadIICanvas = screen.getByTestId("lead-canvas-II") as HTMLCanvasElement;
+    const leadIICtx = canvasContexts.get(leadIICanvas)!;
+    expect(leadIICtx.lineTo).not.toHaveBeenCalled();
+
+    // 5 trozos de 100ms = 0,5s = targetS por defecto: alcanza el pre-roll y
+    // deja el buffer listo para que advance() empiece a consumir en el
+    // siguiente tick de rAF.
+    act(() => {
+      for (let i = 0; i < 5; i++) {
+        fakeSocket.dispatch("message", { data: buildFrameBytes({ sequenceNumber: i, nChannels: 12 }) });
+      }
+    });
+
+    await waitFor(
+      () => {
+        expect(leadIICtx.lineTo).toHaveBeenCalled();
+      },
+      { timeout: 2000 }
+    );
+  });
+
+  it("cambiar de ritmo reinicia el barrido (limpia los canvas de derivacion)", async () => {
+    stubRhythmFetch();
+    render(
+      <ECGWorkspace
+        wsUrl="ws://test"
+        apiBaseUrl="http://api.test"
+        webSocketFactory={() => fakeSocket as unknown as WebSocket}
+      />
+    );
+
+    await waitFor(() => screen.getByText("Sinusal normal"));
+    act(() => fakeSocket.dispatch("open", {}));
+    await userEvent.selectOptions(screen.getByLabelText("Seleccionar ritmo"), "sinus_normal");
+    await waitFor(() => expect(fakeSocket.sentMessages.length).toBeGreaterThan(0));
+
+    const leadIICanvas = screen.getByTestId("lead-canvas-II") as HTMLCanvasElement;
+    const leadIICtx = canvasContexts.get(leadIICanvas)!;
+
+    act(() => {
+      fakeSocket.dispatch("message", {
+        data: JSON.stringify({
+          type: "started",
+          session_id: "11111111-1111-1111-1111-111111111111",
+          seed: 1,
+          sample_rate_hz: 500,
+          channels: 12,
+        }),
+      });
+    });
+    const clearCallsAfterFirstStart = leadIICtx.clearRect.mock.calls.length;
+    expect(clearCallsAfterFirstStart).toBeGreaterThan(0);
+
+    // Seleccionar el mismo ritmo otra vez desde el <select> no dispara
+    // 'change' (el valor no cambia) -- se reproduce un reinicio de sesión
+    // real disparando un segundo 'started' del servidor directamente, igual
+    // que haría el backend al reiniciar con un session_id distinto.
+    act(() => {
+      fakeSocket.dispatch("message", {
+        data: JSON.stringify({
+          type: "started",
+          session_id: "22222222-2222-2222-2222-222222222222",
+          seed: 2,
+          sample_rate_hz: 500,
+          channels: 12,
+        }),
+      });
+    });
+
+    expect(leadIICtx.clearRect.mock.calls.length).toBeGreaterThan(clearCallsAfterFirstStart);
   });
 });

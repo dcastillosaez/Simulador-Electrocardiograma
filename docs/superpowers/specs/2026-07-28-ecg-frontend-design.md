@@ -61,21 +61,26 @@ Ya fijado en la sección 5 del spec madre; aquí solo lo que le toca al cliente:
 - `new Float32Array(buffer, 40, n)` funciona directo porque la cabecera deja el payload alineado a 4 — ya documentado en el spec, se verifica con un test.
 - `sequence_number`: un salto hacia atrás descarta el frame (fuera de orden); un salto hacia adelante indica frames perdidos (se registra, no se interpola); un `session_id` distinto tras un `sequence_number` en 0 identifica un reinicio de sesión.
 
-## 4. Buffer y política de underrun/overrun
+## 4. Dos buffers distintos: jitter de red y ventana de render
 
-Sin cambios respecto a la sección 9 del spec madre: objetivo 500ms, rango sano 300-700ms.
+> Corregido tras la revisión final de rama: la versión original de esta sección confundía ambos buffers en uno solo (`getVisibleSamples` sobre el mismo objeto que absorbía el jitter), lo que producía un trazo de ≤700ms redibujado entero cada tick — inservible para leer un ECG en un canvas que representa varios segundos de papel.
 
-- **Underrun** (buffer vacío): el trazo se congela en la última muestra dibujada y se muestra un indicador de espera de señal. Nunca se salta ni se interpola.
-- **Overrun** (>700ms, típico al volver de una pestaña en segundo plano): se descarta lo más antiguo hasta recuperar el objetivo.
+**`FrameBuffer`** (`simulation-runtime/frame-buffer.ts`) es un amortiguador de **jitter de red**: absorbe la variación con la que llegan los trozos del backend. Objetivo 500ms, rango sano 300-700ms, del orden de un puñado de trozos.
 
-`frame-buffer.ts` expone `push(frame)`, `popUntil(t)`, `getVisibleSamples(leadIndex)` — sin conocimiento de Canvas ni de React, testeable en aislamiento.
+- **Pre-roll**: no empieza a reproducirse con el primer trozo que llega — espera a acumular `targetS` antes de que `advance()` consuma nada (`isPreRolled`). Sin esto, en régimen normal el buffer vive permanentemente al borde del underrun.
+- **Underrun** (buffer vacío): el trazo se congela en la última muestra dibujada y se muestra un indicador de espera de señal. Nunca se salta ni se interpola. Tras vaciarse, hay que volver a alcanzar `targetS` antes de reanudar.
+- **Overrun** (>700ms, típico al volver de una pestaña en segundo plano): se descarta lo más antiguo hasta volver a `targetS` (no hasta `maxS`).
+
+Expone `push(frame)`, `advance(elapsedS)`, `consumeNewSamples(leadIndex)` (las muestras que la última llamada a `advance()` desalojó, no todo lo que queda bufferizado) — sin conocimiento de Canvas ni de React, testeable en aislamiento.
+
+**`SweepBuffer`** (`render/sweep-buffer.ts`) es la **ventana de render en pantalla**, uno por derivación: un anillo circular dimensionado en segundos de papel al ancho del canvas (`sweepCapacitySamples`) — con los valores por defecto del proyecto (800px, 25mm/s, 500Hz), ~4233 muestras, unos 8,5s. Dos órdenes de magnitud mayor que el buffer de jitter. Cada tick de `requestAnimationFrame` drena `consumeNewSamples()` del `FrameBuffer` hacia el `SweepBuffer` de cada derivación activa.
 
 ## 5. Renderizado — capas de Canvas
 
 Tres capas independientes, no un único canvas ni una por derivación sin distinción de responsabilidades:
 
 1. **`GridLayer`**: la rejilla clínica (menor 1mm, mayor 5mm; a 25mm/s, 1mm = 40ms; calibración 10mm/mV) se prerenderiza una vez y solo se recalcula si cambia la velocidad de papel, la ganancia o el layout. No se redibuja a 60fps — dibujar cientos de líneas cada frame sería trabajo desperdiciado.
-2. **`LeadCanvas` × N**: un canvas por derivación activa (1, 3, 6 o 12 según el layout), cada uno lee su propio slice channel-major del buffer y dibuja solo su trazo. Cambiar de layout es trivial (montar/desmontar canvases), y una derivación puede evolucionar de forma independiente sin redibujar las demás.
+2. **`LeadCanvas` × N**: un canvas por derivación activa (1, 3, 6 o 12 según el layout). Cada tick dibuja en modo barrido de monitor (`drawSweepSegment`): solo el segmento de muestras nuevas de ese tick, en la posición de píxel que le marca el cursor de escritura del `SweepBuffer` de esa derivación, nunca el anillo entero. Delante del cursor se borra una banda estrecha para separar visualmente el trazo nuevo del de la vuelta anterior. Cambiar de layout es trivial (montar/desmontar canvases), y una derivación puede evolucionar de forma independiente sin redibujar las demás.
 3. **`OverlayLayer`**: capa superior para medidas e interacción (cursores, calipers). Reservada en esta fase — sin funcionalidad, solo el hueco en la arquitectura para no tener que replanificar el layout cuando se implemente.
 
 ## 6. Controles

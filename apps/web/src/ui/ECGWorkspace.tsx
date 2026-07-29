@@ -6,9 +6,10 @@ import { RhythmSelector } from "./RhythmSelector";
 import { LayoutPicker } from "./LayoutPicker";
 import { BasicControlPanel } from "./BasicControlPanel";
 import { AdvancedControlPanel } from "./AdvancedControlPanel";
-import { leadsForLayout, leadIndex, type LayoutId } from "../render/layout";
+import { leadsForLayout, leadIndex, type LayoutId, type LeadName } from "../render/layout";
 import { drawGrid } from "../render/grid-layer";
-import { drawLeadTrace } from "../render/lead-canvas";
+import { drawSweepSegment } from "../render/lead-canvas";
+import { SweepBuffer, sweepCapacitySamples } from "../render/sweep-buffer";
 import type { RhythmDetail } from "../types/rhythms";
 
 const DEFAULT_VARIABILITY = {
@@ -21,6 +22,7 @@ const SILENT_NOISE = { emg_v: 0, mains_v: 0, baseline_v: 0, motion_v: 0, clip_v:
 const DEFAULT_SAMPLE_RATE_HZ = 500;
 const PAPER_SPEED_MM_S = 25;
 const GAIN_MM_PER_MV = 10;
+const CANVAS_WIDTH_PX = 800;
 
 export interface ECGWorkspaceProps {
   wsUrl: string;
@@ -39,10 +41,44 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
   const [selectedRhythm, setSelectedRhythm] = useState<RhythmDetail | null>(null);
   const [advancedMode, setAdvancedMode] = useState(false);
   const [layout, setLayout] = useState<LayoutId>("6");
-  const [isUnderrun, setIsUnderrun] = useState(false);
+  const [isAwaitingSignal, setIsAwaitingSignal] = useState(false);
   const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
   const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
   const gridCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const sweepBuffersRef = useRef<Map<LeadName, SweepBuffer>>(new Map());
+
+  const sampleRateHz = store.sampleRateHz ?? DEFAULT_SAMPLE_RATE_HZ;
+
+  // Un anillo de barrido por derivación activa, dimensionado a los segundos
+  // de papel que caben en el ancho del canvas (~8,5s con los valores por
+  // defecto) — NO al buffer de jitter de red, que es dos órdenes de magnitud
+  // menor. Se recrea si cambia el layout o la frecuencia de muestreo.
+  useEffect(() => {
+    const capacity = sweepCapacitySamples(CANVAS_WIDTH_PX, PAPER_SPEED_MM_S, sampleRateHz);
+    const buffers = new Map<LeadName, SweepBuffer>();
+    for (const lead of leadsForLayout(layout)) {
+      buffers.set(lead, new SweepBuffer(capacity));
+    }
+    sweepBuffersRef.current = buffers;
+  }, [layout, sampleRateHz]);
+
+  // Al arrancar una sesión (ritmo nuevo o reinicio con otro session_id) el
+  // eje de tiempo empieza de cero: se vacían los anillos y se limpian los
+  // canvas para no dejar el trazo del ritmo anterior conviviendo en pantalla
+  // con el nuevo.
+  useEffect(() => {
+    const onStarted = () => {
+      for (const sweep of sweepBuffersRef.current.values()) {
+        sweep.reset();
+      }
+      for (const canvas of Object.values(canvasRefs.current)) {
+        const ctx = canvas?.getContext("2d");
+        if (ctx && canvas) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    };
+    runtime.on("started", onStarted);
+    return () => runtime.off("started", onStarted);
+  }, [runtime]);
 
   useEffect(() => {
     // `attachRuntime` devuelve `detach`: sin desuscribir en el cleanup,
@@ -66,23 +102,20 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
       lastS = nowS;
 
       runtime.buffer.advance(elapsedS);
-      // Underrun: el trazo se congela (no se redibuja con muestras nuevas,
-      // simplemente no hay ninguna que dibujar) y se muestra el indicador.
-      // Nunca se interpola — es justo lo que "congelar en la última
-      // muestra" significa: no tocar el canvas en absoluto este tick.
-      setIsUnderrun(runtime.buffer.isUnderrun);
-      if (runtime.buffer.isUnderrun) {
-        frameId = requestAnimationFrame(tick);
-        return;
-      }
-      const sampleRateHz = store.sampleRateHz ?? DEFAULT_SAMPLE_RATE_HZ;
+      // Se dibuja lo que advance() haya liberado ESTE tick, aunque el buffer
+      // haya quedado vacío al hacerlo — si no, el último trozo consumido
+      // antes de un underrun se perdería sin llegar a pintarse. Con cero
+      // muestras nuevas, drawSweepSegment no toca el canvas: el trazo se
+      // congela en la última muestra, sin interpolar jamás.
       for (const lead of leadsForLayout(layout)) {
         const canvas = canvasRefs.current[lead];
         const ctx = canvas?.getContext("2d");
-        if (ctx && canvas) {
-          const samples = runtime.buffer.getVisibleSamples(leadIndex(lead));
-          drawLeadTrace(
+        const sweep = sweepBuffersRef.current.get(lead);
+        if (ctx && canvas && sweep) {
+          const samples = runtime.buffer.consumeNewSamples(leadIndex(lead));
+          drawSweepSegment(
             ctx,
+            sweep,
             samples,
             sampleRateHz,
             { paperSpeedMmS: PAPER_SPEED_MM_S, gainMmPerMv: GAIN_MM_PER_MV },
@@ -90,11 +123,14 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
           );
         }
       }
+      // "Esperando señal" cubre los dos motivos opuestos de no reproducir:
+      // no queda nada (underrun) o aún no hay reserva suficiente (pre-roll).
+      setIsAwaitingSignal(runtime.buffer.isUnderrun || !runtime.buffer.isPreRolled);
       frameId = requestAnimationFrame(tick);
     };
     frameId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frameId);
-  }, [runtime, layout, store.sampleRateHz]);
+  }, [runtime, layout, sampleRateHz]);
 
   useEffect(() => {
     const canvas = gridCanvasRef.current;
@@ -139,7 +175,7 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
       {hasConnectedOnce && store.connectionState === "idle" && (
         <p role="status">Desconectado</p>
       )}
-      {isUnderrun && store.connectionState === "running" && (
+      {isAwaitingSignal && store.connectionState === "running" && (
         <p role="status">Esperando señal…</p>
       )}
 
@@ -167,6 +203,7 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
         {leadsForLayout(layout).map((lead) => (
           <canvas
             key={lead}
+            data-testid={`lead-canvas-${lead}`}
             ref={(el) => {
               canvasRefs.current[lead] = el;
             }}
