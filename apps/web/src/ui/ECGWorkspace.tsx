@@ -117,6 +117,11 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
       // antes de un underrun se perdería sin llegar a pintarse. Con cero
       // muestras nuevas, drawSweepSegment no toca el canvas: el trazo se
       // congela en la última muestra, sin interpolar jamás.
+      //
+      // El hueco (pérdida de red o descarte por overrun) es el mismo para
+      // las doce derivaciones -- viene del mismo trozo multicanal -- así que
+      // se lee una sola vez por tick, no por derivación.
+      const hadGap = runtime.buffer.justConsumedHadGap;
       for (const lead of leadsForLayout(layout)) {
         const canvas = canvasRefs.current[lead];
         const ctx = canvas?.getContext("2d");
@@ -129,7 +134,8 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
             samples,
             sampleRateHz,
             { paperSpeedMmS: PAPER_SPEED_MM_S, gainMmPerMv: GAIN_MM_PER_MV },
-            canvas.height
+            canvas.height,
+            hadGap
           );
         }
       }

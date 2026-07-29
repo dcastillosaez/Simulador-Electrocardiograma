@@ -223,6 +223,27 @@ describe("drawSweepSegment", () => {
     }
   });
 
+  it("con hadGap=true no enlaza con el tick anterior: levanta el lapiz en vez de interpolar el hueco", () => {
+    // Spec §4: un hueco (perdida de frame en red o descarte por overrun)
+    // nunca se interpola. Antes de este fix drawSweepSegment siempre unia el
+    // trazo nuevo con el ultimo punto dibujado, sin importar si entre medias
+    // faltaba señal real.
+    const ctx = makeCtx();
+    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25, SAMPLE_RATE_HZ));
+    drawSweepSegment(ctx, sweep, new Float32Array(50), SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
+    (ctx.moveTo as any).mockClear();
+    (ctx.lineTo as any).mockClear();
+
+    drawSweepSegment(ctx, sweep, new Float32Array(50), SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX, true);
+
+    // Sin el enlace de union (indice 49 del tick anterior), el unico moveTo
+    // es el de la primera muestra nueva (indice 50) y las 49 restantes son
+    // lineTo -- un lapiz levantado, no una linea recta sobre el hueco.
+    expect((ctx.moveTo as any).mock.calls.length).toBe(1);
+    expect((ctx.moveTo as any).mock.calls[0][0]).toBeCloseTo(50 * PX_PER_SAMPLE);
+    expect((ctx.lineTo as any).mock.calls.length).toBe(49);
+  });
+
   it("no dibuja nada con un array vacio de muestras nuevas", () => {
     const ctx = makeCtx();
     const sweep = new SweepBuffer(64);

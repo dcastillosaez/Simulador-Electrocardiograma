@@ -245,6 +245,34 @@ describe("FrameBuffer", () => {
     expect(buffer.isUnderrun).toBe(true);
   });
 
+  it("justConsumedHadGap es falso sin perdidas ni overrun", () => {
+    const buffer = new FrameBuffer({ targetS: 0.1, minS: 0.05, maxS: 0.7 });
+    buffer.push(makeFrame({ sequenceNumber: 0 }));
+    buffer.advance(0.1);
+    expect(buffer.justConsumedHadGap).toBe(false);
+  });
+
+  it("justConsumedHadGap es verdadero cuando el trozo desalojado venia marcado con gapBefore (perdida de red)", () => {
+    const buffer = new FrameBuffer({ targetS: 0.1, minS: 0.05, maxS: 0.7 });
+    buffer.push(makeFrame({ sequenceNumber: 5 }), { gapBefore: true });
+    buffer.advance(0.1);
+    expect(buffer.justConsumedHadGap).toBe(true);
+  });
+
+  it("el descarte por overrun marca el trozo superviviente con gapBefore, aunque llegase sin perdida de red", () => {
+    // Spec §4: el overrun tambien es un hueco real -- el trozo que sobrevive
+    // ya no es contiguo con lo ultimo dibujado, igual que si se hubiese
+    // perdido en la red. Sin esto el renderer uniria ambos lados con una
+    // linea recta que finge continuidad donde falta señal.
+    const buffer = new FrameBuffer({ targetS: 0.5, minS: 0.3, maxS: 0.7 });
+    for (let i = 0; i < 8; i++) {
+      buffer.push(makeFrame({ sequenceNumber: i })); // el 8º dispara el overrun
+    }
+    buffer.advance(0.5); // consume lo que sobrevivio al descarte
+
+    expect(buffer.justConsumedHadGap).toBe(true);
+  });
+
   it("el coste de push()+advance() no crece con el numero de operaciones", () => {
     // Mismo patrón que el benchmark del motor Python (fase A, tarea 17):
     // medianas de N operaciones antes y después de una ventana larga,

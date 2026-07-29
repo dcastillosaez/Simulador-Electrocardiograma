@@ -24,7 +24,8 @@ export function drawSweepSegment(
   newSamples: Float32Array,
   sampleRateHz: number,
   options: LeadCanvasOptions,
-  heightPx: number
+  heightPx: number,
+  hadGap = false
 ): void {
   if (newSamples.length === 0) {
     return;
@@ -37,9 +38,12 @@ export function drawSweepSegment(
 
   const startIndex = sweep.writeCursor;
   // El enlace con el segmento del tick anterior solo existe si ya hay trazo
-  // escrito y no acabamos de envolver: unir la posición 0 con la capacity-1
-  // dibujaría una línea atravesando todo el canvas de derecha a izquierda.
-  const linksToPrevious = sweep.hasSamples && startIndex > 0;
+  // escrito, no acabamos de envolver (unir la posición 0 con la capacity-1
+  // dibujaría una línea atravesando todo el canvas de derecha a izquierda) y
+  // no hay un hueco real por delante: perdida de frame en red o descarte por
+  // overrun. Un hueco no se interpola nunca (spec §4) -- se levanta el lapiz
+  // y el trazo nuevo empieza con su propio moveTo, igual que al envolver.
+  const linksToPrevious = !hadGap && sweep.hasSamples && startIndex > 0;
   const previousY = linksToPrevious
     ? baselineY - voltageToPx(sweep.at(startIndex - 1), options.gainMmPerMv)
     : 0;

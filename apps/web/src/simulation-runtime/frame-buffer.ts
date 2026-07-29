@@ -6,6 +6,18 @@ export interface FrameBufferOptions {
   maxS?: number;
 }
 
+export interface PushOptions {
+  /** Hueco real por delante de este trozo: perdida de frame detectada en la
+   * red (secuencia no consecutiva). El renderer lo usa para no unir este
+   * trozo con el trazo anterior mediante una línea recta. */
+  gapBefore?: boolean;
+}
+
+interface BufferEntry {
+  frame: DecodedFrame;
+  gapBefore: boolean;
+}
+
 /** Devuelto por `consumeNewSamples` cuando no hay nada que consumir. Es
  * inmutable de facto (longitud 0) y se comparte para no asignar un
  * `Float32Array` por derivación en cada uno de los ~60 ticks por segundo en
@@ -22,12 +34,12 @@ export class FrameBuffer {
   readonly minS: number;
   readonly maxS: number;
 
-  private frames: DecodedFrame[] = [];
+  private entries: BufferEntry[] = [];
   private pendingS = 0;
   private preRolled = false;
   /** Trozos desalojados por la ÚLTIMA llamada a `advance()`. Se sobrescribe
    * en cada llamada: representa lo nuevo de este tick, no un histórico. */
-  private justConsumed: DecodedFrame[] = [];
+  private justConsumed: BufferEntry[] = [];
 
   constructor(options: FrameBufferOptions = {}) {
     this.targetS = options.targetS ?? 0.5;
@@ -40,11 +52,11 @@ export class FrameBuffer {
   }
 
   get bufferedDurationS(): number {
-    return this.frames.reduce((sum, frame) => sum + this.frameDurationS(frame), 0);
+    return this.entries.reduce((sum, entry) => sum + this.frameDurationS(entry.frame), 0);
   }
 
   get isUnderrun(): boolean {
-    return this.frames.length === 0;
+    return this.entries.length === 0;
   }
 
   /** `true` desde que lo acumulado alcanza `targetS` por primera vez (y tras
@@ -56,17 +68,27 @@ export class FrameBuffer {
     return this.preRolled;
   }
 
-  push(frame: DecodedFrame): void {
-    this.frames.push(frame);
+  push(frame: DecodedFrame, options: PushOptions = {}): void {
+    this.entries.push({ frame, gapBefore: options.gapBefore ?? false });
     let buffered = this.bufferedDurationS;
     // El disparador de la limpieza es superar `maxS`, pero el punto de parada
     // es `targetS` (spec §4: "descartar lo más antiguo hasta volver al
     // objetivo"). Parar en `maxS` dejaba el buffer pegado al techo tras cada
     // aluvión, sin margen para el siguiente pico de jitter.
     if (buffered > this.maxS) {
-      while (buffered > this.targetS && this.frames.length > 1) {
-        this.frames.shift();
+      let discardedAny = false;
+      while (buffered > this.targetS && this.entries.length > 1) {
+        this.entries.shift();
+        discardedAny = true;
         buffered = this.bufferedDurationS;
+      }
+      // El propio descarte por overrun abre un hueco real en la señal: el
+      // trozo que sobrevive ya no es contiguo con lo último dibujado, igual
+      // que si se hubiese perdido en la red. Sin esto, el renderer uniría
+      // ambos lados con una línea recta que finge continuidad donde en
+      // realidad falta señal (spec §4: nunca interpolar).
+      if (discardedAny) {
+        this.entries[0].gapBefore = true;
       }
     }
     if (!this.preRolled && buffered >= this.targetS) {
@@ -96,19 +118,19 @@ export class FrameBuffer {
       return;
     }
     let remaining = this.pendingS + elapsedS;
-    while (this.frames.length > 0) {
-      const duration = this.frameDurationS(this.frames[0]);
+    while (this.entries.length > 0) {
+      const duration = this.frameDurationS(this.entries[0].frame);
       if (duration > remaining) {
         break;
       }
-      this.justConsumed.push(this.frames.shift()!);
+      this.justConsumed.push(this.entries.shift()!);
       remaining -= duration;
     }
     // Si el buffer se vació durante el drenaje, no se acumula deuda: una
     // parada prolongada del streaming no debe hacer que el primer frame
     // que llegue después se consuma al instante sin llegar a dibujarse.
-    this.pendingS = this.frames.length > 0 ? remaining : 0;
-    if (this.frames.length === 0) {
+    this.pendingS = this.entries.length > 0 ? remaining : 0;
+    if (this.entries.length === 0) {
       this.preRolled = false;
     }
   }
@@ -124,12 +146,13 @@ export class FrameBuffer {
       return NO_SAMPLES;
     }
     const totalSamples = this.justConsumed.reduce(
-      (sum, frame) => sum + frame.nSamplesPerChannel,
+      (sum, entry) => sum + entry.frame.nSamplesPerChannel,
       0
     );
     const result = new Float32Array(totalSamples);
     let offset = 0;
-    for (const frame of this.justConsumed) {
+    for (const entry of this.justConsumed) {
+      const frame = entry.frame;
       const start = leadIndex * frame.nSamplesPerChannel;
       result.set(
         frame.channelsV.subarray(start, start + frame.nSamplesPerChannel),
@@ -140,8 +163,16 @@ export class FrameBuffer {
     return result;
   }
 
+  /** `true` si algún trozo desalojado por el último `advance()` traía un
+   * hueco real por delante (pérdida de red o descarte por overrun). El
+   * renderer lo usa para levantar el lápiz en vez de unir el trazo nuevo con
+   * el del tick anterior mediante una línea recta. */
+  get justConsumedHadGap(): boolean {
+    return this.justConsumed.some((entry) => entry.gapBefore);
+  }
+
   clear(): void {
-    this.frames = [];
+    this.entries = [];
     this.pendingS = 0;
     this.preRolled = false;
     this.justConsumed = [];

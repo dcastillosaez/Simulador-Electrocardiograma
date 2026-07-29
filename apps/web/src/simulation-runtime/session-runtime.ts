@@ -158,7 +158,7 @@ export class SessionRuntime extends TypedEventEmitter<SessionRuntimeEvents> {
       frame.sequenceNumber > this.lastSequenceNumber + 1;
 
     this.lastSequenceNumber = frame.sequenceNumber;
-    this.buffer.push(frame);
+    this.buffer.push(frame, { gapBefore: lost });
     this.emit("frameMeta", {
       sequenceNumber: frame.sequenceNumber,
       lost,
