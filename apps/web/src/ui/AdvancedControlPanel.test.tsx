@@ -4,17 +4,21 @@ import { describe, expect, it, vi } from "vitest";
 import { AdvancedControlPanel } from "./AdvancedControlPanel";
 import type { NoiseParamsPayload } from "../types/engine-params";
 
+// Valores dentro del rango real del slider (0-0,002V, ver SLIDER_MAX_V en
+// AdvancedControlPanel.tsx): la onda R mide ~0,001V, así que estos campos
+// representan fracciones de esa amplitud, no los ~20-50x de antes de la
+// recalibración de escala (Critical C1).
 const noise: NoiseParamsPayload = {
-  emg_v: 0.02, mains_v: 0.01, baseline_v: 0.05, motion_v: 0.0, clip_v: null,
+  emg_v: 0.0002, mains_v: 0.0001, baseline_v: 0.0005, motion_v: 0.0, clip_v: null,
 };
 
 describe("AdvancedControlPanel", () => {
   it("renderiza los cinco sliders con sus valores iniciales", () => {
     render(<AdvancedControlPanel noise={noise} onChange={vi.fn()} onSwitchToBasic={vi.fn()} />);
 
-    expect(screen.getByLabelText("EMG")).toHaveValue("0.02");
-    expect(screen.getByLabelText("Interferencia 50Hz")).toHaveValue("0.01");
-    expect(screen.getByLabelText("Línea base")).toHaveValue("0.05");
+    expect(screen.getByLabelText("EMG")).toHaveValue("0.0002");
+    expect(screen.getByLabelText("Interferencia 50Hz")).toHaveValue("0.0001");
+    expect(screen.getByLabelText("Línea base")).toHaveValue("0.0005");
     expect(screen.getByLabelText("Movimiento")).toHaveValue("0");
     expect(screen.getByLabelText("Saturación")).toHaveValue("0");
   });
@@ -23,9 +27,9 @@ describe("AdvancedControlPanel", () => {
     const onChange = vi.fn();
     render(<AdvancedControlPanel noise={noise} onChange={onChange} onSwitchToBasic={vi.fn()} />);
 
-    fireEventChange(screen.getByLabelText("EMG"), "0.08");
+    fireEventChange(screen.getByLabelText("EMG"), "0.0008");
 
-    expect(onChange).toHaveBeenCalledWith({ ...noise, emg_v: 0.08 });
+    expect(onChange).toHaveBeenCalledWith({ ...noise, emg_v: 0.0008 });
   });
 
   it("el slider de Saturacion al minimo llama a onChange con clip_v: null, no 0", () => {
