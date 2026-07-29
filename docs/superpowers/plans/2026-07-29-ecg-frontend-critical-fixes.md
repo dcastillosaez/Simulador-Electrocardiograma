@@ -8,7 +8,7 @@
 - Amplitud real de la señal (`packages/ecg-engine/src/ecg_engine/beat.py`): onda R ≈ 0,00100V (0,00110V en fibrilación auricular), T ≈ 0,00025V, P ≈ 0,00012V. Constante de referencia: **R_WAVE_V = 0.001** (1mV).
 - `packages/ecg-engine/src/ecg_engine/noise.py`: `emg_v`/`mains_v`/`baseline_v`/`motion_v` son amplitudes/desviaciones típicas en voltios, mismo dominio que la señal (no hay reescalado interno). `baseline_v` se multiplica además por una ganancia por derivación de hasta ×1,3 (`_BASELINE_LEAD_GAIN`).
 
-## Tarea 1 — Recalibrar la escala de los controles de ruido (Critical C1)
+## Task 1 — Recalibrar la escala de los controles de ruido (Critical C1)
 
 **Archivos:** `apps/web/src/ui/AdvancedControlPanel.tsx`, `apps/web/src/ui/noise-presets.ts`, `apps/web/src/ui/noise-presets.test.ts`.
 
@@ -34,7 +34,7 @@
 
 ---
 
-## Tarea 2 — Ring buffer de render con barrido real + política de buffer completa (Critical C2 + C3)
+## Task 2 — Ring buffer de render con barrido real + política de buffer completa (Critical C2 + C3)
 
 **Archivos:** `apps/web/src/simulation-runtime/frame-buffer.ts`, `apps/web/src/simulation-runtime/frame-buffer.test.ts`, `apps/web/src/render/lead-canvas.ts`, `apps/web/src/render/lead-canvas.test.ts`, `apps/web/src/ui/ECGWorkspace.tsx`, `apps/web/src/ui/ECGWorkspace.test.tsx`, y (nuevo) `apps/web/src/render/sweep-buffer.ts` + `apps/web/src/render/sweep-buffer.test.ts`.
 
