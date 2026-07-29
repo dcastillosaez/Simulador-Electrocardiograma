@@ -3311,7 +3311,6 @@ class FakeWebSocket {
 
 describe("ECGWorkspace", () => {
   let fakeSocket: FakeWebSocket;
-  let getContextSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     fakeSocket = new FakeWebSocket();
@@ -3323,8 +3322,12 @@ describe("ECGWorkspace", () => {
       })
     );
     // jsdom no implementa el contexto 2D de Canvas: se sustituye por un
-    // stub inerte para que el bucle de dibujo no falle al montar.
-    getContextSpy = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    // stub inerte para que el bucle de dibujo no falle al montar. No se
+    // guarda la referencia del spy: `ReturnType<typeof vi.spyOn>` sin
+    // parametrizar pierde el overload concreto de `getContext` (colisiona
+    // con la sobrecarga genérica de `vi.spyOn`), y `vi.restoreAllMocks()`
+    // en el `afterEach` restaura este spy igual sin necesitar el tipo.
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
       clearRect: vi.fn(),
       beginPath: vi.fn(),
       moveTo: vi.fn(),
@@ -3337,7 +3340,7 @@ describe("ECGWorkspace", () => {
   });
 
   afterEach(() => {
-    getContextSpy.mockRestore();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
