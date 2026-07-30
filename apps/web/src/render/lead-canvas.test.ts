@@ -1,30 +1,34 @@
 import { describe, expect, it, vi } from "vitest";
-import { ERASE_BAND_PX, OverlayLayer, drawSweepSegment } from "./lead-canvas";
-import { PX_PER_MM } from "./grid-layer";
+import { ERASE_BAND_MM, OverlayLayer, drawSweepSegment } from "./lead-canvas";
+import { voltageToPx } from "./grid-layer";
+import { computeLayoutMetrics } from "./layout-engine";
 import { SweepBuffer, sweepCapacitySamples } from "./sweep-buffer";
-
-// Puente temporal (Task 5): voltageToPx ahora pide LayoutMetrics en vez de
-// una ganancia numerica. Este fichero lo adapta la Task 6 junto con
-// lead-canvas.ts; hasta entonces las dos aserciones de mas abajo inlinean la
-// misma aritmetica que hacia la funcion vieja (v*1000*gain*PX_PER_MM).
+import { getTheme } from "@ui-system/themes/index";
 
 function makeCtx() {
   return {
     clearRect: vi.fn(),
+    fillRect: vi.fn(),
     beginPath: vi.fn(),
     moveTo: vi.fn(),
     lineTo: vi.fn(),
     stroke: vi.fn(),
     strokeStyle: "",
+    fillStyle: "",
     lineWidth: 0,
     canvas: { width: 800 },
   } as unknown as CanvasRenderingContext2D;
 }
 
-const OPTIONS = { paperSpeedMmS: 25, gainMmPerMv: 10 };
 const SAMPLE_RATE_HZ = 500;
-const HEIGHT_PX = 100;
-const PX_PER_SAMPLE = (PX_PER_MM * OPTIONS.paperSpeedMmS) / SAMPLE_RATE_HZ;
+const HEIGHT_PX = 152;
+// 152px de tira con ganancia 10mm/mV y margen de 2mV dan viewportScale = 3,8
+// px/mm, practicamente PX_PER_MM: asi los tests siguen pudiendo razonar en mm.
+const METRICS = computeLayoutMetrics(HEIGHT_PX, 1, 10, 25);
+const OPTIONS = { metrics: METRICS, theme: getTheme("dark").ecg };
+const PX_PER_SAMPLE = METRICS.pixelsPerSecond / SAMPLE_RATE_HZ;
+const ERASE_BAND_PX = ERASE_BAND_MM * METRICS.viewportScalePxPerMm;
+const CAPACITY = sweepCapacitySamples(800, METRICS.pixelsPerSecond, SAMPLE_RATE_HZ);
 
 function xsOf(fn: unknown): number[] {
   return (fn as any).mock.calls.map((call: number[]) => call[0]);
@@ -33,7 +37,7 @@ function xsOf(fn: unknown): number[] {
 describe("drawSweepSegment", () => {
   it("dibuja las muestras nuevas en la posicion de pixel que marca el cursor del anillo", () => {
     const ctx = makeCtx();
-    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25 * PX_PER_MM, SAMPLE_RATE_HZ));
+    const sweep = new SweepBuffer(CAPACITY);
     const samples = new Float32Array([0, 0.001, -0.001]); // voltios
 
     drawSweepSegment(ctx, sweep, samples, SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
@@ -41,11 +45,11 @@ describe("drawSweepSegment", () => {
     const baselineY = HEIGHT_PX / 2;
     const [x0, y0] = (ctx.moveTo as any).mock.calls[0];
     expect(x0).toBeCloseTo(0);
-    expect(y0).toBeCloseTo(baselineY - 0 * 1000 * 10 * PX_PER_MM);
+    expect(y0).toBeCloseTo(baselineY - voltageToPx(0, METRICS));
 
     const [x1, y1] = (ctx.lineTo as any).mock.calls[0];
     expect(x1).toBeCloseTo(PX_PER_SAMPLE);
-    expect(y1).toBeCloseTo(baselineY - 0.001 * 1000 * 10 * PX_PER_MM);
+    expect(y1).toBeCloseTo(baselineY - voltageToPx(0.001, METRICS));
 
     // El anillo queda con esas muestras escritas y el cursor avanzado.
     expect(sweep.writeCursor).toBe(3);
@@ -56,7 +60,7 @@ describe("drawSweepSegment", () => {
     // Esta es la propiedad de rendimiento que motiva todo el rediseño: antes
     // se redibujaba la ventana entera en cada tick.
     const ctx = makeCtx();
-    const capacity = sweepCapacitySamples(800, 25 * PX_PER_MM, SAMPLE_RATE_HZ); // 4233
+    const capacity = CAPACITY; // 4233
     const sweep = new SweepBuffer(capacity);
 
     drawSweepSegment(ctx, sweep, new Float32Array(50), SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
@@ -68,7 +72,7 @@ describe("drawSweepSegment", () => {
 
   it("enlaza el segmento de este tick con el del anterior, sin repintar lo ya dibujado", () => {
     const ctx = makeCtx();
-    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25 * PX_PER_MM, SAMPLE_RATE_HZ));
+    const sweep = new SweepBuffer(CAPACITY);
     drawSweepSegment(ctx, sweep, new Float32Array(50), SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
     (ctx.moveTo as any).mockClear();
     (ctx.lineTo as any).mockClear();
@@ -85,7 +89,7 @@ describe("drawSweepSegment", () => {
 
   it("borra desde donde empieza a dibujar, con un hueco extra por delante del cursor nuevo", () => {
     const ctx = makeCtx();
-    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25 * PX_PER_MM, SAMPLE_RATE_HZ));
+    const sweep = new SweepBuffer(CAPACITY);
 
     drawSweepSegment(ctx, sweep, new Float32Array(50), SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
 
@@ -106,7 +110,7 @@ describe("drawSweepSegment", () => {
     // limpiar la cola de cada tick, y el trazo de la vuelta anterior se
     // veía mezclado con el nuevo.
     const ctx = makeCtx();
-    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25 * PX_PER_MM, SAMPLE_RATE_HZ));
+    const sweep = new SweepBuffer(CAPACITY);
     drawSweepSegment(ctx, sweep, new Float32Array(50), SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
     (ctx.moveTo as any).mockClear();
     (ctx.lineTo as any).mockClear();
@@ -134,7 +138,7 @@ describe("drawSweepSegment", () => {
 
   it("nunca borra el canvas entero: el trazo de la vuelta anterior persiste", () => {
     const ctx = makeCtx();
-    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25 * PX_PER_MM, SAMPLE_RATE_HZ));
+    const sweep = new SweepBuffer(CAPACITY);
 
     drawSweepSegment(ctx, sweep, new Float32Array(50), SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
 
@@ -149,7 +153,7 @@ describe("drawSweepSegment", () => {
     // muestras mide ~75,6px de ancho.
     const ctx = makeCtx();
     const sampleRateHz = 10;
-    const pxPerSample = (PX_PER_MM * OPTIONS.paperSpeedMmS) / sampleRateHz;
+    const pxPerSample = METRICS.pixelsPerSecond / sampleRateHz;
     const capacity = 8;
     const sweepWidthPx = capacity * pxPerSample;
     const sweep = new SweepBuffer(capacity);
@@ -206,7 +210,7 @@ describe("drawSweepSegment", () => {
     // cola y la cabeza, como en un monitor real.
     const ctx = makeCtx();
     const sampleRateHz = 100;
-    const pxPerSample = (PX_PER_MM * OPTIONS.paperSpeedMmS) / sampleRateHz;
+    const pxPerSample = METRICS.pixelsPerSecond / sampleRateHz;
     const capacity = 100;
     const sweepWidthPx = capacity * pxPerSample;
     const sweep = new SweepBuffer(capacity);
@@ -234,7 +238,7 @@ describe("drawSweepSegment", () => {
     // trazo nuevo con el ultimo punto dibujado, sin importar si entre medias
     // faltaba señal real.
     const ctx = makeCtx();
-    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25 * PX_PER_MM, SAMPLE_RATE_HZ));
+    const sweep = new SweepBuffer(CAPACITY);
     drawSweepSegment(ctx, sweep, new Float32Array(50), SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
     (ctx.moveTo as any).mockClear();
     (ctx.lineTo as any).mockClear();
@@ -260,6 +264,30 @@ describe("drawSweepSegment", () => {
     expect(ctx.clearRect).not.toHaveBeenCalled();
     expect(sweep.writeCursor).toBe(0);
   });
+
+  it("la banda de borrado se expresa en milimetros de papel, no en pixeles fijos", () => {
+    // Su propio comentario ya decia "a 25mm/s son unos 2mm de papel": estaba
+    // en las unidades equivocadas. Con escala variable, un hueco fijo en
+    // pixeles se ve enorme comprimido y ridiculo en 4K.
+    const comprimida = computeLayoutMetrics(46, 12, 10, 25);
+    const ctx = makeCtx();
+    const sweep = new SweepBuffer(CAPACITY);
+
+    drawSweepSegment(
+      ctx,
+      sweep,
+      new Float32Array(50),
+      SAMPLE_RATE_HZ,
+      { metrics: comprimida, theme: getTheme("dark").ecg },
+      46
+    );
+
+    const [, , width] = (ctx.clearRect as any).mock.calls[0];
+    expect(width).toBeCloseTo(
+      50 * (comprimida.pixelsPerSecond / SAMPLE_RATE_HZ) +
+        ERASE_BAND_MM * comprimida.viewportScalePxPerMm
+    );
+  });
 });
 
 describe("OverlayLayer", () => {
@@ -267,7 +295,7 @@ describe("OverlayLayer", () => {
     const ctx = makeCtx();
     const overlay = new OverlayLayer();
 
-    expect(() => overlay.draw(ctx, 800, 100)).not.toThrow();
+    expect(() => overlay.draw(ctx, 800, HEIGHT_PX)).not.toThrow();
     expect(ctx.moveTo).not.toHaveBeenCalled();
     expect(ctx.stroke).not.toHaveBeenCalled();
   });

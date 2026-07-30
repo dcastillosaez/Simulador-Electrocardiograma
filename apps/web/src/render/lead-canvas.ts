@@ -1,15 +1,23 @@
-import { PX_PER_MM } from "./grid-layer";
+import type { EcgTheme } from "@ui-system/themes/types";
+import { voltageToPx } from "./grid-layer";
+import type { LayoutMetrics } from "./layout-engine";
 import type { SweepBuffer } from "./sweep-buffer";
 
+/** Todo lo que el dibujo de una tira necesita saber. Las escalas llegan ya
+ * resueltas en `metrics` y el color en `theme`: el renderer no deriva escalas
+ * por su cuenta ni consulta el DOM, así que sigue siendo puro. */
 export interface LeadCanvasOptions {
-  paperSpeedMmS: number;
-  gainMmPerMv: number;
+  metrics: LayoutMetrics;
+  theme: EcgTheme;
 }
 
-/** Ancho del hueco que se borra por delante del cursor de escritura. Es lo
- * que separa visualmente el trazo nuevo del de la vuelta anterior — el efecto
- * de barrido de un monitor de cabecera. A 25mm/s son unos 2mm de papel. */
-export const ERASE_BAND_PX = 8;
+/** Ancho del hueco que se borra por delante del cursor de escritura, en
+ * milímetros de papel. Es lo que separa visualmente el trazo nuevo del de la
+ * vuelta anterior — el efecto de barrido de un monitor de cabecera.
+ *
+ * En milímetros y no en píxeles: con escala variable, un hueco fijo en píxeles
+ * se ve enorme en una vista comprimida y ridículo en 4K. */
+export const ERASE_BAND_MM = 2;
 
 /** Escribe las muestras nuevas de este tick en el anillo de la derivación y
  * dibuja SOLO ese segmento, en la posición de píxel que le marca el cursor.
@@ -31,7 +39,7 @@ export function drawSweepSegment(
     return;
   }
 
-  const pxPerSample = (PX_PER_MM * options.paperSpeedMmS) / sampleRateHz;
+  const pxPerSample = options.metrics.pixelsPerSecond / sampleRateHz;
   const capacity = sweep.capacity;
   const sweepWidthPx = capacity * pxPerSample;
   const baselineY = heightPx / 2;
@@ -40,30 +48,26 @@ export function drawSweepSegment(
   // El enlace con el segmento del tick anterior solo existe si ya hay trazo
   // escrito, no acabamos de envolver (unir la posición 0 con la capacity-1
   // dibujaría una línea atravesando todo el canvas de derecha a izquierda) y
-  // no hay un hueco real por delante: perdida de frame en red o descarte por
-  // overrun. Un hueco no se interpola nunca (spec §4) -- se levanta el lapiz
+  // no hay un hueco real por delante: pérdida de frame en red o descarte por
+  // overrun. Un hueco no se interpola nunca (spec §4) -- se levanta el lápiz
   // y el trazo nuevo empieza con su propio moveTo, igual que al envolver.
   const linksToPrevious = !hadGap && sweep.hasSamples && startIndex > 0;
-  // Puente temporal: voltageToPx ahora pide LayoutMetrics (Task 5). Este
-  // fichero lo reescribe entero la Task 6 para consumir
-  // metrics.pixelsPerMillivolt directamente; hasta entonces se inlinea la
-  // misma aritmetica que hacia la funcion vieja (v*1000*gain*PX_PER_MM).
   const previousY = linksToPrevious
-    ? baselineY - sweep.at(startIndex - 1) * 1000 * options.gainMmPerMv * PX_PER_MM
+    ? baselineY - voltageToPx(sweep.at(startIndex - 1), options.metrics)
     : 0;
 
-  sweep.push(newSamples);
+  sweep.push(newSamples, { gapBefore: hadGap });
   // La banda borrada debe cubrir COMO MÍNIMO el tramo que se va a dibujar
   // ahora mismo (startIndex..writeCursor), no solo un hueco fijo por
   // delante del cursor nuevo: con trozos reales de 100ms (50 muestras) el
-  // cursor avanza ~9,45px por tick, más que ERASE_BAND_PX (8px) — una banda
-  // más estrecha que el avance deja sin limpiar la cola de cada trozo, y el
-  // trazo de la vuelta anterior se queda ahí, mezclado con el nuevo, en
-  // cuanto se completa una vuelta.
-  const eraseWidthPx = newSamples.length * pxPerSample + ERASE_BAND_PX;
+  // cursor avanza más que la banda, y una banda más estrecha que el avance
+  // deja sin limpiar la cola de cada trozo — el trazo de la vuelta anterior
+  // se queda ahí, mezclado con el nuevo, en cuanto se completa una vuelta.
+  const eraseWidthPx =
+    newSamples.length * pxPerSample + ERASE_BAND_MM * options.metrics.viewportScalePxPerMm;
   eraseBandAhead(ctx, startIndex * pxPerSample, eraseWidthPx, sweepWidthPx, heightPx);
 
-  ctx.strokeStyle = "#000000";
+  ctx.strokeStyle = options.theme.trace;
   ctx.lineWidth = 1;
   ctx.beginPath();
 
@@ -75,7 +79,7 @@ export function drawSweepSegment(
   for (let i = 0; i < newSamples.length; i++) {
     const ringIndex = (startIndex + i) % capacity;
     const x = ringIndex * pxPerSample;
-    const y = baselineY - newSamples[i] * 1000 * options.gainMmPerMv * PX_PER_MM;
+    const y = baselineY - voltageToPx(newSamples[i], options.metrics);
     if (penDown && ringIndex !== 0) {
       ctx.lineTo(x, y);
     } else {
@@ -88,8 +92,11 @@ export function drawSweepSegment(
 }
 
 /** Limpia una banda de `bandWidthPx` a partir de `cursorX`, envolviendo al
- * borde derecho si no cabe entera. */
-function eraseBandAhead(
+ * borde derecho si no cabe entera.
+ *
+ * Exportada para que el repintado completo (`sweep-rebuilder.ts`) reproduzca
+ * el mismo hueco de barrido sin duplicar la aritmética de envolvimiento. */
+export function eraseBandAhead(
   ctx: CanvasRenderingContext2D,
   cursorX: number,
   bandWidthPx: number,

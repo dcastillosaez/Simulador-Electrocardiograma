@@ -144,7 +144,7 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
             sweep,
             samples,
             sampleRateHz,
-            { paperSpeedMmS: PAPER_SPEED_MM_S, gainMmPerMv: GAIN_MM_PER_MV },
+            { metrics: computeLayoutMetrics(canvas.height, 1, GAIN_MM_PER_MV, PAPER_SPEED_MM_S), theme: getTheme().ecg },
             canvas.height,
             hadGap
           );
