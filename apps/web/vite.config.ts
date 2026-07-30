@@ -37,6 +37,13 @@ export default defineConfig({
     },
   },
   server: {
+    // El 5173 por defecto de Vite cae dentro de un rango que Windows reserva
+    // para si (5141-5240 en la maquina de desarrollo, via Hyper-V/WSL/Docker):
+    // `npm run dev` muere con EACCES antes de llegar a escuchar, y no es algo
+    // que Vite pueda esquivar solo. 5600 queda fuera de todos los rangos
+    // excluidos. Para ver los de una maquina concreta:
+    //   netsh interface ipv4 show excludedportrange protocol=tcp
+    port: 5600,
     fs: {
       // Vite solo sirve/transforma ficheros bajo `server.fs.allow`, que por
       // defecto es la raiz del proyecto (`apps/web`). El repo no tiene
