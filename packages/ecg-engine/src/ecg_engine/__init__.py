@@ -11,7 +11,7 @@ Trabaja exclusivamente en unidades SI: segundos, voltios y hercios.
 
 from .catalog import get_rhythm, list_rhythms
 from .engine import EcgEngine
-from .measurements import Measurements, measure
+from .measurements import Measurements, measure, qtc_bazett_s
 from .types import (
     DEFAULT_SAMPLE_RATE_HZ,
     LEAD_ORDER,
@@ -33,4 +33,5 @@ __all__ = [
     "get_rhythm",
     "list_rhythms",
     "measure",
+    "qtc_bazett_s",
 ]

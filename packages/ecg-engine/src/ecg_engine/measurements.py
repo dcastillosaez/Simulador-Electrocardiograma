@@ -43,6 +43,28 @@ class Measurements:
         return {k: float(v) for k, v in asdict(self).items()}
 
 
+def qtc_bazett_s(qt_s: float, rr_s: float) -> float:
+    """QT corregido por frecuencia, fórmula de Bazett: QTc = QT / √RR.
+
+    Se expone como función suelta y no como campo de `Measurements` a
+    propósito: añadir un campo obligaría a regenerar los golden measurements
+    de los doce ritmos, que es mucha superficie de cambio para una raíz
+    cuadrada. Quien quiera el QTc lo compone con `qt_s` y `rr_mean_s`.
+
+    Bazett sobrecorrige en los extremos —infla el QTc en taquicardia y lo
+    hunde en bradicardia— y eso es sabido desde 1920. Se usa igualmente
+    porque es la que llevan los monitores de cabecera y la que el alumno va a
+    encontrarse en la planta; enseñar otra distinta sería enseñar mal.
+
+    Un valor no medible se propaga como no medible: `measure` devuelve NaN
+    ante una disociación AV o morfologías mezcladas, y corregir un NaN no lo
+    convierte en un número.
+    """
+    if math.isnan(qt_s) or math.isnan(rr_s) or rr_s <= 0.0:
+        return math.nan
+    return qt_s / math.sqrt(rr_s)
+
+
 def _pr_mean_s(
     atrial_times: np.ndarray,
     ventricular_times: np.ndarray,

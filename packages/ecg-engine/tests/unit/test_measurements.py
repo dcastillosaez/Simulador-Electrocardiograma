@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from ecg_engine.catalog import get_rhythm
-from ecg_engine.measurements import Measurements, measure
+from ecg_engine.measurements import Measurements, measure, qtc_bazett_s
 from ecg_engine.types import LEAD_ORDER, N_LEADS, CardiacEvent, EventKind
 
 
@@ -134,3 +134,51 @@ def test_measurements_are_immutable():
     result = measure(events, signal, 500)
     with pytest.raises(dataclasses.FrozenInstanceError):
         result.heart_rate_hz = 1.0
+
+
+class TestQtcBazett:
+    """QT corregido por frecuencia.
+
+    Vive en el motor y no en el frontend a propósito: es una fórmula clínica,
+    y el sitio de esas es el motor (ver CLAUDE.md). Se expone como función
+    suelta y no como campo de `Measurements` porque añadir un campo obligaría
+    a regenerar los golden measurements de los doce ritmos, que es mucha
+    superficie de cambio para una raíz cuadrada.
+    """
+
+    def test_at_sixty_bpm_the_correction_is_the_identity(self):
+        # RR = 1s, y la raíz de 1 es 1: a 60 lpm el QTc ES el QT. Es la
+        # propiedad que hace reconocible la fórmula de un vistazo.
+        assert qtc_bazett_s(0.400, 1.0) == pytest.approx(0.400)
+
+    def test_tachycardia_stretches_the_qt(self):
+        # A 100 lpm (RR = 0,6s) un QT de 360ms corregido pasa de 460ms: el
+        # mismo QT que a 60 lpm seria normal, aqui es limitrofe. Esa es
+        # justamente la razon de existir de la correccion.
+        assert qtc_bazett_s(0.360, 0.6) == pytest.approx(0.360 / math.sqrt(0.6))
+        assert qtc_bazett_s(0.360, 0.6) > 0.360
+
+    def test_bradycardia_shrinks_the_qt(self):
+        assert qtc_bazett_s(0.440, 1.5) < 0.440
+
+    def test_a_non_measurable_input_stays_non_measurable(self):
+        # measure() devuelve NaN cuando algo no es medible (disociacion AV,
+        # morfologias mezcladas, sin eventos). Corregir un NaN no lo convierte
+        # en un numero: la ausencia de medida se propaga.
+        assert math.isnan(qtc_bazett_s(math.nan, 1.0))
+        assert math.isnan(qtc_bazett_s(0.400, math.nan))
+
+    def test_a_degenerate_rr_is_not_measurable(self):
+        # Sin latidos no hay RR. Dividir por cero daria infinito y dividir por
+        # un RR negativo daria un complejo: las dos cosas son peores que
+        # declarar que no hay medida.
+        assert math.isnan(qtc_bazett_s(0.400, 0.0))
+        assert math.isnan(qtc_bazett_s(0.400, -1.0))
+
+    def test_it_corrects_the_qt_of_a_real_simulation(self):
+        events, signal = build("sinus_normal", seconds=30.0)
+        result = measure(events, signal, 500)
+        qtc = qtc_bazett_s(result.qt_s, result.rr_mean_s)
+        # Sinusal normal ronda los 70 lpm, asi que RR < 1s y el QTc sube algo
+        # sobre el QT, pero se queda dentro del rango normal (< 450ms).
+        assert result.qt_s < qtc < 0.450
