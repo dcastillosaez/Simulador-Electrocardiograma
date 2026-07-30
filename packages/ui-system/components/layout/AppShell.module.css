@@ -1,0 +1,55 @@
+.shell {
+  display: grid;
+  /* dvh y no vh: en tablet y movil la barra del navegador falsea vh y el
+     layout da saltos al aparecer y desaparecer. */
+  height: 100dvh;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--surface-background);
+  grid-template-areas:
+    "header  header    header"
+    "sidebar ecg       inspector"
+    "status  status    status";
+  grid-template-columns: 280px 1fr 320px;
+  grid-template-rows: auto 1fr auto;
+  box-sizing: border-box;
+}
+
+.header { grid-area: header; }
+.sidebar { grid-area: sidebar; }
+.inspector { grid-area: inspector; }
+.status { grid-area: status; }
+
+.ecg {
+  grid-area: ecg;
+  /* Sin min-height:0 un hijo con contenido fuerza el desbordamiento de la fila,
+     el grid crece mas alla del viewport y reaparece el scroll que el spec
+     descarta. Es el fallo clasico de Grid. */
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Por debajo de esto las tres columnas no caben. Los paneles pasan a apilarse
+   y el ECG mantiene su prioridad de altura. */
+@media (max-width: 1100px) {
+  .shell {
+    grid-template-areas:
+      "header"
+      "ecg"
+      "sidebar"
+      "inspector"
+      "status";
+    grid-template-columns: 1fr;
+    /* La fila del ECG lleva una altura DEFINIDA, no `1fr`.
+       Con `height: auto`, un `1fr` se dimensiona al contenido; y el contenido
+       son las tiras, cuya altura sale de LayoutMetrics, que sale de la altura
+       medida de este mismo contenedor. Es una dependencia circular: las tiras
+       colapsarian al suelo de 16px o oscilarian entre dos tamanos. En
+       escritorio no ocurre porque `100dvh` acota el grid entero. */
+    grid-template-rows: auto minmax(0, 50dvh) auto auto auto;
+    height: auto;
+    min-height: 100dvh;
+  }
+}

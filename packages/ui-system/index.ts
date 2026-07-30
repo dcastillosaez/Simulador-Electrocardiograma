@@ -6,3 +6,4 @@ export * from "./components/foundation/index";
 export * from "./components/surface/index";
 export * from "./components/data/index";
 export * from "./components/controls/index";
+export * from "./components/layout/index";

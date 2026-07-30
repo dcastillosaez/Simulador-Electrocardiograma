@@ -1,0 +1,10 @@
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+  height: 100%;
+  /* El escenario si puede scrollear: no es el ECG. Con doce sliders abiertos en
+     una pantalla corta, la alternativa es recortarlos. */
+  overflow-y: auto;
+}
