@@ -1,0 +1,63 @@
+.group {
+  display: inline-flex;
+  min-width: 0;
+  margin: 0;
+  padding: 2px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-background);
+}
+
+.legend {
+  /* El nombre lo aporta el aria-label del contenedor; la leyenda visible
+     sobra y ocuparia una linea entera dentro de la barra. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: calc(var(--radius-sm) - 2px);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  transition: background var(--motion-fast), color var(--motion-fast);
+}
+
+.option:hover {
+  background: var(--panel-hover);
+}
+
+.input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.input:checked + .text {
+  color: var(--text-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.selected {
+  background: var(--panel-hover);
+  color: var(--text-primary);
+}
+
+/* Foco visible: sin esto, navegar el control con teclado es invisible porque
+   el radio real esta oculto. */
+.input:focus-visible + .text {
+  outline: 2px solid var(--inspector-ok);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
