@@ -28,7 +28,7 @@ function xsOf(fn: unknown): number[] {
 describe("drawSweepSegment", () => {
   it("dibuja las muestras nuevas en la posicion de pixel que marca el cursor del anillo", () => {
     const ctx = makeCtx();
-    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25, SAMPLE_RATE_HZ));
+    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25 * PX_PER_MM, SAMPLE_RATE_HZ));
     const samples = new Float32Array([0, 0.001, -0.001]); // voltios
 
     drawSweepSegment(ctx, sweep, samples, SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
@@ -51,7 +51,7 @@ describe("drawSweepSegment", () => {
     // Esta es la propiedad de rendimiento que motiva todo el rediseño: antes
     // se redibujaba la ventana entera en cada tick.
     const ctx = makeCtx();
-    const capacity = sweepCapacitySamples(800, 25, SAMPLE_RATE_HZ); // 4233
+    const capacity = sweepCapacitySamples(800, 25 * PX_PER_MM, SAMPLE_RATE_HZ); // 4233
     const sweep = new SweepBuffer(capacity);
 
     drawSweepSegment(ctx, sweep, new Float32Array(50), SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
@@ -63,7 +63,7 @@ describe("drawSweepSegment", () => {
 
   it("enlaza el segmento de este tick con el del anterior, sin repintar lo ya dibujado", () => {
     const ctx = makeCtx();
-    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25, SAMPLE_RATE_HZ));
+    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25 * PX_PER_MM, SAMPLE_RATE_HZ));
     drawSweepSegment(ctx, sweep, new Float32Array(50), SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
     (ctx.moveTo as any).mockClear();
     (ctx.lineTo as any).mockClear();
@@ -80,7 +80,7 @@ describe("drawSweepSegment", () => {
 
   it("borra desde donde empieza a dibujar, con un hueco extra por delante del cursor nuevo", () => {
     const ctx = makeCtx();
-    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25, SAMPLE_RATE_HZ));
+    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25 * PX_PER_MM, SAMPLE_RATE_HZ));
 
     drawSweepSegment(ctx, sweep, new Float32Array(50), SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
 
@@ -101,7 +101,7 @@ describe("drawSweepSegment", () => {
     // limpiar la cola de cada tick, y el trazo de la vuelta anterior se
     // veía mezclado con el nuevo.
     const ctx = makeCtx();
-    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25, SAMPLE_RATE_HZ));
+    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25 * PX_PER_MM, SAMPLE_RATE_HZ));
     drawSweepSegment(ctx, sweep, new Float32Array(50), SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
     (ctx.moveTo as any).mockClear();
     (ctx.lineTo as any).mockClear();
@@ -129,7 +129,7 @@ describe("drawSweepSegment", () => {
 
   it("nunca borra el canvas entero: el trazo de la vuelta anterior persiste", () => {
     const ctx = makeCtx();
-    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25, SAMPLE_RATE_HZ));
+    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25 * PX_PER_MM, SAMPLE_RATE_HZ));
 
     drawSweepSegment(ctx, sweep, new Float32Array(50), SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
 
@@ -229,7 +229,7 @@ describe("drawSweepSegment", () => {
     // trazo nuevo con el ultimo punto dibujado, sin importar si entre medias
     // faltaba señal real.
     const ctx = makeCtx();
-    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25, SAMPLE_RATE_HZ));
+    const sweep = new SweepBuffer(sweepCapacitySamples(800, 25 * PX_PER_MM, SAMPLE_RATE_HZ));
     drawSweepSegment(ctx, sweep, new Float32Array(50), SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
     (ctx.moveTo as any).mockClear();
     (ctx.lineTo as any).mockClear();

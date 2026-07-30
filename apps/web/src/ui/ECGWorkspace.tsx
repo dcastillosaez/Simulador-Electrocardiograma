@@ -7,7 +7,7 @@ import { LayoutPicker } from "./LayoutPicker";
 import { BasicControlPanel } from "./BasicControlPanel";
 import { AdvancedControlPanel } from "./AdvancedControlPanel";
 import { leadsForLayout, leadIndex, type LayoutId, type LeadName } from "../render/layout";
-import { drawGrid, voltageToPx } from "../render/grid-layer";
+import { drawGrid, voltageToPx, PX_PER_MM } from "../render/grid-layer";
 import { drawSweepSegment } from "../render/lead-canvas";
 import { SweepBuffer, sweepCapacitySamples } from "../render/sweep-buffer";
 import type { RhythmDetail } from "../types/rhythms";
@@ -64,7 +64,11 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
   // defecto) — NO al buffer de jitter de red, que es dos órdenes de magnitud
   // menor. Se recrea si cambia el layout o la frecuencia de muestreo.
   useEffect(() => {
-    const capacity = sweepCapacitySamples(CANVAS_WIDTH_PX, PAPER_SPEED_MM_S, sampleRateHz);
+    const capacity = sweepCapacitySamples(
+      CANVAS_WIDTH_PX,
+      PAPER_SPEED_MM_S * PX_PER_MM,
+      sampleRateHz
+    );
     const buffers = new Map<LeadName, SweepBuffer>();
     for (const lead of leadsForLayout(layout)) {
       buffers.set(lead, new SweepBuffer(capacity));
