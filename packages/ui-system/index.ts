@@ -2,3 +2,4 @@
 // que esto sea un paquete npm de verdad, este fichero es el `main`.
 export * from "./tokens/tokens";
 export * from "./themes/index";
+export * from "./components/foundation/index";

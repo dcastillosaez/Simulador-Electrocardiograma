@@ -26,7 +26,17 @@
       // node_modules sube desde el fichero, no desde este tsconfig. Se
       // mapea solo "vitest" (no un catch-all "*"): un comodin amplio
       // rompe la resolucion normal de "react"/"react-dom" via exports/main.
-      "vitest": ["./node_modules/vitest"]
+      "vitest": ["./node_modules/vitest"],
+      // Lo mismo para las dependencias que el ui-system comparte con la app.
+      // Se apunta a los paquetes de tipos y no a los de runtime porque tsc
+      // solo busca declaraciones: "react" no publica ninguna, y mapearlo a
+      // ./node_modules/react dejaria el JSX sin tipar. Los alias equivalentes
+      // para el bundler estan en vite.config.ts (SHARED_DEPS).
+      "react": ["./node_modules/@types/react"],
+      "react/*": ["./node_modules/@types/react/*"],
+      "react-dom": ["./node_modules/@types/react-dom"],
+      "react-dom/*": ["./node_modules/@types/react-dom/*"],
+      "@testing-library/*": ["./node_modules/@testing-library/*"]
     }
   },
   "include": ["src", "../../packages/ui-system"]

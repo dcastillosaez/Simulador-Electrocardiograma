@@ -6,11 +6,35 @@ import { configDefaults } from "vitest/config";
 
 const uiSystem = fileURLToPath(new URL("../../packages/ui-system", import.meta.url));
 const webRoot = fileURLToPath(new URL(".", import.meta.url));
+const webModules = fileURLToPath(new URL("./node_modules", import.meta.url));
+
+/** Las dependencias que el ui-system comparte con la app.
+ *
+ * Vite resuelve un import desnudo subiendo por `node_modules` desde el fichero
+ * que lo escribe, y `packages/ui-system` no tiene ninguno: el repo no usa
+ * workspaces (a proposito, ver CLAUDE.md), asi que nadie ha creado ahi un
+ * arbol de dependencias. Sin estos alias, cualquier componente del paquete
+ * falla con "Failed to resolve import 'react'".
+ *
+ * Se listan una a una en vez de un comodin: el alias es una anulacion de la
+ * resolucion normal, y un catch-all se tragaria tambien los imports que hoy
+ * resuelven bien. La regla de @rollup/plugin-alias es prefijo con frontera de
+ * `/`, asi que "react" cubre "react/jsx-runtime" sin entradas extra. */
+const SHARED_DEPS = [
+  "react",
+  "react-dom",
+  "@testing-library/react",
+  "@testing-library/user-event",
+  "@testing-library/jest-dom",
+];
 
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    alias: { "@ui-system": uiSystem },
+    alias: {
+      "@ui-system": uiSystem,
+      ...Object.fromEntries(SHARED_DEPS.map((dep) => [dep, `${webModules}/${dep}`])),
+    },
   },
   server: {
     fs: {
