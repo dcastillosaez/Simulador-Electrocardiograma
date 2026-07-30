@@ -1,0 +1,12 @@
+.display {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  /* --space-1: el hueco que descuenta computeLayoutMetrics. */
+  gap: var(--space-1);
+  min-height: 0;
+  min-width: 0;
+  /* El area de ECG NO scrollea. Un monitor clinico no scrollea, y perderlo
+     destruye la sensacion de monitorizacion continua. */
+  overflow: hidden;
+}

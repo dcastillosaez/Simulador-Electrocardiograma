@@ -1,0 +1,26 @@
+.strip {
+  position: relative;
+  flex: none;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.label {
+  position: absolute;
+  top: 2px;
+  left: var(--space-2);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  /* El trazo pasa por debajo de la etiqueta: sin esto, el cursor del raton la
+     convierte en un obstaculo para futuros calipers. */
+  pointer-events: none;
+  user-select: none;
+}
