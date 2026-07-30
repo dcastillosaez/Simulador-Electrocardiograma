@@ -1,0 +1,13 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  background: var(--panel-background);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-md);
+}

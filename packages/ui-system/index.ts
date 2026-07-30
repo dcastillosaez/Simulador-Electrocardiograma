@@ -3,3 +3,5 @@
 export * from "./tokens/tokens";
 export * from "./themes/index";
 export * from "./components/foundation/index";
+export * from "./components/surface/index";
+export * from "./components/data/index";

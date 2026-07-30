@@ -1,0 +1,46 @@
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.label {
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.readout {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.value {
+  /* Monoespaciada y con cifras tabulares: un valor que cambia cada segundo no
+     debe hacer bailar la columna entera. */
+  font-family: var(--font-mono);
+  font-size: var(--font-size-lg);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--line-height-tight);
+}
+
+.unit {
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+}
+
+.neutral { color: var(--text-primary); }
+.ok { color: var(--inspector-ok); }
+.warning { color: var(--inspector-warning); }
+.critical { color: var(--inspector-critical); }
+
+.unavailable {
+  color: var(--text-muted);
+}
