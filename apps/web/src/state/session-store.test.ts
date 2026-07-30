@@ -44,6 +44,7 @@ describe("useSessionStore", () => {
       params: null,
       lastError: null,
       framesLost: 0,
+      measurements: null,
     });
   });
 
@@ -152,5 +153,81 @@ describe("useSessionStore", () => {
     expect(state.connectionState).toBe("idle");
     expect(state.sessionId).toBeNull();
     expect(state.selectedRhythmId).toBe("sinus_normal");
+  });
+});
+
+describe("medidas fisiologicas", () => {
+  function attachedRuntime() {
+    const fake = new FakeWebSocket();
+    const runtime = new SessionRuntime("ws://test", () => fake as unknown as WebSocket);
+    useSessionStore.getState().attachRuntime(runtime);
+    runtime.connect();
+    fake.dispatch("open", {});
+    return fake;
+  }
+
+  it("guarda los valores que publica el servidor", () => {
+    const fake = attachedRuntime();
+
+    fake.dispatch("message", {
+      data: JSON.stringify({
+        type: "measurements",
+        t_s: 10,
+        window_s: 10,
+        values: { pr_ms: 160, qrs_ms: 90, qt_ms: 400, qtc_ms: 432.8 },
+      }),
+    });
+
+    expect(useSessionStore.getState().measurements).toEqual({
+      pr_ms: 160,
+      qrs_ms: 90,
+      qt_ms: 400,
+      qtc_ms: 432.8,
+    });
+  });
+
+  it("conserva el null de una medida no medible", () => {
+    // Un flutter no tiene PR. `null` no es lo mismo que «todavia no medido»:
+    // el inspector debe poder distinguir el hueco declarado del vacio inicial.
+    const fake = attachedRuntime();
+
+    fake.dispatch("message", {
+      data: JSON.stringify({
+        type: "measurements",
+        t_s: 10,
+        window_s: 10,
+        values: { pr_ms: null, qrs_ms: 90 },
+      }),
+    });
+
+    expect(useSessionStore.getState().measurements?.pr_ms).toBeNull();
+  });
+
+  it("un ritmo nuevo descarta las medidas del anterior", () => {
+    // Sin esto el PR del ritmo saliente convive con el trazado del entrante
+    // hasta la primera medida nueva, un segundo despues.
+    const fake = attachedRuntime();
+
+    fake.dispatch("message", {
+      data: JSON.stringify({
+        type: "measurements",
+        t_s: 10,
+        window_s: 10,
+        values: { pr_ms: 160 },
+      }),
+    });
+    expect(useSessionStore.getState().measurements).not.toBeNull();
+
+    fake.dispatch("message", {
+      data: JSON.stringify({
+        type: "started",
+        session_id: "33333333-3333-3333-3333-333333333333",
+        seed: 7,
+        sample_rate_hz: 500,
+        channels: 12,
+      }),
+    });
+
+    expect(useSessionStore.getState().measurements).toBeNull();
   });
 });

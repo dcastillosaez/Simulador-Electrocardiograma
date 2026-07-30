@@ -5,6 +5,7 @@ import { FrameBuffer } from "./frame-buffer";
 import type {
   ClientMessage,
   ErrorMessage,
+  MeasurementsMessage,
   PausedMessage,
   ResumedMessage,
   ServerMessage,
@@ -30,6 +31,7 @@ export interface SessionRuntimeEvents {
   paused: PausedMessage;
   resumed: ResumedMessage;
   stopped: StoppedMessage;
+  measurements: MeasurementsMessage;
   error: ErrorMessage;
   frameMeta: { sequenceNumber: number; lost: boolean; sessionId: string };
 }
@@ -132,6 +134,11 @@ export class SessionRuntime extends TypedEventEmitter<SessionRuntimeEvents> {
       case "stopped":
         this.state = "stopped";
         this.emit("stopped", message);
+        break;
+      case "measurements":
+        // No toca `state`: las medidas describen la senal, no el ciclo de
+        // vida de la sesion.
+        this.emit("measurements", message);
         break;
       case "error":
         this.emit("error", message);

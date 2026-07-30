@@ -15,6 +15,10 @@ export interface SessionStoreState {
   params: EngineParamsPayload | null;
   lastError: { code: string; detail: string } | null;
   framesLost: number;
+  /** Ultimas medidas publicadas por el servidor. `null` mientras no ha
+   * llegado ninguna; dentro, un valor `null` significa «no medible en este
+   * ritmo», que no es lo mismo que «todavia no medido». */
+  measurements: Record<string, number | null> | null;
 
   selectRhythm: (rhythmId: string) => void;
   /** Devuelve una función `detach()` que retira exactamente los listeners
@@ -36,6 +40,7 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
   params: null,
   lastError: null,
   framesLost: 0,
+  measurements: null,
 
   selectRhythm: (rhythmId) => set({ selectedRhythmId: rhythmId }),
 
@@ -51,12 +56,18 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
         sampleRateHz: message.sample_rate_hz,
         lastError: null,
         framesLost: 0,
+        // Un ritmo nuevo invalida las medidas del anterior: dejarlas
+        // visibles mostraria el PR del ritmo saliente junto al trazado del
+        // entrante hasta la primera medida nueva, un segundo despues.
+        measurements: null,
       });
     const onUpdated = (message: SessionRuntimeEvents["updated"]) =>
       set({ params: message.params });
     const onPaused = () => set({ connectionState: "paused" });
     const onResumed = () => set({ connectionState: "running" });
     const onStopped = () => set({ connectionState: "stopped" });
+    const onMeasurements = (message: SessionRuntimeEvents["measurements"]) =>
+      set({ measurements: message.values });
     const onError = (message: SessionRuntimeEvents["error"]) =>
       set({ lastError: { code: message.code, detail: message.detail } });
     const onFrameMeta = (meta: SessionRuntimeEvents["frameMeta"]) => {
@@ -72,6 +83,7 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
     runtime.on("paused", onPaused);
     runtime.on("resumed", onResumed);
     runtime.on("stopped", onStopped);
+    runtime.on("measurements", onMeasurements);
     runtime.on("error", onError);
     runtime.on("frameMeta", onFrameMeta);
 
@@ -83,6 +95,7 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
       runtime.off("paused", onPaused);
       runtime.off("resumed", onResumed);
       runtime.off("stopped", onStopped);
+      runtime.off("measurements", onMeasurements);
       runtime.off("error", onError);
       runtime.off("frameMeta", onFrameMeta);
     };
