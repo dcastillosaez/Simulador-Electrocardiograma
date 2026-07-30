@@ -1,3 +1,4 @@
+export { IconButton, type IconButtonProps } from "./IconButton";
 export {
   SegmentedControl,
   type SegmentedControlProps,

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Theme } from "@ui-system/themes/types";
 import { drawGrid } from "../../render/grid-layer";
-import type { LayoutMetrics } from "../../render/layout-engine";
+import { STRIP_GAP_PX, type LayoutMetrics } from "../../render/layout-engine";
 import { drawSweepSegment, type LeadCanvasOptions } from "../../render/lead-canvas";
 import { SweepRebuilder } from "../../render/sweep-rebuilder";
 import { SweepBuffer, sweepCapacitySamples } from "../../render/sweep-buffer";
@@ -21,7 +21,20 @@ export interface UseSweepRendererResult {
   registerTrace: (lead: LeadName, element: HTMLCanvasElement | null) => void;
   registerGrid: (lead: LeadName, element: HTMLCanvasElement | null) => void;
   isAwaitingSignal: boolean;
+  /** Aplana lo que hay en pantalla a un solo canvas, o `null` si aún no hay
+   * nada dibujado. Vive aquí y no en el componente de exportación porque
+   * quien sabe qué canvas existen y cómo se apilan es este hook. */
+  composeSnapshot: (options?: SnapshotOptions) => HTMLCanvasElement | null;
 }
+
+export interface SnapshotOptions {
+  /** Se estampa arriba a la derecha. Un trazado exportado sin fecha no se
+   * puede situar después en la historia de nada. */
+  stamp?: string;
+}
+
+const SNAPSHOT_LABEL_PX = 11;
+const SNAPSHOT_PADDING_PX = 6;
 
 const rebuilder = new SweepRebuilder();
 
@@ -154,5 +167,55 @@ export function useSweepRenderer({
     return () => cancelAnimationFrame(frameId);
   }, [runtime, leads, sampleRateHz, metrics, theme.name]);
 
-  return { registerTrace, registerGrid, isAwaitingSignal };
+  // Composición para exportar. Nunca en el camino caliente: se llama al
+  // pulsar un botón o, como mucho, a cadencia de vídeo.
+  //
+  // Hay que redibujar en vez de capturar el DOM porque cada tira son dos
+  // canvas superpuestos por CSS, y un canvas no "ve" lo que hay debajo. La
+  // etiqueta de la derivación vive en un `<span>`, así que aquí se pinta a
+  // mano: sin ella, un PNG de doce trazados no dice cuál es cuál.
+  const composeSnapshot = useCallback(
+    (options: SnapshotOptions = {}): HTMLCanvasElement | null => {
+      const first = gridCanvases.current.get(leads[0]);
+      if (!first || first.width === 0 || first.height === 0) return null;
+
+      const stripHeight = first.height;
+      const out = document.createElement("canvas");
+      out.width = first.width;
+      out.height = stripHeight * leads.length + STRIP_GAP_PX * (leads.length - 1);
+
+      const ctx = out.getContext("2d");
+      if (!ctx) return null;
+
+      ctx.fillStyle = theme.ecg.background;
+      ctx.fillRect(0, 0, out.width, out.height);
+
+      leads.forEach((lead, index) => {
+        const y = index * (stripHeight + STRIP_GAP_PX);
+        const grid = gridCanvases.current.get(lead);
+        const trace = traceCanvases.current.get(lead);
+        if (grid) ctx.drawImage(grid, 0, y);
+        if (trace) ctx.drawImage(trace, 0, y);
+
+        ctx.fillStyle = theme.text.muted;
+        ctx.font = `${SNAPSHOT_LABEL_PX}px monospace`;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.fillText(lead, SNAPSHOT_PADDING_PX, y + SNAPSHOT_PADDING_PX / 2);
+      });
+
+      if (options.stamp) {
+        ctx.fillStyle = theme.text.muted;
+        ctx.font = `${SNAPSHOT_LABEL_PX}px monospace`;
+        ctx.textAlign = "right";
+        ctx.textBaseline = "top";
+        ctx.fillText(options.stamp, out.width - SNAPSHOT_PADDING_PX, SNAPSHOT_PADDING_PX / 2);
+      }
+
+      return out;
+    },
+    [leads, theme]
+  );
+
+  return { registerTrace, registerGrid, isAwaitingSignal, composeSnapshot };
 }

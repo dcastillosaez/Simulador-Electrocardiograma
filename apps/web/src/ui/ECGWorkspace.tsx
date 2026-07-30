@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AppShell,
   Badge,
   Header,
+  IconButton,
   Inspector,
   Metric,
   MetricGrid,
@@ -25,9 +26,12 @@ import { EcgDisplay } from "./EcgDisplay";
 import { useLayoutMetrics } from "./hooks/useLayoutMetrics";
 import { useSimulationRuntime } from "./hooks/useSimulationRuntime";
 import { useSweepRenderer } from "./hooks/useSweepRenderer";
+import { formatClock, useClock } from "./hooks/useClock";
+import { useExport } from "./hooks/useExport";
 import { leadsForLayout, type LayoutId } from "../render/layout";
 import type { Compression } from "../render/layout-engine";
 import type { RhythmDetail } from "../types/rhythms";
+import styles from "./ECGWorkspace.module.css";
 
 const DEFAULT_VARIABILITY = {
   respiration_hz: 0.25,
@@ -93,7 +97,7 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
     paperSpeedMmS: PAPER_SPEED_MM_S,
   });
 
-  const { registerTrace, registerGrid, isAwaitingSignal } = useSweepRenderer({
+  const { registerTrace, registerGrid, isAwaitingSignal, composeSnapshot } = useSweepRenderer({
     runtime,
     leads,
     sampleRateHz,
@@ -101,6 +105,27 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
     widthPx,
     theme,
   });
+
+  const now = useClock();
+  const clock = formatClock(now);
+
+  // El sello va DENTRO del PNG, no solo en el nombre del fichero: un fichero
+  // se renombra y la imagen se queda sin fecha.
+  const snapshotWithStamp = useCallback(
+    () => composeSnapshot({ stamp: clock }),
+    [composeSnapshot, clock]
+  );
+  const { exportPng, toggleRecording, isRecording, exportError } = useExport({
+    composeSnapshot: snapshotWithStamp,
+  });
+
+  const isPaused = store.connectionState === "paused";
+  const hasSession = store.connectionState === "running" || isPaused;
+
+  const togglePause = () => {
+    if (isPaused) runtime.resume();
+    else runtime.pause();
+  };
 
   // El CSS toma su juego de custom properties del atributo del elemento raíz.
   useEffect(() => {
@@ -162,6 +187,23 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
             options={THEME_OPTIONS}
             onChange={setThemeName}
           />
+          {/* "Congelar" y no "Pausa": lo que el usuario quiere no es detener
+              un vídeo, es parar el barrido para poder leer el trazado. El
+              texto del botón dice lo que hace, no cómo está implementado. */}
+          <IconButton
+            icon={isPaused ? "play" : "pause"}
+            label={isPaused ? "Reanudar" : "Congelar"}
+            onClick={togglePause}
+            disabled={!hasSession}
+            active={isPaused}
+          />
+          <IconButton icon="download" label="PNG" onClick={exportPng} />
+          <IconButton
+            icon={isRecording ? "stop" : "ecg"}
+            label={isRecording ? "Detener" : "Grabar"}
+            onClick={toggleRecording}
+            active={isRecording}
+          />
         </Header>
       }
       sidebar={
@@ -219,9 +261,14 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
             {hasConnectedOnce && store.connectionState === "idle" && (
               <p role="status">Desconectado</p>
             )}
+            {/* Solo mientras corre: en pausa el buffer se vacía a propósito, y
+                anunciar "Esperando señal" ahí convertiría una acción
+                deliberada del usuario en lo que parece una avería de red. */}
             {isAwaitingSignal && store.connectionState === "running" && (
               <p role="status">Esperando señal…</p>
             )}
+            {isPaused && <p role="status">Trazado congelado</p>}
+            {exportError && <p role="alert">{exportError}</p>}
             <MetricGrid>
               <Metric
                 label="Ritmo"
@@ -256,6 +303,12 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
               {COMPRESSION_LABEL[metrics.compression]}
             </Badge>
           </Tooltip>
+          {/* Empujado al extremo derecho. La hora de un registro clínico no es
+              decoración: una tira sin sello temporal no se puede situar
+              después en la historia de nadie. */}
+          <time className={styles.clock} dateTime={now.toISOString()}>
+            {clock}
+          </time>
         </StatusBar>
       }
     />

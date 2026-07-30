@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { Select, SegmentedControl, Slider, Stepper } from "./index";
+import { IconButton, Select, SegmentedControl, Slider, Stepper } from "./index";
 
 describe("SegmentedControl", () => {
   const OPTIONS = [
@@ -160,5 +160,33 @@ describe("Select", () => {
     await userEvent.selectOptions(screen.getByLabelText("Seleccionar ritmo"), "sinus_normal");
 
     expect(onChange).toHaveBeenCalledWith("sinus_normal");
+  });
+});
+
+describe("IconButton", () => {
+  it("su texto es su nombre accesible", () => {
+    // Siempre lleva texto, nunca solo el icono: un icono suelto obliga a
+    // adivinar, y en una consola clinica adivinar es lo que no debe pasar.
+    render(<IconButton icon="pause" label="Congelar" onClick={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Congelar" })).toBeInTheDocument();
+  });
+
+  it("un boton sin estado sostenido no se anuncia como pulsable", () => {
+    // aria-pressed en un boton de accion simple hace que el lector anuncie
+    // "no pulsado" en algo que no tiene dos estados.
+    render(<IconButton icon="download" label="Exportar" onClick={vi.fn()} />);
+    expect(screen.getByRole("button")).not.toHaveAttribute("aria-pressed");
+  });
+
+  it("un boton activo lo declara, no solo lo colorea", () => {
+    render(<IconButton icon="stop" label="Grabando" onClick={vi.fn()} active />);
+    expect(screen.getByRole("button")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("deshabilitado no llama a nadie", async () => {
+    const onClick = vi.fn();
+    render(<IconButton icon="pause" label="Congelar" onClick={onClick} disabled />);
+    await userEvent.click(screen.getByRole("button"));
+    expect(onClick).not.toHaveBeenCalled();
   });
 });

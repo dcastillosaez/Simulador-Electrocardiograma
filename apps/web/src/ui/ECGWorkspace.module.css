@@ -1,0 +1,7 @@
+.clock {
+  /* Al extremo derecho de la barra de estado. `margin-left: auto` en un
+     contenedor flex y no `justify-content: space-between` en la barra: la
+     barra no debe saber que uno de sus hijos quiere irse al borde. */
+  margin-left: auto;
+  color: var(--text-primary);
+}
