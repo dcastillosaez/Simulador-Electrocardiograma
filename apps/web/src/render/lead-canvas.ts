@@ -1,4 +1,4 @@
-import { PX_PER_MM, voltageToPx } from "./grid-layer";
+import { PX_PER_MM } from "./grid-layer";
 import type { SweepBuffer } from "./sweep-buffer";
 
 export interface LeadCanvasOptions {
@@ -44,8 +44,12 @@ export function drawSweepSegment(
   // overrun. Un hueco no se interpola nunca (spec §4) -- se levanta el lapiz
   // y el trazo nuevo empieza con su propio moveTo, igual que al envolver.
   const linksToPrevious = !hadGap && sweep.hasSamples && startIndex > 0;
+  // Puente temporal: voltageToPx ahora pide LayoutMetrics (Task 5). Este
+  // fichero lo reescribe entero la Task 6 para consumir
+  // metrics.pixelsPerMillivolt directamente; hasta entonces se inlinea la
+  // misma aritmetica que hacia la funcion vieja (v*1000*gain*PX_PER_MM).
   const previousY = linksToPrevious
-    ? baselineY - voltageToPx(sweep.at(startIndex - 1), options.gainMmPerMv)
+    ? baselineY - sweep.at(startIndex - 1) * 1000 * options.gainMmPerMv * PX_PER_MM
     : 0;
 
   sweep.push(newSamples);
@@ -71,7 +75,7 @@ export function drawSweepSegment(
   for (let i = 0; i < newSamples.length; i++) {
     const ringIndex = (startIndex + i) % capacity;
     const x = ringIndex * pxPerSample;
-    const y = baselineY - voltageToPx(newSamples[i], options.gainMmPerMv);
+    const y = baselineY - newSamples[i] * 1000 * options.gainMmPerMv * PX_PER_MM;
     if (penDown && ringIndex !== 0) {
       ctx.lineTo(x, y);
     } else {

@@ -42,11 +42,13 @@ class FakeWebSocket {
 
 interface MockCtx {
   clearRect: ReturnType<typeof vi.fn>;
+  fillRect: ReturnType<typeof vi.fn>;
   beginPath: ReturnType<typeof vi.fn>;
   moveTo: ReturnType<typeof vi.fn>;
   lineTo: ReturnType<typeof vi.fn>;
   stroke: ReturnType<typeof vi.fn>;
   strokeStyle: string;
+  fillStyle: string;
   lineWidth: number;
   canvas: { width: number };
 }
@@ -54,11 +56,13 @@ interface MockCtx {
 function makeMockCtx(): MockCtx {
   return {
     clearRect: vi.fn(),
+    fillRect: vi.fn(),
     beginPath: vi.fn(),
     moveTo: vi.fn(),
     lineTo: vi.fn(),
     stroke: vi.fn(),
     strokeStyle: "",
+    fillStyle: "",
     lineWidth: 0,
     canvas: { width: 800 },
   };

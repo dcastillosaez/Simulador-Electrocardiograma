@@ -7,10 +7,12 @@ import { LayoutPicker } from "./LayoutPicker";
 import { BasicControlPanel } from "./BasicControlPanel";
 import { AdvancedControlPanel } from "./AdvancedControlPanel";
 import { leadsForLayout, leadIndex, type LayoutId, type LeadName } from "../render/layout";
-import { drawGrid, voltageToPx, PX_PER_MM } from "../render/grid-layer";
+import { drawGrid, PX_PER_MM } from "../render/grid-layer";
+import { computeLayoutMetrics } from "../render/layout-engine";
 import { drawSweepSegment } from "../render/lead-canvas";
 import { SweepBuffer, sweepCapacitySamples } from "../render/sweep-buffer";
 import type { RhythmDetail } from "../types/rhythms";
+import { getTheme } from "@ui-system/themes/index";
 
 const DEFAULT_VARIABILITY = {
   respiration_hz: 0.25,
@@ -32,7 +34,12 @@ const CANVAS_WIDTH_PX = 800;
 // borde. STRIP_MARGIN_MV fija cuanto margen queda por encima y por debajo de
 // la linea base tras la R mas alta esperada, y de ahí sale el alto real.
 const STRIP_MARGIN_V = 0.002; // 2mV de margen a cada lado de la base
-const STRIP_HEIGHT_PX = Math.ceil(2 * voltageToPx(STRIP_MARGIN_V, GAIN_MM_PER_MV));
+// Puente temporal: voltageToPx ahora pide LayoutMetrics en vez de una
+// ganancia numerica (Task 5). Aqui aun no hay metricas -- este calculo se
+// hace antes de montar el componente -- asi que se inlinea la misma
+// aritmetica que hacia la funcion vieja hasta que la Task 12 sustituya este
+// alto fijo por el LayoutEngine.
+const STRIP_HEIGHT_PX = Math.ceil(2 * STRIP_MARGIN_V * 1000 * GAIN_MM_PER_MV * PX_PER_MM);
 
 export interface ECGWorkspaceProps {
   wsUrl: string;
@@ -155,7 +162,16 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
   useEffect(() => {
     const canvas = gridCanvasRef.current;
     const ctx = canvas?.getContext("2d");
-    if (ctx && canvas) drawGrid(ctx, canvas.width, canvas.height);
+    if (!ctx || !canvas) return;
+    // Puente temporal: la Task 12 sustituye este canvas suelto por un canvas
+    // de rejilla dentro de cada LeadStrip, con las metricas del LayoutEngine.
+    const metrics = computeLayoutMetrics(
+      canvas.height,
+      1,
+      GAIN_MM_PER_MV,
+      PAPER_SPEED_MM_S
+    );
+    drawGrid(ctx, canvas.width, canvas.height, metrics, getTheme().ecg);
   }, [layout]);
 
   useEffect(() => {

@@ -1,14 +1,24 @@
-// Asume 96 CSS px por pulgada (estándar del navegador para `px`), como
-// unidad de referencia para pasar de milímetros de papel a píxeles.
+import type { EcgTheme } from "@ui-system/themes/types";
+// Solo el tipo: `layout-engine.ts` importa `PX_PER_MM` de aquí, así que un
+// import de valor cerraría un ciclo en tiempo de ejecución. `import type` se
+// borra al compilar y no crea dependencia real.
+import type { LayoutMetrics } from "./layout-engine";
+
+/** Píxeles por milímetro que asume el navegador para la unidad `px` (96 dpi).
+ *
+ * Ya no lo consume el dibujo: es el `viewportScale` por defecto, la referencia
+ * de la que parte `computeLayoutMetrics`. Que 96 dpi sea ficción en casi
+ * cualquier monitor actual es cierto y asumido; los simuladores comerciales
+ * tampoco logran escala física exacta, mantienen proporciones y ofrecen
+ * calibración a quien la necesite. */
 export const PX_PER_MM = 96 / 25.4;
 
-export function timeToPx(tS: number, paperSpeedMmS: number): number {
-  return tS * paperSpeedMmS * PX_PER_MM;
+export function timeToPx(tS: number, metrics: LayoutMetrics): number {
+  return tS * metrics.pixelsPerSecond;
 }
 
-export function voltageToPx(vVolts: number, gainMmPerMv: number): number {
-  const mv = vVolts * 1000;
-  return mv * gainMmPerMv * PX_PER_MM;
+export function voltageToPx(vVolts: number, metrics: LayoutMetrics): number {
+  return vVolts * 1000 * metrics.pixelsPerMillivolt;
 }
 
 export interface GridLines {
@@ -21,8 +31,12 @@ export interface GridLines {
 const MINOR_SPACING_MM = 1;
 const MAJOR_EVERY_N_MINOR = 5;
 
-export function computeGridLines(widthPx: number, heightPx: number): GridLines {
-  const spacingPx = MINOR_SPACING_MM * PX_PER_MM;
+export function computeGridLines(
+  widthPx: number,
+  heightPx: number,
+  metrics: LayoutMetrics
+): GridLines {
+  const spacingPx = MINOR_SPACING_MM * metrics.viewportScalePxPerMm;
 
   const verticalMinor: number[] = [];
   const verticalMajor: number[] = [];
@@ -43,20 +57,31 @@ export function computeGridLines(widthPx: number, heightPx: number): GridLines {
   return { verticalMinor, verticalMajor, horizontalMinor, horizontalMajor };
 }
 
+/** Dibuja fondo y rejilla de UNA tira, con sus dimensiones reales.
+ *
+ * Antes había un único canvas de rejilla de 800x600 posicionado en absoluto que
+ * no se alineaba con las tiras de debajo. Por tira, además de cuadrar, hace
+ * cada derivación autónoma: se puede ampliar, congelar o resaltar una sin
+ * tocar el resto. */
 export function drawGrid(
   ctx: CanvasRenderingContext2D,
   widthPx: number,
-  heightPx: number
+  heightPx: number,
+  metrics: LayoutMetrics,
+  theme: EcgTheme
 ): void {
-  const lines = computeGridLines(widthPx, heightPx);
-  ctx.clearRect(0, 0, widthPx, heightPx);
+  const lines = computeGridLines(widthPx, heightPx, metrics);
 
-  ctx.strokeStyle = "#f4c6c6";
+  ctx.clearRect(0, 0, widthPx, heightPx);
+  ctx.fillStyle = theme.background;
+  ctx.fillRect(0, 0, widthPx, heightPx);
+
+  ctx.strokeStyle = theme.gridMinor;
   ctx.lineWidth = 0.5;
   for (const x of lines.verticalMinor) drawLine(ctx, x, 0, x, heightPx);
   for (const y of lines.horizontalMinor) drawLine(ctx, 0, y, widthPx, y);
 
-  ctx.strokeStyle = "#e08080";
+  ctx.strokeStyle = theme.gridMajor;
   ctx.lineWidth = 1;
   for (const x of lines.verticalMajor) drawLine(ctx, x, 0, x, heightPx);
   for (const y of lines.horizontalMajor) drawLine(ctx, 0, y, widthPx, y);

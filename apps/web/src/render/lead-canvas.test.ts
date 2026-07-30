@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { ERASE_BAND_PX, OverlayLayer, drawSweepSegment } from "./lead-canvas";
-import { PX_PER_MM, voltageToPx } from "./grid-layer";
+import { PX_PER_MM } from "./grid-layer";
 import { SweepBuffer, sweepCapacitySamples } from "./sweep-buffer";
+
+// Puente temporal (Task 5): voltageToPx ahora pide LayoutMetrics en vez de
+// una ganancia numerica. Este fichero lo adapta la Task 6 junto con
+// lead-canvas.ts; hasta entonces las dos aserciones de mas abajo inlinean la
+// misma aritmetica que hacia la funcion vieja (v*1000*gain*PX_PER_MM).
 
 function makeCtx() {
   return {
@@ -36,11 +41,11 @@ describe("drawSweepSegment", () => {
     const baselineY = HEIGHT_PX / 2;
     const [x0, y0] = (ctx.moveTo as any).mock.calls[0];
     expect(x0).toBeCloseTo(0);
-    expect(y0).toBeCloseTo(baselineY - voltageToPx(0, 10));
+    expect(y0).toBeCloseTo(baselineY - 0 * 1000 * 10 * PX_PER_MM);
 
     const [x1, y1] = (ctx.lineTo as any).mock.calls[0];
     expect(x1).toBeCloseTo(PX_PER_SAMPLE);
-    expect(y1).toBeCloseTo(baselineY - voltageToPx(0.001, 10));
+    expect(y1).toBeCloseTo(baselineY - 0.001 * 1000 * 10 * PX_PER_MM);
 
     // El anillo queda con esas muestras escritas y el cursor avanzado.
     expect(sweep.writeCursor).toBe(3);
