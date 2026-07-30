@@ -17,8 +17,10 @@ from enum import Enum
 import numpy as np
 
 from ecg_engine import EcgEngine, EngineParams
+from ecg_engine.catalog import get_rhythm
 
 from .errors import RhythmNotFoundError
+from .measuring import MeasurementWindow, measurements_payload
 
 CHUNK_SAMPLES = 50  # 100 ms a 500 Hz — la cadencia de streaming del diseño
 _SEED_UPPER_BOUND = 2**31
@@ -44,6 +46,7 @@ class SimulationManager:
         self.started_at: dt.datetime | None = None
         self._engine: EcgEngine | None = None
         self._sequence_number: int = 0
+        self._window: MeasurementWindow | None = None
 
     def start(
         self,
@@ -63,6 +66,10 @@ class SimulationManager:
         self.session_id = uuid.uuid4()
         self.started_at = dt.datetime.now(dt.timezone.utc)
         self._sequence_number = 0
+        # Ventana nueva por sesion: un ritmo nuevo arranca un eje de tiempo
+        # nuevo, y medir a caballo entre dos ritmos promediaria dos
+        # fisiologias distintas.
+        self._window = MeasurementWindow(self._engine.sample_rate_hz)
         self.state = SimulationState.RUNNING
         return self.session_id
 
@@ -114,6 +121,8 @@ class SimulationManager:
         assert self._engine is not None
         t_start_s = self._engine.t_s
         channels_v = self._engine.generate(CHUNK_SAMPLES)
+        assert self._window is not None
+        self._window.append(channels_v)
         chunk = Chunk(
             sequence_number=self._sequence_number,
             t_start_s=t_start_s,
@@ -121,3 +130,20 @@ class SimulationManager:
         )
         self._sequence_number += 1
         return chunk
+
+    def measurements(self) -> dict | None:
+        """Medidas de la ventana actual, o `None` si aun no hay senal.
+
+        El calculo es del motor; aqui solo se le da la ventana y el hecho de
+        catalogo que el motor no puede deducir de la senal: si el ritmo tiene
+        siquiera un PR que medir (un flutter no lo tiene, y su relacion F-QRS
+        es tan regular que ningun guardarrail estadistico lo delataria).
+        """
+        if self._engine is None or self._window is None:
+            return None
+        return measurements_payload(
+            source=self._engine.source,
+            window=self._window,
+            t_end_s=self._engine.t_s,
+            pr_is_measurable=get_rhythm(self.rhythm_id).pr_is_measurable,
+        )

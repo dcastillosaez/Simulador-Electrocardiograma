@@ -37,7 +37,7 @@ from ..schemas import (
     updated_message,
 )
 from ..simulation import SimulationManager
-from ..streaming import stream_chunks
+from ..streaming import stream_chunks, stream_measurements
 
 router = APIRouter()
 logger = logging.getLogger("ecg_api.simulation_ws")
@@ -237,7 +237,14 @@ async def simulation_ws(websocket: WebSocket) -> None:
                     stream_chunks(manager, outbox, DEFAULT_SAMPLE_RATE_HZ)
                 )
                 sender_task = asyncio.create_task(_sender_loop(websocket, outbox))
-                for task in (producer_task, sender_task):
+                # Las medidas salen por JSON y no por el outbox binario: son
+                # un canal aparte, a una cadencia diez veces mas lenta, y
+                # mezclarlas con los frames obligaria a versionar el formato
+                # binario cada vez que se anada una metrica nueva.
+                measurements_task = asyncio.create_task(
+                    stream_measurements(manager, websocket.send_json)
+                )
+                for task in (producer_task, sender_task, measurements_task):
                     task.add_done_callback(
                         functools.partial(
                             _on_background_task_done,
@@ -246,7 +253,7 @@ async def simulation_ws(websocket: WebSocket) -> None:
                             close_tasks=close_tasks,
                         )
                     )
-                background_tasks = [producer_task, sender_task]
+                background_tasks = [producer_task, sender_task, measurements_task]
 
             elif isinstance(message, UpdateMessage):
                 if await _reject_if_no_active_session(websocket, manager):
