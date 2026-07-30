@@ -14,7 +14,12 @@ def test_settings_have_sane_defaults(monkeypatch):
     settings = Settings(_env_file=None)
     assert settings.engine_commit == "dev"
     assert "postgresql+asyncpg://" in settings.database_url
-    assert settings.cors_origins_list == ["http://localhost:5173"]
+    # Los dos puertos de desarrollo: 5600 es donde escucha hoy el dev server y
+    # 5173 el que Vite trae por defecto (ver el comentario de `config.py`).
+    assert settings.cors_origins_list == [
+        "http://localhost:5600",
+        "http://localhost:5173",
+    ]
 
 
 def test_settings_read_from_environment(monkeypatch):
