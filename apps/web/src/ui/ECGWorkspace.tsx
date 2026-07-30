@@ -28,7 +28,12 @@ import { useSimulationRuntime } from "./hooks/useSimulationRuntime";
 import { useSweepRenderer } from "./hooks/useSweepRenderer";
 import { formatClock, useClock } from "./hooks/useClock";
 import { useExport } from "./hooks/useExport";
-import { leadsForLayout, type LayoutId } from "../render/layout";
+import {
+  columnsForLayout,
+  leadColumnsForLayout,
+  rowsForLayout,
+  type LayoutId,
+} from "../render/layout";
 import {
   GAIN_STEPS_MM_PER_MV,
   type Compression,
@@ -111,24 +116,24 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
   const [gain, setGain] = useState<GainSetting>("auto");
   const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
 
-  const leads = useMemo(() => leadsForLayout(layout), [layout]);
+  const leadColumns = useMemo(() => leadColumnsForLayout(layout), [layout]);
   const sampleRateHz = store.sampleRateHz ?? DEFAULT_SAMPLE_RATE_HZ;
   const theme = getTheme(themeName);
 
   useSimulationRuntime(runtime);
 
-  const { containerRef, metrics, widthPx } = useLayoutMetrics({
-    leadCount: leads.length,
+  const { containerRef, metrics } = useLayoutMetrics({
+    rowCount: rowsForLayout(layout),
+    columnCount: columnsForLayout(layout),
     gain,
     paperSpeedMmS: PAPER_SPEED_MM_S,
   });
 
   const { registerTrace, registerGrid, isAwaitingSignal, composeSnapshot } = useSweepRenderer({
     runtime,
-    leads,
+    leadColumns,
     sampleRateHz,
     metrics,
-    widthPx,
     theme,
   });
 
@@ -276,9 +281,8 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
       ecg={
         <EcgDisplay
           containerRef={containerRef}
-          leads={leads}
+          leadColumns={leadColumns}
           metrics={metrics}
-          widthPx={widthPx}
           registerTrace={registerTrace}
           registerGrid={registerGrid}
         />
@@ -340,6 +344,10 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
             {metrics.clinicalGainMmPerMv} mm/mV{metrics.gainIsAuto ? " (auto)" : ""}
           </span>
           <span>{PAPER_SPEED_MM_S} mm/s</span>
+          {/* Los segundos por tira son la lectura que importa: en el formato
+              partido cada una muestra la mitad, y no decirlo llevaria a contar
+              mal un intervalo largo. */}
+          <span>{metrics.stripSeconds} s/tira</span>
           <span>Frames perdidos {store.framesLost}</span>
           <Tooltip content={COMPRESSION_HINT}>
             <Badge tone={COMPRESSION_TONE[metrics.compression]}>

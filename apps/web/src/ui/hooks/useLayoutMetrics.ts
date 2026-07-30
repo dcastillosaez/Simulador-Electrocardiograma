@@ -12,7 +12,10 @@ const FALLBACK_WIDTH_PX = 800;
 const FALLBACK_HEIGHT_PX = 600;
 
 export interface UseLayoutMetricsParams {
-  leadCount: number;
+  /** Filas visibles, no derivaciones: en el formato de dos columnas son seis
+   * con doce derivaciones. */
+  rowCount: number;
+  columnCount: number;
   /** `"auto"` deja que el reparto de altura elija la ganancia, como haria un
    * electrocardiografo; un numero la fija. */
   gain: GainSetting;
@@ -22,7 +25,6 @@ export interface UseLayoutMetricsParams {
 export interface UseLayoutMetricsResult {
   containerRef: (element: HTMLElement | null) => void;
   metrics: LayoutMetrics;
-  widthPx: number;
 }
 
 /** Observa el contenedor del ECG y traduce su tamaño a `LayoutMetrics`.
@@ -32,7 +34,8 @@ export interface UseLayoutMetricsResult {
  * pantalla partida, modo presentación—, y ninguna de ellas debería obligar a
  * tocar el renderer. */
 export function useLayoutMetrics({
-  leadCount,
+  rowCount,
+  columnCount,
   gain,
   paperSpeedMmS,
 }: UseLayoutMetricsParams): UseLayoutMetricsResult {
@@ -72,7 +75,13 @@ export function useLayoutMetrics({
 
   return {
     containerRef,
-    widthPx: size.widthPx,
-    metrics: computeLayoutMetrics(size.heightPx, leadCount, gain, paperSpeedMmS),
+    metrics: computeLayoutMetrics({
+      availableWidthPx: size.widthPx,
+      availableHeightPx: size.heightPx,
+      rowCount,
+      columnCount,
+      gain,
+      paperSpeedMmS,
+    }),
   };
 }

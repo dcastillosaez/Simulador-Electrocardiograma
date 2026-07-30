@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Theme } from "@ui-system/themes/types";
 import { drawGrid } from "../../render/grid-layer";
-import { STRIP_GAP_PX, type LayoutMetrics } from "../../render/layout-engine";
+import {
+  COLUMN_GAP_PX,
+  STRIP_GAP_PX,
+  type LayoutMetrics,
+} from "../../render/layout-engine";
 import { drawSweepSegment, type LeadCanvasOptions } from "../../render/lead-canvas";
 import { SweepRebuilder } from "../../render/sweep-rebuilder";
 import { SweepBuffer, sweepCapacitySamples } from "../../render/sweep-buffer";
@@ -10,10 +14,11 @@ import type { SessionRuntime } from "../../simulation-runtime/session-runtime";
 
 export interface UseSweepRendererParams {
   runtime: SessionRuntime;
-  leads: readonly LeadName[];
+  /** Una lista por columna. El renderer las aplana para dibujar, pero necesita
+   * la estructura para componer la exportacion. */
+  leadColumns: readonly (readonly LeadName[])[];
   sampleRateHz: number;
   metrics: LayoutMetrics;
-  widthPx: number;
   theme: Theme;
 }
 
@@ -42,12 +47,13 @@ const rebuilder = new SweepRebuilder();
  * completos. */
 export function useSweepRenderer({
   runtime,
-  leads,
+  leadColumns,
   sampleRateHz,
   metrics,
-  widthPx,
   theme,
 }: UseSweepRendererParams): UseSweepRendererResult {
+  const leads = useMemo(() => leadColumns.flat(), [leadColumns]);
+  const widthPx = metrics.stripWidthPx;
   const traceCanvases = useRef(new Map<LeadName, HTMLCanvasElement>());
   const gridCanvases = useRef(new Map<LeadName, HTMLCanvasElement>());
   const sweeps = useRef(new Map<LeadName, SweepBuffer>());
@@ -180,9 +186,13 @@ export function useSweepRenderer({
       if (!first || first.width === 0 || first.height === 0) return null;
 
       const stripHeight = first.height;
+      const stripWidth = first.width;
+      const rows = Math.max(...leadColumns.map((column) => column.length));
+      const columns = leadColumns.length;
+
       const out = document.createElement("canvas");
-      out.width = first.width;
-      out.height = stripHeight * leads.length + STRIP_GAP_PX * (leads.length - 1);
+      out.width = stripWidth * columns + COLUMN_GAP_PX * (columns - 1);
+      out.height = stripHeight * rows + STRIP_GAP_PX * (rows - 1);
 
       const ctx = out.getContext("2d");
       if (!ctx) return null;
@@ -190,18 +200,24 @@ export function useSweepRenderer({
       ctx.fillStyle = theme.ecg.background;
       ctx.fillRect(0, 0, out.width, out.height);
 
-      leads.forEach((lead, index) => {
-        const y = index * (stripHeight + STRIP_GAP_PX);
-        const grid = gridCanvases.current.get(lead);
-        const trace = traceCanvases.current.get(lead);
-        if (grid) ctx.drawImage(grid, 0, y);
-        if (trace) ctx.drawImage(trace, 0, y);
+      // La imagen exportada conserva la disposicion de la pantalla: un ECG en
+      // formato de dos columnas se reconoce por su forma, y aplanarlo a una
+      // tira unica lo haria irreconocible.
+      leadColumns.forEach((column, columnIndex) => {
+        const x = columnIndex * (stripWidth + COLUMN_GAP_PX);
+        column.forEach((lead, rowIndex) => {
+          const y = rowIndex * (stripHeight + STRIP_GAP_PX);
+          const grid = gridCanvases.current.get(lead);
+          const trace = traceCanvases.current.get(lead);
+          if (grid) ctx.drawImage(grid, x, y);
+          if (trace) ctx.drawImage(trace, x, y);
 
-        ctx.fillStyle = theme.text.muted;
-        ctx.font = `${SNAPSHOT_LABEL_PX}px monospace`;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "top";
-        ctx.fillText(lead, SNAPSHOT_PADDING_PX, y + SNAPSHOT_PADDING_PX / 2);
+          ctx.fillStyle = theme.text.muted;
+          ctx.font = `${SNAPSHOT_LABEL_PX}px monospace`;
+          ctx.textAlign = "left";
+          ctx.textBaseline = "top";
+          ctx.fillText(lead, x + SNAPSHOT_PADDING_PX, y + SNAPSHOT_PADDING_PX / 2);
+        });
       });
 
       if (options.stamp) {
@@ -214,7 +230,7 @@ export function useSweepRenderer({
 
       return out;
     },
-    [leads, theme]
+    [leadColumns, leads, theme]
   );
 
   return { registerTrace, registerGrid, isAwaitingSignal, composeSnapshot };

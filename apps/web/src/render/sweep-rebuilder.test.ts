@@ -5,9 +5,23 @@ import { SweepBuffer } from "./sweep-buffer";
 import { SweepRebuilder } from "./sweep-rebuilder";
 import { getTheme } from "@ui-system/themes/index";
 
+/** Metricas con el ancho que hace que un milimetro mida PX_PER_MM, para poder
+ * seguir razonando en la escala fisica de referencia. */
+function metricsOf(heightPx: number, rows: number, gain: "auto" | number) {
+  return computeLayoutMetrics({
+    availableWidthPx: 10 * 25 * (96 / 25.4),
+    availableHeightPx: heightPx,
+    rowCount: rows,
+    columnCount: 1,
+    gain,
+    paperSpeedMmS: 25,
+  });
+}
+
+
 const SAMPLE_RATE_HZ = 500;
 const HEIGHT_PX = 152;
-const METRICS = computeLayoutMetrics(HEIGHT_PX, 1, 10, 25);
+const METRICS = metricsOf(HEIGHT_PX, 1, 10);
 const OPTIONS = { metrics: METRICS, theme: getTheme("dark").ecg };
 
 function makeCtx() {

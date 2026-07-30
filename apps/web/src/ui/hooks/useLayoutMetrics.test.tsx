@@ -3,9 +3,10 @@ import { act, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useLayoutMetrics } from "./useLayoutMetrics";
 
-function Probe({ leadCount }: { leadCount: number }) {
-  const { containerRef, metrics, widthPx } = useLayoutMetrics({
-    leadCount,
+function Probe({ leadCount, columnCount = 1 }: { leadCount: number; columnCount?: number }) {
+  const { containerRef, metrics } = useLayoutMetrics({
+    rowCount: leadCount,
+    columnCount,
     gain: "auto" as const,
     paperSpeedMmS: 25,
   });
@@ -13,7 +14,7 @@ function Probe({ leadCount }: { leadCount: number }) {
     <div ref={containerRef}>
       <span data-testid="strip">{metrics.stripHeightPx}</span>
       <span data-testid="compression">{metrics.compression}</span>
-      <span data-testid="width">{widthPx}</span>
+      <span data-testid="width">{metrics.stripWidthPx}</span>
     </div>
   );
 }

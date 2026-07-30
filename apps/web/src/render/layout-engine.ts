@@ -44,6 +44,17 @@ export const GAIN_STEPS_MM_PER_MV = [20, 10, 5, 2.5] as const;
  * fija el usuario. */
 export type GainSetting = "auto" | number;
 
+/** Segundos de papel que muestra la pantalla completa.
+ *
+ * Diez segundos es la tira de ritmo estándar: es lo que se imprime, lo que se
+ * mira para contar una arritmia y lo que el alumno va a encontrarse. Fijarlo
+ * —en vez de dejar que dependa del ancho de la ventana, que es lo que pasaba
+ * antes— hace que dos personas con monitores distintos vean lo mismo. */
+export const SCREEN_SECONDS = 10;
+
+/** Hueco entre columnas en el formato de dos columnas. Es `--space-2`. */
+export const COLUMN_GAP_PX = 8;
+
 export type Compression = "normal" | "compact" | "very-compact";
 
 /** Todo lo que el renderer necesita saber sobre geometría. Se pasa entero en
@@ -51,6 +62,12 @@ export type Compression = "normal" | "compact" | "very-compact";
  * dibujo trabajando con escalas distintas. */
 export interface LayoutMetrics {
   stripHeightPx: number;
+  /** Ancho de UNA tira. Con dos columnas es la mitad del área, menos el
+   * hueco. */
+  stripWidthPx: number;
+  /** Segundos que muestra cada tira. Diez a una columna, cinco a dos: el
+   * split no comprime, enseña la mitad de tiempo en la mitad de ancho. */
+  stripSeconds: number;
   compression: Compression;
   /** Ganancia efectiva. En automático, la mayor que cabe. */
   clinicalGainMmPerMv: number;
@@ -73,17 +90,23 @@ function classify(stripHeightPx: number): Compression {
 }
 
 /** Milivoltios representables a cada lado de la línea base. */
-function halfRangeMv(stripHeightPx: number, gainMmPerMv: number): number {
-  return stripHeightPx / (2 * PX_PER_MM * gainMmPerMv);
+function halfRangeMv(
+  stripHeightPx: number,
+  gainMmPerMv: number,
+  scalePxPerMm: number
+): number {
+  return stripHeightPx / (2 * scalePxPerMm * gainMmPerMv);
 }
 
 /** La mayor ganancia estándar con la que `STRIP_MARGIN_MV` cabe a cada lado.
  *
  * Si no cabe ni con la más pequeña se devuelve esa: recortar es preferible a
  * inventar una ganancia intermedia que no existe en ningún equipo. */
-function autoGain(stripHeightPx: number): number {
+function autoGain(stripHeightPx: number, scalePxPerMm: number): number {
   for (const gain of GAIN_STEPS_MM_PER_MV) {
-    if (halfRangeMv(stripHeightPx, gain) >= STRIP_MARGIN_MV) return gain;
+    if (halfRangeMv(stripHeightPx, gain, scalePxPerMm) >= STRIP_MARGIN_MV) {
+      return gain;
+    }
   }
   return GAIN_STEPS_MM_PER_MV[GAIN_STEPS_MM_PER_MV.length - 1];
 }
@@ -107,35 +130,72 @@ function autoGain(stripHeightPx: number): number {
  * derivaciones en un portátil, y el spec descarta tanto el scroll como ocultar
  * derivaciones en silencio: las tiras se comprimen más y `compression` lo
  * declara. Degradación informada, no silenciosa. */
-export function computeLayoutMetrics(
-  availableHeightPx: number,
-  leadCount: number,
-  gain: GainSetting,
-  paperSpeedMmS: number
-): LayoutMetrics {
-  const count = Math.max(1, Math.floor(leadCount));
-  const gapsPx = STRIP_GAP_PX * (count - 1);
-  const perStripPx = (availableHeightPx - gapsPx) / count;
+export interface LayoutInput {
+  availableWidthPx: number;
+  availableHeightPx: number;
+  /** Filas visibles, no derivaciones: en `"6x2"` son seis con doce
+   * derivaciones. */
+  rowCount: number;
+  columnCount: number;
+  gain: GainSetting;
+  paperSpeedMmS: number;
+}
 
+export function computeLayoutMetrics({
+  availableWidthPx,
+  availableHeightPx,
+  rowCount,
+  columnCount,
+  gain,
+  paperSpeedMmS,
+}: LayoutInput): LayoutMetrics {
+  const rows = Math.max(1, Math.floor(rowCount));
+  const columns = Math.max(1, Math.floor(columnCount));
+
+  const gapsPx = STRIP_GAP_PX * (rows - 1);
+  const perStripPx = (availableHeightPx - gapsPx) / rows;
   const stripHeightPx = Math.max(
     STRIP_FLOOR_PX,
     Math.min(STRIP_MAX_PX, perStripPx)
   );
 
+  const stripWidthPx = Math.max(
+    1,
+    (availableWidthPx - COLUMN_GAP_PX * (columns - 1)) / columns
+  );
+  const stripSeconds = SCREEN_SECONDS / columns;
+
+  // LA ESCALA SALE DEL ANCHO, no de una suposición de 96dpi.
+  //
+  // El display tiene que mostrar `stripSeconds` de papel exactamente, así que
+  // los píxeles por milímetro son los que hagan falta para que quepan. Lo
+  // importante —y lo que arregló el defecto de la cuadrícula— es que esta
+  // misma escala gobierne los DOS ejes: mientras eso se cumpla, la celda es
+  // cuadrada, un segundo son cinco cuadros grandes y medir contando cuadros
+  // es exacto, valga lo que valga el milímetro en píxeles.
+  //
+  // Como el ancho de columna y los segundos por tira se dividen los dos entre
+  // el número de columnas, la escala es la MISMA en una columna que en dos: el
+  // formato partido no comprime el trazado, solo enseña menos tiempo.
+  const viewportScalePxPerMm = stripWidthPx / (stripSeconds * paperSpeedMmS);
+
   const gainIsAuto = gain === "auto";
-  const clinicalGainMmPerMv = gainIsAuto ? autoGain(stripHeightPx) : gain;
+  const clinicalGainMmPerMv = gainIsAuto
+    ? autoGain(stripHeightPx, viewportScalePxPerMm)
+    : gain;
 
   return {
     stripHeightPx,
+    stripWidthPx,
+    stripSeconds,
     compression: classify(stripHeightPx),
     clinicalGainMmPerMv,
     gainIsAuto,
-    gainFits: halfRangeMv(stripHeightPx, clinicalGainMmPerMv) >= STRIP_MARGIN_MV,
-    // Escala física, idéntica en horizontal y vertical. Que 96dpi sea ficción
-    // en casi cualquier monitor es cierto y asumido; lo que importa aquí es
-    // que las proporciones entre ejes sean las del papel.
-    viewportScalePxPerMm: PX_PER_MM,
-    pixelsPerMillivolt: clinicalGainMmPerMv * PX_PER_MM,
-    pixelsPerSecond: paperSpeedMmS * PX_PER_MM,
+    gainFits:
+      halfRangeMv(stripHeightPx, clinicalGainMmPerMv, viewportScalePxPerMm) >=
+      STRIP_MARGIN_MV,
+    viewportScalePxPerMm,
+    pixelsPerMillivolt: clinicalGainMmPerMv * viewportScalePxPerMm,
+    pixelsPerSecond: paperSpeedMmS * viewportScalePxPerMm,
   };
 }

@@ -5,6 +5,20 @@ import { drawSweepSegment } from "./lead-canvas";
 import { computeLayoutMetrics } from "./layout-engine";
 import { SweepBuffer, sweepCapacitySamples } from "./sweep-buffer";
 
+/** Metricas con el ancho que hace que un milimetro mida PX_PER_MM, para poder
+ * seguir razonando en la escala fisica de referencia. */
+function metricsOf(heightPx: number, rows: number, gain: "auto" | number) {
+  return computeLayoutMetrics({
+    availableWidthPx: 10 * 25 * (96 / 25.4),
+    availableHeightPx: heightPx,
+    rowCount: rows,
+    columnCount: 1,
+    gain,
+    paperSpeedMmS: 25,
+  });
+}
+
+
 /** Colores que no aparecen en ningun tema real ni en ningun sitio del codigo.
  * Si el renderer asigna algo que no este aqui, es que lo lleva escrito a
  * mano. */
@@ -50,7 +64,7 @@ function makeRecordingCtx() {
   return { ctx: ctx as unknown as CanvasRenderingContext2D, assigned };
 }
 
-const METRICS = computeLayoutMetrics(152, 1, 10, 25);
+const METRICS = metricsOf(152, 1, 10);
 
 describe("contrato de tema del renderer", () => {
   it("drawGrid no asigna ningun color que no venga del tema", () => {

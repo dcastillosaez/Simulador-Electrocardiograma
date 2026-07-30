@@ -5,6 +5,20 @@ import { computeLayoutMetrics } from "./layout-engine";
 import { SweepBuffer, sweepCapacitySamples } from "./sweep-buffer";
 import { getTheme } from "@ui-system/themes/index";
 
+/** Metricas con el ancho que hace que un milimetro mida PX_PER_MM, para poder
+ * seguir razonando en la escala fisica de referencia. */
+function metricsOf(heightPx: number, rows: number, gain: "auto" | number) {
+  return computeLayoutMetrics({
+    availableWidthPx: 10 * 25 * (96 / 25.4),
+    availableHeightPx: heightPx,
+    rowCount: rows,
+    columnCount: 1,
+    gain,
+    paperSpeedMmS: 25,
+  });
+}
+
+
 function makeCtx() {
   return {
     clearRect: vi.fn(),
@@ -24,7 +38,7 @@ const SAMPLE_RATE_HZ = 500;
 const HEIGHT_PX = 152;
 // 152px de tira con ganancia 10mm/mV y margen de 2mV dan viewportScale = 3,8
 // px/mm, practicamente PX_PER_MM: asi los tests siguen pudiendo razonar en mm.
-const METRICS = computeLayoutMetrics(HEIGHT_PX, 1, 10, 25);
+const METRICS = metricsOf(HEIGHT_PX, 1, 10);
 const OPTIONS = { metrics: METRICS, theme: getTheme("dark").ecg };
 const PX_PER_SAMPLE = METRICS.pixelsPerSecond / SAMPLE_RATE_HZ;
 const ERASE_BAND_PX = ERASE_BAND_MM * METRICS.viewportScalePxPerMm;
@@ -269,7 +283,7 @@ describe("drawSweepSegment", () => {
     // Su propio comentario ya decia "a 25mm/s son unos 2mm de papel": estaba
     // en las unidades equivocadas. Con escala variable, un hueco fijo en
     // pixeles se ve enorme comprimido y ridiculo en 4K.
-    const comprimida = computeLayoutMetrics(46, 12, 10, 25);
+    const comprimida = metricsOf(46, 12, 10);
     const ctx = makeCtx();
     const sweep = new SweepBuffer(CAPACITY);
 

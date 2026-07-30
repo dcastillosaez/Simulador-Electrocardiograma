@@ -6,6 +6,8 @@ const OPTIONS: Array<{ value: LayoutId; label: string }> = [
   { value: "3", label: "3" },
   { value: "6", label: "6" },
   { value: "12", label: "12" },
+  // El formato del ECG en papel: doce derivaciones en dos columnas de seis.
+  { value: "6x2", label: "6x2" },
 ];
 
 export interface LayoutPickerProps {

@@ -3,11 +3,24 @@ import { PX_PER_MM, computeGridLines, drawGrid, timeToPx, voltageToPx } from "./
 import { computeLayoutMetrics } from "./layout-engine";
 import { getTheme } from "@ui-system/themes/index";
 
+/** Metricas con el ancho que hace que un milimetro mida PX_PER_MM, para poder
+ * seguir razonando en la escala fisica de referencia. */
+function metricsOf(heightPx: number, rows: number, gain: "auto" | number) {
+  return computeLayoutMetrics({
+    availableWidthPx: 10 * 25 * (96 / 25.4),
+    availableHeightPx: heightPx,
+    rowCount: rows,
+    columnCount: 1,
+    gain,
+    paperSpeedMmS: 25,
+  });
+}
+
+
 const GAIN = 10;
-const SPEED = 25;
 // La escala fisica ya no depende del alto de tira: un milimetro son PX_PER_MM
 // pixeles siempre, y lo que se adapta a la altura es la ganancia.
-const METRICS = computeLayoutMetrics(152, 1, GAIN, SPEED);
+const METRICS = metricsOf(152, 1, GAIN);
 const THEME = getTheme("dark").ecg;
 
 describe("timeToPx / voltageToPx", () => {
@@ -24,10 +37,10 @@ describe("timeToPx / voltageToPx", () => {
     // Antes comprimir la ventana encogia el trazo. Ahora no: el milimetro es
     // el milimetro, y lo que cambia cuando no cabe es la ganancia -- que es
     // como se comporta un electrocardiografo.
-    const comprimida = computeLayoutMetrics(46, 1, GAIN, SPEED);
+    const comprimida = metricsOf(46, 1, GAIN);
     expect(voltageToPx(0.001, comprimida)).toBeCloseTo(voltageToPx(0.001, METRICS), 5);
 
-    const mediaGanancia = computeLayoutMetrics(46, 1, GAIN / 2, SPEED);
+    const mediaGanancia = metricsOf(46, 1, GAIN / 2);
     expect(voltageToPx(0.001, mediaGanancia)).toBeCloseTo(
       voltageToPx(0.001, METRICS) / 2,
       5
@@ -49,7 +62,7 @@ describe("computeGridLines", () => {
     // La cuadricula representa milimetros de papel. Si se estirase o encogiese
     // con la ventana dejaria de servir para medir, que es justo el defecto que
     // este cambio corrige.
-    const comprimida = computeLayoutMetrics(46, 1, "auto", SPEED);
+    const comprimida = metricsOf(46, 1, "auto");
     const anchas = computeGridLines(200, 200, METRICS);
     const juntas = computeGridLines(200, 200, comprimida);
     expect(juntas.verticalMinor.length).toBe(anchas.verticalMinor.length);

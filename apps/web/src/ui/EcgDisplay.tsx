@@ -5,32 +5,40 @@ import { LeadStrip } from "./LeadStrip";
 
 export interface EcgDisplayProps {
   containerRef: (element: HTMLElement | null) => void;
-  leads: readonly LeadName[];
+  /** Una lista por columna. Con un solo elemento es la vista clásica. */
+  leadColumns: readonly (readonly LeadName[])[];
   metrics: LayoutMetrics;
-  widthPx: number;
   registerTrace: (lead: LeadName, element: HTMLCanvasElement | null) => void;
   registerGrid: (lead: LeadName, element: HTMLCanvasElement | null) => void;
 }
 
+/** Las columnas van sincronizadas: muestran el mismo instante con
+ * derivaciones distintas, como un monitor de cabecera. No es el papel, donde
+ * cada bloque es un tramo de tiempo consecutivo — aquí la señal está viva, y
+ * poder comparar el mismo latido entre derivaciones es justo lo que se busca
+ * al partir la pantalla. */
 export function EcgDisplay({
   containerRef,
-  leads,
+  leadColumns,
   metrics,
-  widthPx,
   registerTrace,
   registerGrid,
 }: EcgDisplayProps) {
   return (
     <div className={styles.display} ref={containerRef}>
-      {leads.map((lead) => (
-        <LeadStrip
-          key={lead}
-          lead={lead}
-          widthPx={widthPx}
-          heightPx={metrics.stripHeightPx}
-          registerTrace={registerTrace}
-          registerGrid={registerGrid}
-        />
+      {leadColumns.map((leads, index) => (
+        <div className={styles.column} key={index}>
+          {leads.map((lead) => (
+            <LeadStrip
+              key={lead}
+              lead={lead}
+              widthPx={metrics.stripWidthPx}
+              heightPx={metrics.stripHeightPx}
+              registerTrace={registerTrace}
+              registerGrid={registerGrid}
+            />
+          ))}
+        </div>
       ))}
     </div>
   );
