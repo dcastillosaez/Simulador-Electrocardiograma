@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PX_PER_MM } from "./grid-layer";
 import {
+  GAIN_STEPS_MM_PER_MV,
   STRIP_COMPACT_PX,
   STRIP_FLOOR_PX,
   STRIP_GAP_PX,
@@ -10,7 +11,6 @@ import {
   computeLayoutMetrics,
 } from "./layout-engine";
 
-const GAIN = 10;
 const SPEED = 25;
 
 /** Alto que hay que dar al contenedor para que a cada tira le toquen
@@ -20,35 +20,36 @@ function heightFor(stripPx: number, leadCount: number): number {
   return stripPx * leadCount + STRIP_GAP_PX * (leadCount - 1);
 }
 
-describe("computeLayoutMetrics", () => {
+/** Alto de tira justo para representar `marginMv` a cada lado de la línea
+ * base con la ganancia dada, a escala real. */
+function heightForGain(gainMmPerMv: number, marginMv = STRIP_MARGIN_MV): number {
+  return 2 * marginMv * gainMmPerMv * PX_PER_MM;
+}
+
+describe("reparto de altura", () => {
   it("reparte el alto disponible entre las derivaciones, descontando los huecos", () => {
-    const metrics = computeLayoutMetrics(heightFor(70, 12), 12, GAIN, SPEED);
+    const metrics = computeLayoutMetrics(heightFor(70, 12), 12, "auto", SPEED);
     expect(metrics.stripHeightPx).toBeCloseTo(70);
   });
 
   it("nunca pasa del maximo, aunque sobre alto", () => {
-    const metrics = computeLayoutMetrics(heightFor(400, 3), 3, GAIN, SPEED);
+    const metrics = computeLayoutMetrics(heightFor(400, 3), 3, "auto", SPEED);
     expect(metrics.stripHeightPx).toBe(STRIP_MAX_PX);
   });
 
   it("el minimo es blando: por debajo de 52px sigue comprimiendo, no recorta", () => {
-    // Es la decision del spec: el scroll esta descartado y ocultar
-    // derivaciones en silencio es inaceptable en algo clinico, asi que las
-    // tiras se comprimen mas y la interfaz lo declara. Un clamp con suelo en
-    // 52 desbordaria la ventana, que es justo lo que se quiere evitar.
-    const metrics = computeLayoutMetrics(heightFor(46, 12), 12, GAIN, SPEED);
+    const metrics = computeLayoutMetrics(heightFor(46, 12), 12, "auto", SPEED);
     expect(metrics.stripHeightPx).toBeCloseTo(46);
     expect(metrics.stripHeightPx).toBeLessThan(STRIP_MIN_PX);
   });
 
   it("respeta un suelo absoluto para no crear canvas degenerados", () => {
-    const metrics = computeLayoutMetrics(12, 12, GAIN, SPEED);
-    expect(metrics.stripHeightPx).toBe(STRIP_FLOOR_PX);
+    expect(computeLayoutMetrics(12, 12, "auto", SPEED).stripHeightPx).toBe(STRIP_FLOOR_PX);
   });
 
   it("clasifica la compresion en las tres fronteras", () => {
     const at = (stripPx: number, leads = 12) =>
-      computeLayoutMetrics(heightFor(stripPx, leads), leads, GAIN, SPEED).compression;
+      computeLayoutMetrics(heightFor(stripPx, leads), leads, "auto", SPEED).compression;
 
     expect(at(STRIP_COMPACT_PX)).toBe("normal");
     expect(at(STRIP_COMPACT_PX - 1)).toBe("compact");
@@ -56,62 +57,120 @@ describe("computeLayoutMetrics", () => {
     expect(at(STRIP_MIN_PX - 1)).toBe("very-compact");
   });
 
-  it("la ganancia clinica no depende del tamano de la ventana", () => {
-    // El nucleo de la separacion fisiologia/viewport: un milivoltio es un
-    // milivoltio, y lo que cambia con la pantalla es cuantos pixeles lo
-    // representan.
-    const grande = computeLayoutMetrics(heightFor(120, 6), 6, GAIN, SPEED);
-    const pequena = computeLayoutMetrics(heightFor(46, 12), 12, GAIN, SPEED);
-    expect(grande.clinicalGainMmPerMv).toBe(GAIN);
-    expect(pequena.clinicalGainMmPerMv).toBe(GAIN);
-    expect(pequena.viewportScalePxPerMm).toBeLessThan(grande.viewportScalePxPerMm);
+  it("una sola derivacion no descuenta huecos", () => {
+    expect(computeLayoutMetrics(300, 1, "auto", SPEED).stripHeightPx).toBe(STRIP_MAX_PX);
+  });
+});
+
+describe("cuadricula cuadrada", () => {
+  it("un milimetro mide lo mismo en los dos ejes, siempre", () => {
+    // ES EL ARREGLO. Antes la escala vertical se estiraba para llenar la tira
+    // mientras la horizontal seguia fija, y la rejilla se dibujaba con la
+    // vertical: daba 6,25 cuadros grandes por segundo en vez de 5, un 25% de
+    // error al medir un RR sobre el papel. Ahora el milimetro es el milimetro
+    // y lo que se adapta es la ganancia.
+    for (const stripPx of [16, 46, 70, 121, 140]) {
+      const metrics = computeLayoutMetrics(heightFor(stripPx, 6), 6, "auto", SPEED);
+      expect(metrics.viewportScalePxPerMm, `${stripPx}px`).toBeCloseTo(PX_PER_MM);
+    }
   });
 
+  it("a 25mm/s un segundo son exactamente cinco cuadros grandes", () => {
+    // La comprobacion que hace un clinico con el dedo sobre la pantalla.
+    const metrics = computeLayoutMetrics(heightFor(121, 6), 6, "auto", SPEED);
+    const bigSquarePx = 5 * metrics.viewportScalePxPerMm;
+    expect(metrics.pixelsPerSecond / bigSquarePx).toBeCloseTo(5);
+  });
+
+  it("un cuadro pequeno son 40ms, la lectura de toda la vida", () => {
+    const metrics = computeLayoutMetrics(heightFor(121, 6), 6, "auto", SPEED);
+    const smallSquareS = metrics.viewportScalePxPerMm / metrics.pixelsPerSecond;
+    expect(smallSquareS).toBeCloseTo(0.04);
+  });
+
+  it("el eje horizontal no depende del alto de tira ni de la ganancia", () => {
+    const alta = computeLayoutMetrics(heightFor(140, 3), 3, "auto", SPEED);
+    const baja = computeLayoutMetrics(heightFor(46, 12), 12, "auto", SPEED);
+    expect(baja.pixelsPerSecond).toBeCloseTo(alta.pixelsPerSecond);
+    expect(alta.pixelsPerSecond).toBeCloseTo(SPEED * PX_PER_MM);
+  });
+});
+
+describe("ganancia automatica", () => {
+  it("elige la mayor ganancia estandar que quepa", () => {
+    // Es lo que hace un electrocardiografo real: si la amplitud no cabe se
+    // baja la ganancia, nunca se toca la velocidad del papel.
+    // Con la tira al maximo cabe justo el rango clinico a ganancia estandar:
+    // el tope de altura esta derivado precisamente de eso.
+    const holgada = computeLayoutMetrics(heightFor(STRIP_MAX_PX, 6), 6, "auto", SPEED);
+    expect(holgada.clinicalGainMmPerMv).toBe(10);
+    expect(STRIP_MAX_PX).toBeGreaterThanOrEqual(heightForGain(10));
+
+    const justa = computeLayoutMetrics(heightFor(80, 6), 6, "auto", SPEED);
+    expect(justa.clinicalGainMmPerMv).toBe(5);
+  });
+
+  it("baja escalon a escalon segun se estrecha la tira", () => {
+    const gainAt = (stripPx: number) =>
+      computeLayoutMetrics(heightFor(stripPx, 6), 6, "auto", SPEED).clinicalGainMmPerMv;
+
+    expect(gainAt(1000)).toBe(10); // el tope de tira impide llegar a 20
+    expect(gainAt(90)).toBe(5);
+    expect(gainAt(40)).toBe(2.5);
+  });
+
+  it("nunca baja del escalon mas pequeno, aunque no quepa", () => {
+    // Con doce derivaciones en una ventana diminuta no cabe ni a 2,5mm/mV.
+    // Recortar es preferible a inventar una ganancia que no existe en ningun
+    // equipo: el numero que se lee en pantalla tiene que ser uno real.
+    const metrics = computeLayoutMetrics(12, 12, "auto", SPEED);
+    expect(metrics.clinicalGainMmPerMv).toBe(Math.min(...GAIN_STEPS_MM_PER_MV));
+  });
+
+  it("se declara como automatica", () => {
+    const metrics = computeLayoutMetrics(heightFor(121, 6), 6, "auto", SPEED);
+    expect(metrics.gainIsAuto).toBe(true);
+    // En automatico siempre cabe salvo en el suelo, asi que no hay aviso.
+    expect(metrics.gainFits).toBe(true);
+  });
+});
+
+describe("ganancia manual", () => {
+  it("respeta la que fija el usuario aunque quepa una mayor", () => {
+    const metrics = computeLayoutMetrics(heightFor(140, 3), 3, 2.5, SPEED);
+    expect(metrics.clinicalGainMmPerMv).toBe(2.5);
+    expect(metrics.gainIsAuto).toBe(false);
+  });
+
+  it("avisa cuando la ganancia elegida no cabe, pero la aplica igual", () => {
+    // El usuario manda. Un equipo real tampoco impide subir la ganancia: la
+    // sube y la señal se sale por arriba. Lo que no puede pasar es que se
+    // altere la escala temporal para disimularlo.
+    const metrics = computeLayoutMetrics(heightFor(50, 12), 12, 20, SPEED);
+    expect(metrics.clinicalGainMmPerMv).toBe(20);
+    expect(metrics.gainFits).toBe(false);
+    expect(metrics.pixelsPerSecond).toBeCloseTo(SPEED * PX_PER_MM);
+  });
+
+  it("la ganancia manual no toca la cuadricula", () => {
+    const normal = computeLayoutMetrics(heightFor(121, 6), 6, 10, SPEED);
+    const doble = computeLayoutMetrics(heightFor(121, 6), 6, 20, SPEED);
+    expect(doble.viewportScalePxPerMm).toBeCloseTo(normal.viewportScalePxPerMm);
+    expect(doble.pixelsPerSecond).toBeCloseTo(normal.pixelsPerSecond);
+  });
+});
+
+describe("cadena de escalas", () => {
   it("pixelsPerMillivolt es el producto de los dos eslabones", () => {
-    const metrics = computeLayoutMetrics(heightFor(100, 6), 6, GAIN, SPEED);
+    const metrics = computeLayoutMetrics(heightFor(100, 6), 6, "auto", SPEED);
     expect(metrics.pixelsPerMillivolt).toBeCloseTo(
       metrics.clinicalGainMmPerMv * metrics.viewportScalePxPerMm
     );
   });
 
-  it("el tope de 140px deja la escala vertical justo por debajo de los 96dpi", () => {
-    // La altura de tira que daria exactamente PX_PER_MM es
-    // 2 x margen x ganancia x PX_PER_MM = 151,2px, por encima del tope de 140.
-    // O sea: con el tope actual la escala vertical NUNCA llega del todo a la
-    // suposicion de 96dpi, se queda en 3,5 px/mm. Es una consecuencia real del
-    // tope y no un accidente, asi que conviene que cambiarlo haga saltar esto.
-    const alturaExacta96dpi = 2 * STRIP_MARGIN_MV * GAIN * PX_PER_MM;
-    expect(alturaExacta96dpi).toBeGreaterThan(STRIP_MAX_PX);
-
-    const topeada = computeLayoutMetrics(heightFor(300, 1), 1, GAIN, SPEED);
-    expect(topeada.stripHeightPx).toBe(STRIP_MAX_PX);
-    expect(topeada.viewportScalePxPerMm).toBeCloseTo(
-      STRIP_MAX_PX / (2 * STRIP_MARGIN_MV * GAIN)
-    );
-    expect(topeada.viewportScalePxPerMm).toBeLessThan(PX_PER_MM);
-  });
-
-  it("la senal de 2mV cabe justo en media tira, sin recortar", () => {
-    // Es la propiedad que arreglo I-2 y que ahora debe sobrevivir a cualquier
-    // tamano de ventana: la R de V5 (~1,3mV) nunca toca el borde.
-    for (const stripPx of [46, 70, 140]) {
-      const metrics = computeLayoutMetrics(heightFor(stripPx, 12), 12, GAIN, SPEED);
-      const halfPx = metrics.stripHeightPx / 2;
-      expect(STRIP_MARGIN_MV * metrics.pixelsPerMillivolt).toBeCloseTo(halfPx);
-    }
-  });
-
-  it("el eje horizontal no depende del alto de tira", () => {
-    // Si viewportScale gobernase los dos ejes, comprimir 12 derivaciones daria
-    // ~27 segundos por pantalla: un garabato ilegible.
-    const alta = computeLayoutMetrics(heightFor(140, 3), 3, GAIN, SPEED);
-    const baja = computeLayoutMetrics(heightFor(46, 12), 12, GAIN, SPEED);
-    expect(baja.pixelsPerSecond).toBeCloseTo(alta.pixelsPerSecond);
-    expect(alta.pixelsPerSecond).toBeCloseTo(SPEED * PX_PER_MM);
-  });
-
-  it("una sola derivacion no descuenta huecos", () => {
-    const metrics = computeLayoutMetrics(300, 1, GAIN, SPEED);
-    expect(metrics.stripHeightPx).toBe(STRIP_MAX_PX);
+  it("doblar la ganancia dobla la altura del trazo", () => {
+    const normal = computeLayoutMetrics(heightFor(121, 6), 6, 10, SPEED);
+    const doble = computeLayoutMetrics(heightFor(121, 6), 6, 20, SPEED);
+    expect(doble.pixelsPerMillivolt).toBeCloseTo(normal.pixelsPerMillivolt * 2);
   });
 });

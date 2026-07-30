@@ -6,7 +6,7 @@ import { useLayoutMetrics } from "./useLayoutMetrics";
 function Probe({ leadCount }: { leadCount: number }) {
   const { containerRef, metrics, widthPx } = useLayoutMetrics({
     leadCount,
-    clinicalGainMmPerMv: 10,
+    gain: "auto" as const,
     paperSpeedMmS: 25,
   });
   return (

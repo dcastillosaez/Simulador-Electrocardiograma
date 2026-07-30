@@ -29,7 +29,11 @@ import { useSweepRenderer } from "./hooks/useSweepRenderer";
 import { formatClock, useClock } from "./hooks/useClock";
 import { useExport } from "./hooks/useExport";
 import { leadsForLayout, type LayoutId } from "../render/layout";
-import type { Compression } from "../render/layout-engine";
+import {
+  GAIN_STEPS_MM_PER_MV,
+  type Compression,
+  type GainSetting,
+} from "../render/layout-engine";
 import type { RhythmDetail } from "../types/rhythms";
 import styles from "./ECGWorkspace.module.css";
 
@@ -42,12 +46,33 @@ const DEFAULT_VARIABILITY = {
 const SILENT_NOISE = { emg_v: 0, mains_v: 0, baseline_v: 0, motion_v: 0, clip_v: null };
 const DEFAULT_SAMPLE_RATE_HZ = 500;
 const PAPER_SPEED_MM_S = 25;
-const GAIN_MM_PER_MV = 10;
 
 const THEME_OPTIONS: Array<{ value: ThemeName; label: string }> = [
   { value: "dark", label: "Monitor" },
   { value: "light", label: "Papel" },
 ];
+
+/** El valor viaja como texto porque un `SegmentedControl` es un grupo de
+ * radios y el `value` de un radio siempre es una cadena. Se traduce en el
+ * unico sitio donde se lee. */
+const GAIN_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "auto", label: "Auto" },
+  ...GAIN_STEPS_MM_PER_MV.map((gain) => ({
+    value: String(gain),
+    label: String(gain),
+  })),
+];
+
+function parseGain(value: string): GainSetting {
+  return value === "auto" ? "auto" : Number(value);
+}
+
+const GAIN_HINT =
+  "Ganancia vertical en mm/mV. En automatico se elige la mayor que quepa, " +
+  "igual que en un electrocardiografo. La velocidad del papel no cambia nunca.";
+const GAIN_CLIPPING_HINT =
+  "La ganancia elegida no cabe en el alto de tira disponible: el trazo puede " +
+  "recortarse. Baja la ganancia o muestra menos derivaciones.";
 
 /** El indicador es clínico, no técnico: en pantalla no aparece nunca un
  * "46 px/tira", porque ni el médico ni el alumno saben qué hacer con ese
@@ -83,6 +108,7 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
   const [advancedMode, setAdvancedMode] = useState(false);
   const [layout, setLayout] = useState<LayoutId>("6");
   const [themeName, setThemeName] = useState<ThemeName>("dark");
+  const [gain, setGain] = useState<GainSetting>("auto");
   const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
 
   const leads = useMemo(() => leadsForLayout(layout), [layout]);
@@ -93,7 +119,7 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
 
   const { containerRef, metrics, widthPx } = useLayoutMetrics({
     leadCount: leads.length,
-    clinicalGainMmPerMv: GAIN_MM_PER_MV,
+    gain,
     paperSpeedMmS: PAPER_SPEED_MM_S,
   });
 
@@ -187,6 +213,14 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
             options={THEME_OPTIONS}
             onChange={setThemeName}
           />
+          <Tooltip content={GAIN_HINT}>
+            <SegmentedControl
+              label="Ganancia"
+              value={gain === "auto" ? "auto" : String(gain)}
+              options={GAIN_OPTIONS}
+              onChange={(value) => setGain(parseGain(value))}
+            />
+          </Tooltip>
           {/* "Congelar" y no "Pausa": lo que el usuario quiere no es detener
               un vídeo, es parar el barrido para poder leer el trazado. El
               texto del botón dice lo que hace, no cómo está implementado. */}
@@ -268,6 +302,10 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
               <p role="status">Esperando señal…</p>
             )}
             {isPaused && <p role="status">Trazado congelado</p>}
+            {/* Solo puede pasar con ganancia fijada a mano: en automatico se
+                elige precisamente la que cabe. El usuario manda, pero se le
+                dice lo que va a ver y como arreglarlo. */}
+            {!metrics.gainFits && <p role="status">{GAIN_CLIPPING_HINT}</p>}
             {exportError && <p role="alert">{exportError}</p>}
             <MetricGrid>
               <Metric
@@ -295,7 +333,12 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
         <StatusBar>
           <span>{store.connectionState}</span>
           <span>{sampleRateHz} Hz</span>
-          <span>{GAIN_MM_PER_MV} mm/mV</span>
+          {/* La ganancia efectiva, siempre visible y con su origen: un ECG a
+              media ganancia que no lo declare se lee mal, porque el QRS
+              parece la mitad de alto de lo que es. */}
+          <span>
+            {metrics.clinicalGainMmPerMv} mm/mV{metrics.gainIsAuto ? " (auto)" : ""}
+          </span>
           <span>{PAPER_SPEED_MM_S} mm/s</span>
           <span>Frames perdidos {store.framesLost}</span>
           <Tooltip content={COMPRESSION_HINT}>

@@ -1,4 +1,4 @@
-import { Stepper } from "@ui-system/components/controls/index";
+import { NumberField } from "@ui-system/components/controls/index";
 
 export interface HeartRateControlProps {
   range: { minimum: number; maximum: number };
@@ -13,11 +13,6 @@ export function HeartRateControl({ range, valueHz, onChange }: HeartRateControlP
   const minBpm = Math.round(range.minimum * 60);
   const maxBpm = Math.round(range.maximum * 60);
 
-  const step = (deltaBpm: number) => {
-    const next = clamp(bpm + deltaBpm, minBpm, maxBpm);
-    onChange(next / 60);
-  };
-
   // El motor documenta este contrato por escrito (catalog/definitions.py):
   // los ritmos de frecuencia fija (flutter, TV, FV...) declaran
   // minimum===maximum, y ofrecer un control que no hace nada sería
@@ -25,18 +20,21 @@ export function HeartRateControl({ range, valueHz, onChange }: HeartRateControlP
   const isFixed = minBpm === maxBpm;
 
   return (
-    <Stepper
+    <NumberField
       label="Frecuencia"
-      value={`${bpm} lpm${isFixed ? " (fija)" : ""}`}
+      value={bpm}
+      min={minBpm}
+      max={maxBpm}
+      step={STEP_BPM}
+      unit="lpm"
       decrementLabel="Bajar frecuencia"
       incrementLabel="Subir frecuencia"
-      disabled={isFixed}
-      onDecrement={() => step(-STEP_BPM)}
-      onIncrement={() => step(STEP_BPM)}
+      readOnly={isFixed}
+      readOnlyText={`${bpm} lpm (fija)`}
+      // El campo trabaja en latidos por minuto, que es como se piensa una
+      // frecuencia; el motor en hercios. La conversión vive aquí y no en el
+      // componente genérico, que no sabe de fisiología.
+      onChange={(nextBpm) => onChange(nextBpm / 60)}
     />
   );
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }

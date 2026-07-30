@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { IconButton, Select, SegmentedControl, Slider, Stepper } from "./index";
+import { IconButton, NumberField, Select, SegmentedControl, Slider, Stepper } from "./index";
 
 describe("SegmentedControl", () => {
   const OPTIONS = [
@@ -188,5 +188,108 @@ describe("IconButton", () => {
     render(<IconButton icon="pause" label="Congelar" onClick={onClick} disabled />);
     await userEvent.click(screen.getByRole("button"));
     expect(onClick).not.toHaveBeenCalled();
+  });
+});
+
+describe("NumberField", () => {
+  const base = {
+    label: "Frecuencia",
+    min: 40,
+    max: 180,
+    step: 5,
+    unit: "lpm",
+    decrementLabel: "Bajar frecuencia",
+    incrementLabel: "Subir frecuencia",
+  };
+
+  it("se puede escribir un valor directamente", async () => {
+    const onChange = vi.fn();
+    render(<NumberField {...base} value={70} onChange={onChange} />);
+
+    const field = screen.getByRole("spinbutton", { name: "Frecuencia" });
+    await userEvent.clear(field);
+    await userEvent.type(field, "137");
+    await userEvent.tab();
+
+    expect(onChange).toHaveBeenCalledWith(137);
+  });
+
+  it("acepta cualquier entero del rango, no solo multiplos del paso", async () => {
+    const onChange = vi.fn();
+    render(<NumberField {...base} value={70} onChange={onChange} />);
+
+    const field = screen.getByRole("spinbutton", { name: "Frecuencia" });
+    await userEvent.clear(field);
+    await userEvent.type(field, "73{Enter}");
+
+    expect(onChange).toHaveBeenCalledWith(73);
+  });
+
+  it("no valida a cada tecla, solo al confirmar", async () => {
+    // El error clasico del campo numerico controlado: validando en cada
+    // pulsacion es imposible escribir "120", porque al llegar a "1" el valor
+    // ya se habria corregido al minimo.
+    const onChange = vi.fn();
+    render(<NumberField {...base} value={70} onChange={onChange} />);
+
+    const field = screen.getByRole("spinbutton", { name: "Frecuencia" });
+    await userEvent.clear(field);
+    await userEvent.type(field, "120");
+
+    expect(onChange).not.toHaveBeenCalled();
+    await userEvent.tab();
+    expect(onChange).toHaveBeenCalledWith(120);
+  });
+
+  it("acota al rango lo que se escriba fuera de el", async () => {
+    const onChange = vi.fn();
+    render(<NumberField {...base} value={70} onChange={onChange} />);
+
+    const field = screen.getByRole("spinbutton", { name: "Frecuencia" });
+    await userEvent.clear(field);
+    await userEvent.type(field, "500{Enter}");
+
+    expect(onChange).toHaveBeenCalledWith(180);
+  });
+
+  it("un texto sin numero devuelve el valor vigente", async () => {
+    const onChange = vi.fn();
+    render(<NumberField {...base} value={70} onChange={onChange} />);
+
+    const field = screen.getByRole("spinbutton", { name: "Frecuencia" });
+    await userEvent.clear(field);
+    await userEvent.tab();
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(field).toHaveValue(70);
+  });
+
+  it("los botones mueven de paso en paso", async () => {
+    const onChange = vi.fn();
+    render(<NumberField {...base} value={70} onChange={onChange} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Subir frecuencia" }));
+    expect(onChange).toHaveBeenCalledWith(75);
+  });
+
+  it("los botones se deshabilitan en los extremos del rango", () => {
+    const { rerender } = render(<NumberField {...base} value={40} onChange={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Bajar frecuencia" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Subir frecuencia" })).toBeEnabled();
+
+    rerender(<NumberField {...base} value={180} onChange={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Subir frecuencia" })).toBeDisabled();
+  });
+
+  it("de solo lectura no ofrece campo ni botones", () => {
+    // Los ritmos de frecuencia fija declaran minimum===maximum: ofrecer un
+    // control que no hace nada seria mentirle al usuario.
+    render(
+      <NumberField {...base} value={150} onChange={vi.fn()} readOnly readOnlyText="150 lpm (fija)" />
+    );
+
+    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByText("150 lpm (fija)")).toBeInTheDocument();
   });
 });

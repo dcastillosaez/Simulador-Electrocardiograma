@@ -1,3 +1,4 @@
+export { NumberField, type NumberFieldProps } from "./NumberField";
 export { IconButton, type IconButtonProps } from "./IconButton";
 export {
   SegmentedControl,

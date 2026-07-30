@@ -5,15 +5,44 @@ import { PX_PER_MM } from "./grid-layer";
 export const STRIP_MIN_PX = 52;
 /** A partir de aquí la vista se considera holgada. */
 export const STRIP_COMPACT_PX = 65;
-/** Tope duro: más alto no aporta legibilidad y desperdicia pantalla. */
-export const STRIP_MAX_PX = 140;
+/** Margen vertical que se quiere reservar a cada lado de la línea base, en
+ * milivoltios. Con 2mV la R de V5 (~1,3mV) no toca el borde. Ya no fija la
+ * escala: fija qué ganancia se elige en automático. */
+export const STRIP_MARGIN_MV = 2;
+
+/** Ganancia estándar de un electrocardiógrafo. */
+const STANDARD_GAIN_MM_PER_MV = 10;
+
+/** Tope duro de altura de tira.
+ *
+ * No es un número redondo elegido a ojo: es exactamente lo que ocupa el rango
+ * clínico completo (`STRIP_MARGIN_MV` a cada lado) a ganancia estándar y
+ * escala real. Por encima de eso la tira solo añade papel en blanco.
+ *
+ * El valor anterior, 140px, era arbitrario y tenía una consecuencia que nadie
+ * había mirado: como 10mm/mV necesita 152px, ninguna tira llegaba nunca a la
+ * ganancia estándar. La vista se habría quedado permanentemente en media
+ * ganancia sin que hubiera un motivo clínico para ello. */
+export const STRIP_MAX_PX = Math.ceil(
+  2 * STRIP_MARGIN_MV * STANDARD_GAIN_MM_PER_MV * PX_PER_MM
+);
 /** Hueco entre tiras. Es `--space-1`. */
 export const STRIP_GAP_PX = 4;
 /** Suelo absoluto de seguridad: por debajo el canvas deja de ser dibujable. */
 export const STRIP_FLOOR_PX = 16;
-/** Margen vertical reservado a cada lado de la línea base, en milivoltios. Con
- * 2mV la R de V5 (~1,3mV) nunca toca el borde, que es el arreglo I-2. */
-export const STRIP_MARGIN_MV = 2;
+
+/** Ganancias de un electrocardiógrafo, de mayor a menor.
+ *
+ * Son las del equipo real y no una escala continua a propósito: el número que
+ * aparece en pantalla tiene que ser uno que el alumno vaya a reconocer cuando
+ * se ponga delante de una máquina. 10mm/mV es lo normal; 5 es «media
+ * ganancia», lo que se pone cuando el QRS se sale; 20 es «doble ganancia»,
+ * para complejos de bajo voltaje. */
+export const GAIN_STEPS_MM_PER_MV = [20, 10, 5, 2.5] as const;
+
+/** Ganancia vertical: `"auto"` la decide el reparto de altura, un número la
+ * fija el usuario. */
+export type GainSetting = "auto" | number;
 
 export type Compression = "normal" | "compact" | "very-compact";
 
@@ -23,9 +52,15 @@ export type Compression = "normal" | "compact" | "very-compact";
 export interface LayoutMetrics {
   stripHeightPx: number;
   compression: Compression;
-  /** Fisiología. El tamaño de la ventana no la toca jamás. */
+  /** Ganancia efectiva. En automático, la mayor que cabe. */
   clinicalGainMmPerMv: number;
-  /** Pantalla. Es el único eslabón que se adapta. */
+  /** Si la ha decidido el sistema o la ha fijado el usuario. */
+  gainIsAuto: boolean;
+  /** `false` cuando la ganancia elegida a mano no cabe en la tira y el trazo
+   * se va a recortar. La interfaz lo avisa; no se corrige por detrás. */
+  gainFits: boolean;
+  /** Píxeles por milímetro de papel. **El mismo en los dos ejes**: es lo que
+   * hace que la cuadrícula sea cuadrada y que medir sobre ella sea correcto. */
   viewportScalePxPerMm: number;
   pixelsPerMillivolt: number;
   pixelsPerSecond: number;
@@ -37,18 +72,45 @@ function classify(stripHeightPx: number): Compression {
   return "very-compact";
 }
 
+/** Milivoltios representables a cada lado de la línea base. */
+function halfRangeMv(stripHeightPx: number, gainMmPerMv: number): number {
+  return stripHeightPx / (2 * PX_PER_MM * gainMmPerMv);
+}
+
+/** La mayor ganancia estándar con la que `STRIP_MARGIN_MV` cabe a cada lado.
+ *
+ * Si no cabe ni con la más pequeña se devuelve esa: recortar es preferible a
+ * inventar una ganancia intermedia que no existe en ningún equipo. */
+function autoGain(stripHeightPx: number): number {
+  for (const gain of GAIN_STEPS_MM_PER_MV) {
+    if (halfRangeMv(stripHeightPx, gain) >= STRIP_MARGIN_MV) return gain;
+  }
+  return GAIN_STEPS_MM_PER_MV[GAIN_STEPS_MM_PER_MV.length - 1];
+}
+
 /** Reparte el alto disponible entre `leadCount` derivaciones y deriva de ahí la
  * cadena de escalas mV → mm → px.
  *
- * El tope superior es duro; el inferior no existe como recorte. Un `clamp` con
- * suelo en `STRIP_MIN_PX` desbordaría la ventana con doce derivaciones en un
- * portátil, y el spec descarta tanto el scroll como ocultar derivaciones en
- * silencio: las tiras se comprimen más y `compression` lo declara para que la
- * interfaz avise. Degradación informada, no silenciosa. */
+ * **El milímetro es el milímetro en los dos ejes.** Antes la escala vertical se
+ * estiraba para llenar la tira mientras la horizontal seguía fija en
+ * `PX_PER_MM`, y la rejilla se dibujaba con la vertical: el resultado era una
+ * cuadrícula que mentía en el eje del tiempo —6,25 cuadros grandes por segundo
+ * en vez de 5, un 25% de error al medir un RR sobre el papel—. En algo docente
+ * eso enseña a medir mal, que es peor que no medir.
+ *
+ * Lo que se adapta es la ganancia, exactamente como en un electrocardiógrafo:
+ * si la amplitud no cabe se baja a media ganancia y se declara en pantalla. La
+ * velocidad del papel no se toca jamás.
+ *
+ * El tope superior de tira es duro; el inferior no existe como recorte. Un
+ * `clamp` con suelo en `STRIP_MIN_PX` desbordaría la ventana con doce
+ * derivaciones en un portátil, y el spec descarta tanto el scroll como ocultar
+ * derivaciones en silencio: las tiras se comprimen más y `compression` lo
+ * declara. Degradación informada, no silenciosa. */
 export function computeLayoutMetrics(
   availableHeightPx: number,
   leadCount: number,
-  clinicalGainMmPerMv: number,
+  gain: GainSetting,
   paperSpeedMmS: number
 ): LayoutMetrics {
   const count = Math.max(1, Math.floor(leadCount));
@@ -60,21 +122,20 @@ export function computeLayoutMetrics(
     Math.min(STRIP_MAX_PX, perStripPx)
   );
 
-  // La tira debe cubrir STRIP_MARGIN_MV a cada lado de la línea base, así que
-  // el alto disponible fija cuántos píxeles vale un milímetro. La ganancia
-  // clínica se queda fuera de este despeje: es un dato fisiológico, no una
-  // consecuencia del tamaño de la ventana.
-  const verticalMm = 2 * STRIP_MARGIN_MV * clinicalGainMmPerMv;
-  const viewportScalePxPerMm = stripHeightPx / verticalMm;
+  const gainIsAuto = gain === "auto";
+  const clinicalGainMmPerMv = gainIsAuto ? autoGain(stripHeightPx) : gain;
 
   return {
     stripHeightPx,
     compression: classify(stripHeightPx),
     clinicalGainMmPerMv,
-    viewportScalePxPerMm,
-    pixelsPerMillivolt: clinicalGainMmPerMv * viewportScalePxPerMm,
-    // Horizontal fijo, a propósito. Atarlo también a `viewportScale` daría
-    // ~27 segundos por pantalla en compresión fuerte: ilegible.
+    gainIsAuto,
+    gainFits: halfRangeMv(stripHeightPx, clinicalGainMmPerMv) >= STRIP_MARGIN_MV,
+    // Escala física, idéntica en horizontal y vertical. Que 96dpi sea ficción
+    // en casi cualquier monitor es cierto y asumido; lo que importa aquí es
+    // que las proporciones entre ejes sean las del papel.
+    viewportScalePxPerMm: PX_PER_MM,
+    pixelsPerMillivolt: clinicalGainMmPerMv * PX_PER_MM,
     pixelsPerSecond: paperSpeedMmS * PX_PER_MM,
   };
 }

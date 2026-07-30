@@ -5,8 +5,8 @@ import { getTheme } from "@ui-system/themes/index";
 
 const GAIN = 10;
 const SPEED = 25;
-// 152px de tira dan viewportScale = 3,8 px/mm, que es PX_PER_MM: es el caso de
-// referencia con el que los tests de abajo pueden seguir hablando en mm.
+// La escala fisica ya no depende del alto de tira: un milimetro son PX_PER_MM
+// pixeles siempre, y lo que se adapta a la altura es la ganancia.
 const METRICS = computeLayoutMetrics(152, 1, GAIN, SPEED);
 const THEME = getTheme("dark").ecg;
 
@@ -20,9 +20,18 @@ describe("timeToPx / voltageToPx", () => {
     expect(voltageToPx(0.001, METRICS)).toBeCloseTo(10 * METRICS.viewportScalePxPerMm, 5);
   });
 
-  it("voltageToPx escala con el viewport, no con la fisiologia", () => {
+  it("voltageToPx escala con la ganancia, no con el alto de la tira", () => {
+    // Antes comprimir la ventana encogia el trazo. Ahora no: el milimetro es
+    // el milimetro, y lo que cambia cuando no cabe es la ganancia -- que es
+    // como se comporta un electrocardiografo.
     const comprimida = computeLayoutMetrics(46, 1, GAIN, SPEED);
-    expect(voltageToPx(0.001, comprimida)).toBeLessThan(voltageToPx(0.001, METRICS));
+    expect(voltageToPx(0.001, comprimida)).toBeCloseTo(voltageToPx(0.001, METRICS), 5);
+
+    const mediaGanancia = computeLayoutMetrics(46, 1, GAIN / 2, SPEED);
+    expect(voltageToPx(0.001, mediaGanancia)).toBeCloseTo(
+      voltageToPx(0.001, METRICS) / 2,
+      5
+    );
   });
 });
 
@@ -36,11 +45,26 @@ describe("computeGridLines", () => {
     expect(lines.verticalMajor[1]).toBeCloseTo(5 * METRICS.viewportScalePxPerMm, 5);
   });
 
-  it("el espaciado sigue al viewportScale: comprimir junta las lineas", () => {
-    const comprimida = computeLayoutMetrics(46, 1, GAIN, SPEED);
+  it("el espaciado no cambia al comprimir la ventana", () => {
+    // La cuadricula representa milimetros de papel. Si se estirase o encogiese
+    // con la ventana dejaria de servir para medir, que es justo el defecto que
+    // este cambio corrige.
+    const comprimida = computeLayoutMetrics(46, 1, "auto", SPEED);
     const anchas = computeGridLines(200, 200, METRICS);
     const juntas = computeGridLines(200, 200, comprimida);
-    expect(juntas.verticalMinor.length).toBeGreaterThan(anchas.verticalMinor.length);
+    expect(juntas.verticalMinor.length).toBe(anchas.verticalMinor.length);
+  });
+
+  it("la celda es cuadrada: el mismo espaciado en los dos ejes", () => {
+    const lines = computeGridLines(200, 200, METRICS);
+    expect(lines.verticalMinor[1]).toBeCloseTo(lines.horizontalMinor[1], 5);
+  });
+
+  it("cinco cuadros grandes cubren exactamente un segundo a 25mm/s", () => {
+    // La comprobacion de cabecera: el clinico cuenta cuadros para medir el RR.
+    const lines = computeGridLines(1000, 200, METRICS);
+    const bigSquarePx = lines.verticalMajor[1] - lines.verticalMajor[0];
+    expect(5 * bigSquarePx).toBeCloseTo(METRICS.pixelsPerSecond, 5);
   });
 });
 

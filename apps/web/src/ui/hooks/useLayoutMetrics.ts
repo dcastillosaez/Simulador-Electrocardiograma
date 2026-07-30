@@ -1,5 +1,9 @@
 import { useCallback, useRef, useState } from "react";
-import { computeLayoutMetrics, type LayoutMetrics } from "../../render/layout-engine";
+import {
+  computeLayoutMetrics,
+  type GainSetting,
+  type LayoutMetrics,
+} from "../../render/layout-engine";
 
 /** Tamaño de partida mientras no hay medida real. No es decorativo: en jsdom
  * todo mide cero, y unas métricas de altura cero producirían canvas
@@ -9,7 +13,9 @@ const FALLBACK_HEIGHT_PX = 600;
 
 export interface UseLayoutMetricsParams {
   leadCount: number;
-  clinicalGainMmPerMv: number;
+  /** `"auto"` deja que el reparto de altura elija la ganancia, como haria un
+   * electrocardiografo; un numero la fija. */
+  gain: GainSetting;
   paperSpeedMmS: number;
 }
 
@@ -27,7 +33,7 @@ export interface UseLayoutMetricsResult {
  * tocar el renderer. */
 export function useLayoutMetrics({
   leadCount,
-  clinicalGainMmPerMv,
+  gain,
   paperSpeedMmS,
 }: UseLayoutMetricsParams): UseLayoutMetricsResult {
   const [size, setSize] = useState({
@@ -67,11 +73,6 @@ export function useLayoutMetrics({
   return {
     containerRef,
     widthPx: size.widthPx,
-    metrics: computeLayoutMetrics(
-      size.heightPx,
-      leadCount,
-      clinicalGainMmPerMv,
-      paperSpeedMmS
-    ),
+    metrics: computeLayoutMetrics(size.heightPx, leadCount, gain, paperSpeedMmS),
   };
 }
