@@ -1,3 +1,5 @@
+import { ControlGroup } from "@ui-system/components/surface/index";
+import { Select } from "@ui-system/components/controls/index";
 import { HeartRateControl } from "./HeartRateControl";
 import { NOISE_PRESETS, PRESET_LABELS, matchPreset, type ConcretePresetId, type PresetId } from "./noise-presets";
 import type { NoiseParamsPayload } from "../types/engine-params";
@@ -23,26 +25,25 @@ export function BasicControlPanel(props: BasicControlPanelProps) {
   };
 
   return (
-    <fieldset>
-      <legend>Ritmo</legend>
-      <HeartRateControl
-        range={props.heartRateRange}
-        valueHz={props.heartRateHz}
-        onChange={props.onHeartRateChange}
-      />
-
-      <legend>Calidad de señal</legend>
-      <select
-        aria-label="Calidad de señal"
-        value={currentPreset}
-        onChange={(event) => handlePresetChange(event.target.value as PresetId)}
-      >
-        {(Object.keys(PRESET_LABELS) as PresetId[]).map((id) => (
-          <option key={id} value={id}>
-            {PRESET_LABELS[id]}
-          </option>
-        ))}
-      </select>
-    </fieldset>
+    <>
+      <ControlGroup label="Ritmo">
+        <HeartRateControl
+          range={props.heartRateRange}
+          valueHz={props.heartRateHz}
+          onChange={props.onHeartRateChange}
+        />
+      </ControlGroup>
+      <ControlGroup label="Señal">
+        <Select
+          label="Calidad de señal"
+          value={currentPreset}
+          options={(Object.keys(PRESET_LABELS) as PresetId[]).map((id) => ({
+            value: id,
+            label: PRESET_LABELS[id],
+          }))}
+          onChange={(value) => handlePresetChange(value as PresetId)}
+        />
+      </ControlGroup>
+    </>
   );
 }

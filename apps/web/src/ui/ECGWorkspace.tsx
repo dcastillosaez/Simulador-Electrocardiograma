@@ -1,4 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  AppShell,
+  Badge,
+  Header,
+  Inspector,
+  Metric,
+  MetricGrid,
+  Panel,
+  SectionTitle,
+  SegmentedControl,
+  Sidebar,
+  StatusBar,
+  Tooltip,
+} from "@ui-system";
+import { getTheme, setTheme, type ThemeName } from "@ui-system/themes/index";
 import { SessionRuntime } from "../simulation-runtime/session-runtime";
 import { CatalogClient } from "../simulation-runtime/catalog-client";
 import { useSessionStore } from "../state/session-store";
@@ -6,13 +21,13 @@ import { RhythmSelector } from "./RhythmSelector";
 import { LayoutPicker } from "./LayoutPicker";
 import { BasicControlPanel } from "./BasicControlPanel";
 import { AdvancedControlPanel } from "./AdvancedControlPanel";
-import { leadsForLayout, leadIndex, type LayoutId, type LeadName } from "../render/layout";
-import { drawGrid, PX_PER_MM } from "../render/grid-layer";
-import { computeLayoutMetrics } from "../render/layout-engine";
-import { drawSweepSegment } from "../render/lead-canvas";
-import { SweepBuffer, sweepCapacitySamples } from "../render/sweep-buffer";
+import { EcgDisplay } from "./EcgDisplay";
+import { useLayoutMetrics } from "./hooks/useLayoutMetrics";
+import { useSimulationRuntime } from "./hooks/useSimulationRuntime";
+import { useSweepRenderer } from "./hooks/useSweepRenderer";
+import { leadsForLayout, type LayoutId } from "../render/layout";
+import type { Compression } from "../render/layout-engine";
 import type { RhythmDetail } from "../types/rhythms";
-import { getTheme } from "@ui-system/themes/index";
 
 const DEFAULT_VARIABILITY = {
   respiration_hz: 0.25,
@@ -24,22 +39,27 @@ const SILENT_NOISE = { emg_v: 0, mains_v: 0, baseline_v: 0, motion_v: 0, clip_v:
 const DEFAULT_SAMPLE_RATE_HZ = 500;
 const PAPER_SPEED_MM_S = 25;
 const GAIN_MM_PER_MV = 10;
-const CANVAS_WIDTH_PX = 800;
 
-// V5 es la derivacion con mayor coeficiente de proyeccion del motor
-// (packages/ecg-engine/src/ecg_engine/leads.py, V5 = 1.30): su onda R nominal
-// ya vale ~1.3x R_WAVE_V (~1mV). Con 100px de alto (gain 10mm/mV) el borde
-// del canvas caia en ~1.32mV desde la linea base, así que ruido leve o la
-// propia variabilidad de amplitud bastaban para recortar V4/V5 contra el
-// borde. STRIP_MARGIN_MV fija cuanto margen queda por encima y por debajo de
-// la linea base tras la R mas alta esperada, y de ahí sale el alto real.
-const STRIP_MARGIN_V = 0.002; // 2mV de margen a cada lado de la base
-// Puente temporal: voltageToPx ahora pide LayoutMetrics en vez de una
-// ganancia numerica (Task 5). Aqui aun no hay metricas -- este calculo se
-// hace antes de montar el componente -- asi que se inlinea la misma
-// aritmetica que hacia la funcion vieja hasta que la Task 12 sustituya este
-// alto fijo por el LayoutEngine.
-const STRIP_HEIGHT_PX = Math.ceil(2 * STRIP_MARGIN_V * 1000 * GAIN_MM_PER_MV * PX_PER_MM);
+const THEME_OPTIONS: Array<{ value: ThemeName; label: string }> = [
+  { value: "dark", label: "Monitor" },
+  { value: "light", label: "Papel" },
+];
+
+/** El indicador es clínico, no técnico: en pantalla no aparece nunca un
+ * "46 px/tira", porque ni el médico ni el alumno saben qué hacer con ese
+ * número. La explicación va en el tooltip. */
+const COMPRESSION_LABEL: Record<Compression, string> = {
+  normal: "Normal",
+  compact: "Vista compacta",
+  "very-compact": "Vista muy compacta",
+};
+const COMPRESSION_TONE = {
+  normal: "ok",
+  compact: "warning",
+  "very-compact": "critical",
+} as const;
+const COMPRESSION_HINT =
+  "Altura disponible insuficiente para la representación óptima de 12 derivaciones.";
 
 export interface ECGWorkspaceProps {
   wsUrl: string;
@@ -58,121 +78,34 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
   const [selectedRhythm, setSelectedRhythm] = useState<RhythmDetail | null>(null);
   const [advancedMode, setAdvancedMode] = useState(false);
   const [layout, setLayout] = useState<LayoutId>("6");
-  const [isAwaitingSignal, setIsAwaitingSignal] = useState(false);
+  const [themeName, setThemeName] = useState<ThemeName>("dark");
   const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
-  const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
-  const gridCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const sweepBuffersRef = useRef<Map<LeadName, SweepBuffer>>(new Map());
 
+  const leads = useMemo(() => leadsForLayout(layout), [layout]);
   const sampleRateHz = store.sampleRateHz ?? DEFAULT_SAMPLE_RATE_HZ;
+  const theme = getTheme(themeName);
 
-  // Un anillo de barrido por derivación activa, dimensionado a los segundos
-  // de papel que caben en el ancho del canvas (~8,5s con los valores por
-  // defecto) — NO al buffer de jitter de red, que es dos órdenes de magnitud
-  // menor. Se recrea si cambia el layout o la frecuencia de muestreo.
+  useSimulationRuntime(runtime);
+
+  const { containerRef, metrics, widthPx } = useLayoutMetrics({
+    leadCount: leads.length,
+    clinicalGainMmPerMv: GAIN_MM_PER_MV,
+    paperSpeedMmS: PAPER_SPEED_MM_S,
+  });
+
+  const { registerTrace, registerGrid, isAwaitingSignal } = useSweepRenderer({
+    runtime,
+    leads,
+    sampleRateHz,
+    metrics,
+    widthPx,
+    theme,
+  });
+
+  // El CSS toma su juego de custom properties del atributo del elemento raíz.
   useEffect(() => {
-    const capacity = sweepCapacitySamples(
-      CANVAS_WIDTH_PX,
-      PAPER_SPEED_MM_S * PX_PER_MM,
-      sampleRateHz
-    );
-    const buffers = new Map<LeadName, SweepBuffer>();
-    for (const lead of leadsForLayout(layout)) {
-      buffers.set(lead, new SweepBuffer(capacity));
-    }
-    sweepBuffersRef.current = buffers;
-  }, [layout, sampleRateHz]);
-
-  // Al arrancar una sesión (ritmo nuevo o reinicio con otro session_id) el
-  // eje de tiempo empieza de cero: se vacían los anillos y se limpian los
-  // canvas para no dejar el trazo del ritmo anterior conviviendo en pantalla
-  // con el nuevo.
-  useEffect(() => {
-    const onStarted = () => {
-      for (const sweep of sweepBuffersRef.current.values()) {
-        sweep.reset();
-      }
-      for (const canvas of Object.values(canvasRefs.current)) {
-        const ctx = canvas?.getContext("2d");
-        if (ctx && canvas) ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
-    };
-    runtime.on("started", onStarted);
-    return () => runtime.off("started", onStarted);
-  }, [runtime]);
-
-  useEffect(() => {
-    // `attachRuntime` devuelve `detach`: sin desuscribir en el cleanup,
-    // React StrictMode (monta→limpia→monta el mismo efecto en dev, sin
-    // recrear `runtime`) reataca los mismos listeners sobre la misma
-    // instancia y duplica los eventos — `framesLost` contaría el doble.
-    const detach = useSessionStore.getState().attachRuntime(runtime);
-    runtime.connect();
-    return () => {
-      detach();
-      runtime.disconnect();
-    };
-  }, [runtime]);
-
-  useEffect(() => {
-    let frameId: number;
-    let lastS: number | undefined;
-    const tick = (nowMs: number) => {
-      const nowS = nowMs / 1000;
-      const elapsedS = lastS === undefined ? 0 : nowS - lastS;
-      lastS = nowS;
-
-      runtime.buffer.advance(elapsedS);
-      // Se dibuja lo que advance() haya liberado ESTE tick, aunque el buffer
-      // haya quedado vacío al hacerlo — si no, el último trozo consumido
-      // antes de un underrun se perdería sin llegar a pintarse. Con cero
-      // muestras nuevas, drawSweepSegment no toca el canvas: el trazo se
-      // congela en la última muestra, sin interpolar jamás.
-      //
-      // El hueco (pérdida de red o descarte por overrun) es el mismo para
-      // las doce derivaciones -- viene del mismo trozo multicanal -- así que
-      // se lee una sola vez por tick, no por derivación.
-      const hadGap = runtime.buffer.justConsumedHadGap;
-      for (const lead of leadsForLayout(layout)) {
-        const canvas = canvasRefs.current[lead];
-        const ctx = canvas?.getContext("2d");
-        const sweep = sweepBuffersRef.current.get(lead);
-        if (ctx && canvas && sweep) {
-          const samples = runtime.buffer.consumeNewSamples(leadIndex(lead));
-          drawSweepSegment(
-            ctx,
-            sweep,
-            samples,
-            sampleRateHz,
-            { metrics: computeLayoutMetrics(canvas.height, 1, GAIN_MM_PER_MV, PAPER_SPEED_MM_S), theme: getTheme().ecg },
-            canvas.height,
-            hadGap
-          );
-        }
-      }
-      // "Esperando señal" cubre los dos motivos opuestos de no reproducir:
-      // no queda nada (underrun) o aún no hay reserva suficiente (pre-roll).
-      setIsAwaitingSignal(runtime.buffer.isUnderrun || !runtime.buffer.isPreRolled);
-      frameId = requestAnimationFrame(tick);
-    };
-    frameId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frameId);
-  }, [runtime, layout, sampleRateHz]);
-
-  useEffect(() => {
-    const canvas = gridCanvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!ctx || !canvas) return;
-    // Puente temporal: la Task 12 sustituye este canvas suelto por un canvas
-    // de rejilla dentro de cada LeadStrip, con las metricas del LayoutEngine.
-    const metrics = computeLayoutMetrics(
-      canvas.height,
-      1,
-      GAIN_MM_PER_MV,
-      PAPER_SPEED_MM_S
-    );
-    drawGrid(ctx, canvas.width, canvas.height, metrics, getTheme().ecg);
-  }, [layout]);
+    setTheme(themeName);
+  }, [themeName]);
 
   useEffect(() => {
     if (store.connectionState === "connected" || store.connectionState === "running") {
@@ -190,64 +123,123 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
     });
   };
 
-  const currentParams = store.params ?? (selectedRhythm
-    ? { heart_rate_hz: selectedRhythm.default_parameters.heart_rate_hz, noise: SILENT_NOISE, variability: DEFAULT_VARIABILITY }
-    : null);
+  const currentParams =
+    store.params ??
+    (selectedRhythm
+      ? {
+          heart_rate_hz: selectedRhythm.default_parameters.heart_rate_hz,
+          noise: SILENT_NOISE,
+          variability: DEFAULT_VARIABILITY,
+        }
+      : null);
+
+  const bpm = currentParams ? Math.round(currentParams.heart_rate_hz * 60) : null;
 
   return (
-    <div>
-      <RhythmSelector
-        catalogClient={catalogClient}
-        selectedRhythmId={store.selectedRhythmId}
-        onSelect={handleRhythmSelect}
-      />
-      <LayoutPicker value={layout} onChange={setLayout} />
-
-      {store.lastError && (
-        <p role="alert">
-          {store.lastError.code}: {store.lastError.detail}
-        </p>
-      )}
-      {hasConnectedOnce && store.connectionState === "idle" && (
-        <p role="status">Desconectado</p>
-      )}
-      {isAwaitingSignal && store.connectionState === "running" && (
-        <p role="status">Esperando señal…</p>
-      )}
-
-      {selectedRhythm && currentParams && (
-        advancedMode ? (
-          <AdvancedControlPanel
-            noise={currentParams.noise}
-            onChange={(noise) => runtime.update({ ...currentParams, noise })}
-            onSwitchToBasic={() => setAdvancedMode(false)}
+    <AppShell
+      header={
+        <Header title="Simulador de electrocardiograma">
+          {/* LayoutPicker y no un SegmentedControl inline: el array de opciones
+              vive en un solo sitio y el componente sigue teniendo su test. */}
+          <LayoutPicker value={layout} onChange={setLayout} />
+          <SegmentedControl
+            label="Aspecto"
+            value={themeName}
+            options={THEME_OPTIONS}
+            onChange={setThemeName}
           />
-        ) : (
-          <BasicControlPanel
-            heartRateHz={currentParams.heart_rate_hz}
-            heartRateRange={selectedRhythm.editable_parameters.heart_rate_hz}
-            noise={currentParams.noise}
-            onHeartRateChange={(hz) => runtime.update({ ...currentParams, heart_rate_hz: hz })}
-            onNoiseChange={(noise) => runtime.update({ ...currentParams, noise })}
-            onSwitchToAdvanced={() => setAdvancedMode(true)}
-          />
-        )
-      )}
-
-      <div style={{ position: "relative" }}>
-        <canvas ref={gridCanvasRef} width={800} height={600} style={{ position: "absolute" }} />
-        {leadsForLayout(layout).map((lead) => (
-          <canvas
-            key={lead}
-            data-testid={`lead-canvas-${lead}`}
-            ref={(el) => {
-              canvasRefs.current[lead] = el;
-            }}
-            width={800}
-            height={STRIP_HEIGHT_PX}
-          />
-        ))}
-      </div>
-    </div>
+        </Header>
+      }
+      sidebar={
+        // El Panel va DENTRO del Sidebar y no en su lugar: `Sidebar` es quien
+        // aporta el landmark `complementary` con nombre, y sin el envoltorio
+        // un lector de pantalla pierde la zona entera.
+        <Sidebar>
+          <Panel>
+            <SectionTitle>Paciente</SectionTitle>
+            <RhythmSelector
+              catalogClient={catalogClient}
+              selectedRhythmId={store.selectedRhythmId}
+              onSelect={handleRhythmSelect}
+            />
+            {selectedRhythm && currentParams && (
+              advancedMode ? (
+                <AdvancedControlPanel
+                  noise={currentParams.noise}
+                  onChange={(noise) => runtime.update({ ...currentParams, noise })}
+                  onSwitchToBasic={() => setAdvancedMode(false)}
+                />
+              ) : (
+                <BasicControlPanel
+                  heartRateHz={currentParams.heart_rate_hz}
+                  heartRateRange={selectedRhythm.editable_parameters.heart_rate_hz}
+                  noise={currentParams.noise}
+                  onHeartRateChange={(hz) => runtime.update({ ...currentParams, heart_rate_hz: hz })}
+                  onNoiseChange={(noise) => runtime.update({ ...currentParams, noise })}
+                  onSwitchToAdvanced={() => setAdvancedMode(true)}
+                />
+              )
+            )}
+          </Panel>
+        </Sidebar>
+      }
+      ecg={
+        <EcgDisplay
+          containerRef={containerRef}
+          leads={leads}
+          metrics={metrics}
+          widthPx={widthPx}
+          registerTrace={registerTrace}
+          registerGrid={registerGrid}
+        />
+      }
+      inspector={
+        <Inspector>
+          <Panel>
+            <SectionTitle>Información</SectionTitle>
+            {store.lastError && (
+              <p role="alert">
+                {store.lastError.code}: {store.lastError.detail}
+              </p>
+            )}
+            {hasConnectedOnce && store.connectionState === "idle" && (
+              <p role="status">Desconectado</p>
+            )}
+            {isAwaitingSignal && store.connectionState === "running" && (
+              <p role="status">Esperando señal…</p>
+            )}
+            <MetricGrid>
+              <Metric
+                label="Ritmo"
+                value={selectedRhythm?.display_name ?? ""}
+                unavailable={!selectedRhythm}
+              />
+              <Metric label="FC" value={bpm === null ? "" : String(bpm)} unit="lpm" unavailable={bpm === null} />
+              {/* PR, QRS, QT y RR llegan en la Entrega 2: el motor los calcula
+                  en measurements.py pero la API todavía no los expone. El hueco
+                  se deja visible a propósito. */}
+              <Metric label="PR" value="" unavailable />
+              <Metric label="QRS" value="" unavailable />
+              <Metric label="QT" value="" unavailable />
+              <Metric label="RR" value="" unavailable />
+            </MetricGrid>
+          </Panel>
+        </Inspector>
+      }
+      status={
+        <StatusBar>
+          <span>{store.connectionState}</span>
+          <span>{sampleRateHz} Hz</span>
+          <span>{GAIN_MM_PER_MV} mm/mV</span>
+          <span>{PAPER_SPEED_MM_S} mm/s</span>
+          <span>Frames perdidos {store.framesLost}</span>
+          <Tooltip content={COMPRESSION_HINT}>
+            <Badge tone={COMPRESSION_TONE[metrics.compression]}>
+              {COMPRESSION_LABEL[metrics.compression]}
+            </Badge>
+          </Tooltip>
+        </StatusBar>
+      }
+    />
   );
 }

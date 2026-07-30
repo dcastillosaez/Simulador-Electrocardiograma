@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { computeLayoutMetrics, type LayoutMetrics } from "../../render/layout-engine";
 
 /** Tamaño de partida mientras no hay medida real. No es decorativo: en jsdom
@@ -36,6 +36,16 @@ export function useLayoutMetrics({
   });
   const observer = useRef<ResizeObserver | null>(null);
 
+  // El ciclo de vida del observador vive ENTERO en este callback y no hay un
+  // `useEffect` de desmontaje aparte, aunque lo parezca natural.
+  //
+  // React llama al ref con `null` al desmontar, así que la rama de abajo ya
+  // desconecta. Un `useEffect(() => () => disconnect(), [])` además de esto no
+  // es redundante: es un error. En StrictMode React monta, limpia y vuelve a
+  // montar los efectos sin re-ejecutar los ref callbacks, así que esa limpieza
+  // desconectaría el observador que el ref ya había conectado y nadie volvería
+  // a llamar a `observe()`. El ECG se quedaría congelado en la primera medida
+  // y dejaría de responder a cualquier redimensionado.
   const containerRef = useCallback((element: HTMLElement | null) => {
     observer.current?.disconnect();
     if (!element) {
@@ -53,8 +63,6 @@ export function useLayoutMetrics({
     });
     observer.current.observe(element);
   }, []);
-
-  useEffect(() => () => observer.current?.disconnect(), []);
 
   return {
     containerRef,

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Select } from "@ui-system/components/controls/index";
 import type { CatalogClient } from "../simulation-runtime/catalog-client";
 import type { RhythmDetail, RhythmSummary } from "../types/rhythms";
 
@@ -52,20 +53,16 @@ export function RhythmSelector({
 
   return (
     <>
-      <select
-        aria-label="Seleccionar ritmo"
+      <Select
+        label="Seleccionar ritmo"
         value={selectedRhythmId ?? ""}
-        onChange={(event) => void handleChange(event.target.value)}
-      >
-        <option value="" disabled>
-          Selecciona un ritmo
-        </option>
-        {rhythms.map((rhythm) => (
-          <option key={rhythm.rhythm_id} value={rhythm.rhythm_id}>
-            {rhythm.display_name}
-          </option>
-        ))}
-      </select>
+        placeholder="Selecciona un ritmo"
+        options={rhythms.map((rhythm) => ({
+          value: rhythm.rhythm_id,
+          label: rhythm.display_name,
+        }))}
+        onChange={(rhythmId) => void handleChange(rhythmId)}
+      />
       {selectError && (
         <p role="alert">No se pudo cargar el detalle del ritmo: {selectError}</p>
       )}

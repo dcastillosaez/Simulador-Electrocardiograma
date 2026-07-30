@@ -1,0 +1,26 @@
+/* Reset global mínimo. Vive en la app y no en el ui-system a propósito: un
+   sistema de diseño que impone estilos globales a quien lo importa es una
+   trampa para el siguiente consumidor. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  /* Los 8px de margen que el navegador pone por defecto sumaban 16px al
+     `100dvh` de la shell: la pagina entera ganaba una barra de scroll
+     vertical y el area de ECG quedaba recortada por abajo, que es
+     exactamente lo que el spec descarta. */
+  margin: 0;
+  background: var(--surface-background);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+}

@@ -1,3 +1,5 @@
+import { ControlGroup } from "@ui-system/components/surface/index";
+import { Slider } from "@ui-system/components/controls/index";
 import type { NoiseParamsPayload } from "../types/engine-params";
 import { R_WAVE_V } from "./noise-presets";
 
@@ -30,62 +32,24 @@ export function AdvancedControlPanel({ noise, onChange, onSwitchToBasic }: Advan
   };
 
   return (
-    <fieldset>
-      <legend>Ruido (avanzado)</legend>
-      <NoiseSlider label="EMG" value={noise.emg_v} onChange={(v) => setField("emg_v", v)} />
-      <NoiseSlider
-        label="Interferencia 50Hz"
-        value={noise.mains_v}
-        onChange={(v) => setField("mains_v", v)}
-      />
-      <NoiseSlider
-        label="Línea base"
-        value={noise.baseline_v}
-        onChange={(v) => setField("baseline_v", v)}
-      />
-      <NoiseSlider
-        label="Movimiento"
-        value={noise.motion_v}
-        onChange={(v) => setField("motion_v", v)}
-      />
-      <NoiseSlider
-        label="Saturación"
-        value={noise.clip_v ?? 0}
-        max={CLIP_MAX_V}
-        step={CLIP_STEP_V}
-        // El extremo izquierdo (0) significa "sin saturación" (`clip_v:
-        // null`), no "recortar a amplitud cero" — sin este mapeo, arrastrar
-        // el slider y devolverlo a la izquierda dejaba `clip_v: 0`, que
-        // aplana el trazo entero a una línea recta sin forma de deshacerlo
-        // desde este mismo panel.
-        onChange={(v) => setField("clip_v", v === 0 ? null : v)}
-      />
+    <ControlGroup label="Ruido (avanzado)">
+      <Slider label="EMG" value={noise.emg_v} min={0} max={SLIDER_MAX_V} step={SLIDER_STEP_V}
+        onChange={(v) => setField("emg_v", v)} />
+      <Slider label="Interferencia 50Hz" value={noise.mains_v} min={0} max={SLIDER_MAX_V} step={SLIDER_STEP_V}
+        onChange={(v) => setField("mains_v", v)} />
+      <Slider label="Línea base" value={noise.baseline_v} min={0} max={SLIDER_MAX_V} step={SLIDER_STEP_V}
+        onChange={(v) => setField("baseline_v", v)} />
+      <Slider label="Movimiento" value={noise.motion_v} min={0} max={SLIDER_MAX_V} step={SLIDER_STEP_V}
+        onChange={(v) => setField("motion_v", v)} />
+      {/* El extremo izquierdo (0) significa "sin saturación" (`clip_v: null`),
+          no "recortar a amplitud cero" — sin este mapeo, arrastrar el slider y
+          devolverlo a la izquierda dejaba `clip_v: 0`, que aplana el trazo
+          entero a una línea recta sin forma de deshacerlo desde este panel. */}
+      <Slider label="Saturación" value={noise.clip_v ?? 0} min={0} max={CLIP_MAX_V} step={CLIP_STEP_V}
+        onChange={(v) => setField("clip_v", v === 0 ? null : v)} />
       <button type="button" onClick={onSwitchToBasic}>
         Volver a modo básico
       </button>
-    </fieldset>
-  );
-}
-
-function NoiseSlider(props: {
-  label: string;
-  value: number;
-  max?: number;
-  step?: number;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <label>
-      {props.label}
-      <input
-        aria-label={props.label}
-        type="range"
-        min={0}
-        max={props.max ?? SLIDER_MAX_V}
-        step={props.step ?? SLIDER_STEP_V}
-        value={props.value}
-        onChange={(event) => props.onChange(Number(event.target.value))}
-      />
-    </label>
+    </ControlGroup>
   );
 }

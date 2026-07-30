@@ -1,6 +1,12 @@
+import { SegmentedControl } from "@ui-system/components/controls/index";
 import type { LayoutId } from "../render/layout";
 
-const LAYOUTS: LayoutId[] = ["1", "3", "6", "12"];
+const OPTIONS: Array<{ value: LayoutId; label: string }> = [
+  { value: "1", label: "1" },
+  { value: "3", label: "3" },
+  { value: "6", label: "6" },
+  { value: "12", label: "12" },
+];
 
 export interface LayoutPickerProps {
   value: LayoutId;
@@ -9,19 +15,11 @@ export interface LayoutPickerProps {
 
 export function LayoutPicker({ value, onChange }: LayoutPickerProps) {
   return (
-    <div role="radiogroup" aria-label="Derivaciones visibles">
-      {LAYOUTS.map((layout) => (
-        <label key={layout}>
-          <input
-            type="radio"
-            name="layout"
-            value={layout}
-            checked={value === layout}
-            onChange={() => onChange(layout)}
-          />
-          {layout}
-        </label>
-      ))}
-    </div>
+    <SegmentedControl
+      label="Derivaciones visibles"
+      value={value}
+      options={OPTIONS}
+      onChange={onChange}
+    />
   );
 }

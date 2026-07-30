@@ -1,3 +1,5 @@
+import { Stepper } from "@ui-system/components/controls/index";
+
 export interface HeartRateControlProps {
   range: { minimum: number; maximum: number };
   valueHz: number;
@@ -23,25 +25,15 @@ export function HeartRateControl({ range, valueHz, onChange }: HeartRateControlP
   const isFixed = minBpm === maxBpm;
 
   return (
-    <div>
-      <button
-        type="button"
-        aria-label="Bajar frecuencia"
-        disabled={isFixed}
-        onClick={() => step(-STEP_BPM)}
-      >
-        −5
-      </button>
-      <span aria-live="polite">{bpm} lpm{isFixed ? " (fija)" : ""}</span>
-      <button
-        type="button"
-        aria-label="Subir frecuencia"
-        disabled={isFixed}
-        onClick={() => step(STEP_BPM)}
-      >
-        +5
-      </button>
-    </div>
+    <Stepper
+      label="Frecuencia"
+      value={`${bpm} lpm${isFixed ? " (fija)" : ""}`}
+      decrementLabel="Bajar frecuencia"
+      incrementLabel="Subir frecuencia"
+      disabled={isFixed}
+      onDecrement={() => step(-STEP_BPM)}
+      onIncrement={() => step(STEP_BPM)}
+    />
   );
 }
 
