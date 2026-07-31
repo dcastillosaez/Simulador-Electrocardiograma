@@ -8,7 +8,18 @@ Proyecto independiente dentro de `F:/Documentos/IA/Medicina/`, sin relación con
 
 **Alcance de análisis:** únicamente el contenido de `F:/Documentos/IA/Medicina/Simulador_Electrocardiograma/`.
 
-**Estado actual:** fase 1 implementada. El paquete `packages/ecg-engine/` genera los doce ritmos del MVP en las doce derivaciones, de forma determinista, con 401 tests y una red de golden signals en tres niveles. Faltan la API y el frontend (planes B y C, sin escribir).
+**Estado actual:** fase 1 implementada de extremo a extremo. `packages/ecg-engine/` genera los doce ritmos del MVP en las doce derivaciones, de forma determinista, con red de golden signals en tres niveles. `apps/api/` los sirve por WebSocket (frames binarios a 10Hz) y publica las medidas fisiológicas (FC, RR, PR, QRS, QT, QTc) en JSON a 1Hz. `apps/web/` es el puesto de simulación clínica, con su propio sistema de diseño en `packages/ui-system/`.
+
+## Cómo arrancar
+
+```bash
+arrancar.bat
+```
+
+Levanta Postgres en Docker (abriendo Docker Desktop si hace falta), aplica migraciones, arranca API y frontend en ventanas separadas y abre el navegador. `parar.bat` detiene el contenedor de Postgres, que es lo único que queda en segundo plano al cerrar las ventanas.
+
+- Frontend: `http://localhost:5600` — el 5173 por defecto de Vite cae en un rango que Windows reserva para sí en la máquina de desarrollo, así que `vite.config.ts` fija otro puerto.
+- API: `http://localhost:8000`
 
 Para ver lo que produce el motor sin montar nada más:
 
