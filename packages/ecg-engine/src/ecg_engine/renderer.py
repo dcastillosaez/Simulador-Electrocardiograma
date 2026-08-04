@@ -19,7 +19,7 @@ from typing import Sequence
 import numpy as np
 
 from .beat import get_template
-from .leads import DEFAULT_PROJECTION_SET, LeadProjectionSet
+from .leads import LeadProjectionSet
 from .overlays import MorphologyOverlay
 from .types import (
     N_LEADS,

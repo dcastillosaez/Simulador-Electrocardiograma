@@ -1,10 +1,14 @@
 import numpy as np
 import pytest
 
-from ecg_engine.leads import NORMAL_AXIS_PROJECTION
+from ecg_engine.leads import (
+    DEFAULT_PROJECTION_SET,
+    NORMAL_AXIS_PROJECTION,
+    LeadProjectionSet,
+    projection_from_mapping,
+)
 from ecg_engine.overlays import ST_ELEVATION_INFERIOR
 from ecg_engine.renderer import (
-    DEFAULT_PROJECTION_SET,
     RENDER_MARGIN_S,
     render_events,
     time_grid,
@@ -149,9 +153,6 @@ def test_output_is_always_float64_and_twelve_leads(grid):
     signal = render_events([qrs_at(1.0)], grid, DEFAULT_PROJECTION_SET)
     assert signal.dtype == np.float64
     assert signal.shape[0] == N_LEADS
-
-
-from ecg_engine.leads import DEFAULT_PROJECTION_SET, LeadProjectionSet, projection_from_mapping
 
 
 def test_ventricular_waves_use_their_own_projection(grid):
