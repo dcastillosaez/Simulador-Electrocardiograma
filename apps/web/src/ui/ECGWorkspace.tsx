@@ -350,7 +350,10 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
                 label="Eje"
                 value={
                   currentParams
-                    ? `${Math.round(currentParams.axis.orientation_deg)}° ${ZONE_LABEL[zoneFor(currentParams.axis.orientation_deg)]}`
+                    ? (() => {
+                        const deg = Math.round(currentParams.axis.orientation_deg);
+                        return `${deg}° ${ZONE_LABEL[zoneFor(deg)]}`;
+                      })()
                     : ""
                 }
                 unavailable={!currentParams}

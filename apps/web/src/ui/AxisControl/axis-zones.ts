@@ -1,4 +1,4 @@
-// Espejo de `zone_for`/`AxisZone` del motor (packages/ecg-engine/leads.py).
+// Espejo de `zone_for`/`AxisZone` del motor (packages/ecg-engine/src/ecg_engine/leads.py).
 // Se mantiene a mano con el test de contrato de al lado, igual que la cabecera
 // binaria de 40 bytes es espejo de frames.py. Existe para que el disco pueda
 // colorear la zona mientras el usuario arrastra, sin ida y vuelta al servidor.
