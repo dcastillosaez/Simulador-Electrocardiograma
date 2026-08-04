@@ -10,6 +10,7 @@ la ley de Einthoven (I + III = II) y la progresión de la onda R de V1 a V5.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Mapping
 
@@ -99,6 +100,73 @@ ATRIAL_PROJECTION: LeadProjection = projection_from_mapping(
         "V6": 0.30,
     }
 )
+
+# --- Proyección paramétrica en el plano frontal ---------------------------
+#
+# Las tablas de arriba no son doce numeros a mano: sus derivaciones de
+# miembros son M·cos(ref − angulo_derivacion), y aVR/aVL/aVF salen de las
+# relaciones de Goldberger. Esta seccion generaliza esa construccion a
+# cualquier angulo, de modo que projection_for_axis(50°) reproduce la tabla.
+
+_LEAD_II_DEG: float = 60.0
+"""Ángulo de la derivación II en el plano frontal. Es el eje sobre el que se
+normalizó la tabla histórica: por eso II vale 1,000 exacto en la referencia."""
+
+_QRS_REFERENCE_DEG: float = 50.0
+_P_REFERENCE_DEG: float = 53.4
+
+_QRS_MAGNITUDE: float = 1.0 / math.cos(math.radians(_QRS_REFERENCE_DEG - _LEAD_II_DEG))
+"""Módulo del vector QRS: 1/cos(50°−60°) = 1.01543. Constante. Lo que rota al
+mover el eje es la dirección del vector, no su tamaño; renormalizar en cada
+ángulo haría que II valiese siempre 1,000 —físicamente falso— y explotaría a
+150°, donde cos(II) es cero."""
+
+_P_MAGNITUDE: float = 1.0 / math.cos(math.radians(_P_REFERENCE_DEG - _LEAD_II_DEG))
+"""Módulo del vector P: 1/cos(53.4°−60°) = 1.00667. Distinto del del QRS: con
+una sola magnitud compartida, el II de la proyección auricular saldría 1,009
+en vez del 1,000 de la tabla."""
+
+_LIMB_ANGLE_DEG: dict[str, float] = {"I": 0.0, "II": 60.0, "III": 120.0}
+"""Ángulos de las tres derivaciones bipolares. Las aumentadas no están aquí:
+se derivan de estas por Goldberger, no por coseno directo sobre su angulo."""
+
+QRS_PRECORDIAL: dict[str, float] = {
+    "V1": -0.45, "V2": -0.15, "V3": 0.55, "V4": 1.15, "V5": 1.30, "V6": 0.95,
+}
+"""Precordiales del QRS. El eje frontal no las gobierna: V1–V6 estan en el
+plano horizontal y dependen de la rotacion horaria, un giro distinto. ST y T
+comparten estas mismas precordiales, como hoy al compartir traza con el QRS."""
+
+ATRIAL_PRECORDIAL: dict[str, float] = {
+    "V1": 0.40, "V2": 0.50, "V3": 0.45, "V4": 0.40, "V5": 0.35, "V6": 0.30,
+}
+"""Precordiales de la P."""
+
+
+def projection_for_axis(
+    angle_deg: float, magnitude: float, precordial: Mapping[str, float]
+) -> LeadProjection:
+    """Proyección de doce derivaciones para un eje frontal dado.
+
+    Las seis derivaciones de miembros salen de `angle_deg` y `magnitude`; las
+    seis precordiales son las de `precordial`, que el eje frontal no toca.
+    """
+    a = math.radians(angle_deg)
+    i = magnitude * math.cos(a - math.radians(_LIMB_ANGLE_DEG["I"]))
+    ii = magnitude * math.cos(a - math.radians(_LIMB_ANGLE_DEG["II"]))
+    iii = magnitude * math.cos(a - math.radians(_LIMB_ANGLE_DEG["III"]))
+    mapping = dict(precordial)
+    mapping.update(
+        {
+            "I": i,
+            "II": ii,
+            "III": iii,
+            "aVR": -(i + ii) / 2.0,
+            "aVL": (i - iii) / 2.0,
+            "aVF": (ii + iii) / 2.0,
+        }
+    )
+    return projection_from_mapping(mapping)
 
 
 def project(trace_v: np.ndarray, projection: LeadProjection) -> np.ndarray:
