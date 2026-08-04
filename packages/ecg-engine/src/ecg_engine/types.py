@@ -106,12 +106,35 @@ class VariabilityParams:
 
 
 @dataclass(frozen=True, slots=True)
+class AxisParams:
+    """Orientación eléctrica del corazón en el plano frontal.
+
+    `orientation_deg` es la orientación anatómica: al moverla rotan las cuatro
+    ondas juntas. Los desfases dan a cada onda su eje propio —un hemibloqueo
+    mueve solo el QRS, la isquemia solo el ST— sin desincronizar nada, porque
+    el eje efectivo de cada onda es `orientation_deg + su desfase` y no hay
+    estado duplicado.
+
+    `orientation_deg` no es un parámetro del ECG sino fisiológico: lo consumen
+    el motor de señal, el vector del panel y el corazón 3D de la fase D, que lo
+    leerá como su giro en el plano frontal.
+    """
+
+    orientation_deg: float = 50.0
+    p_offset_deg: float = 3.4
+    qrs_offset_deg: float = 0.0
+    st_offset_deg: float = 0.0
+    t_offset_deg: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
 class EngineParams:
     """Parámetros que el motor acepta en caliente."""
 
     heart_rate_hz: float = 70 / 60
     noise: NoiseParams = field(default_factory=NoiseParams)
     variability: VariabilityParams = field(default_factory=VariabilityParams)
+    axis: AxisParams = field(default_factory=AxisParams)
 
 
 @runtime_checkable

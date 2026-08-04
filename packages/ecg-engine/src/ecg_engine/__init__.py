@@ -15,6 +15,7 @@ from .measurements import Measurements, measure, qtc_bazett_s
 from .types import (
     DEFAULT_SAMPLE_RATE_HZ,
     LEAD_ORDER,
+    AxisParams,
     EngineParams,
     NoiseParams,
     VariabilityParams,
@@ -25,6 +26,7 @@ __version__ = "1.0.0"
 __all__ = [
     "DEFAULT_SAMPLE_RATE_HZ",
     "LEAD_ORDER",
+    "AxisParams",
     "EcgEngine",
     "EngineParams",
     "Measurements",

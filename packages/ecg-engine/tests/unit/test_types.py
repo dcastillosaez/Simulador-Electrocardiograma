@@ -66,3 +66,31 @@ def test_engine_params_defaults_are_physiological():
     assert params.heart_rate_hz == pytest.approx(70 / 60)
     assert params.noise == NoiseParams()
     assert params.noise.emg_v == 0.0
+
+
+def test_axis_params_defaults_reproduce_the_historical_orientation():
+    from ecg_engine import AxisParams
+
+    axis = AxisParams()
+    assert axis.orientation_deg == 50.0
+    assert axis.p_offset_deg == 3.4
+    assert axis.qrs_offset_deg == 0.0
+    assert axis.st_offset_deg == 0.0
+    assert axis.t_offset_deg == 0.0
+
+
+def test_engine_params_carry_a_default_axis():
+    from ecg_engine import AxisParams
+
+    assert EngineParams().axis == AxisParams()
+
+
+def test_axis_params_are_frozen():
+    from ecg_engine import AxisParams
+
+    axis = AxisParams()
+    try:
+        axis.orientation_deg = 0.0  # type: ignore[misc]
+    except dataclasses.FrozenInstanceError:
+        return
+    raise AssertionError("AxisParams debería ser inmutable")
