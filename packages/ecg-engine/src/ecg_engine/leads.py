@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from enum import Enum
 from typing import Mapping
 
 import numpy as np
@@ -175,3 +176,33 @@ def project(trace_v: np.ndarray, projection: LeadProjection) -> np.ndarray:
     if trace.ndim != 1:
         raise ValueError(f"se esperaba una traza 1-D, recibida {trace.ndim}-D")
     return projection.as_column() * trace[np.newaxis, :]
+
+
+class AxisZone(str, Enum):
+    """Interpretación clínica de un eje frontal. Helper derivado del ángulo,
+    nunca un dato almacenado: guardarlo crearía dos fuentes de verdad."""
+
+    NORMAL = "normal"
+    LEFT = "left"
+    RIGHT = "right"
+    EXTREME = "extreme"
+
+
+def _normalize_deg(deg: float) -> float:
+    """Lleva un ángulo cualquiera a (−180, +180]."""
+    d = (deg + 180.0) % 360.0 - 180.0
+    return 180.0 if d == -180.0 else d
+
+
+def zone_for(deg: float) -> AxisZone:
+    """Zona clínica del eje. Normaliza primero: con orientación en +180 y
+    offset en +90 el eje efectivo sale a +270, un ángulo válido que sin
+    normalizar caería fuera de los cuatro intervalos."""
+    a = _normalize_deg(deg)
+    if -30.0 <= a <= 90.0:
+        return AxisZone.NORMAL
+    if -90.0 <= a < -30.0:
+        return AxisZone.LEFT
+    if 90.0 < a <= 180.0:
+        return AxisZone.RIGHT
+    return AxisZone.EXTREME  # −180 < a < −90

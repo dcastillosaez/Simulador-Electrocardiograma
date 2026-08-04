@@ -6,12 +6,14 @@ from ecg_engine.leads import (
     ATRIAL_PROJECTION,
     NORMAL_AXIS_PROJECTION,
     QRS_PRECORDIAL,
+    AxisZone,
     LeadProjection,
     _P_MAGNITUDE,
     _QRS_MAGNITUDE,
     project,
     projection_for_axis,
     projection_from_mapping,
+    zone_for,
 )
 from ecg_engine.types import LEAD_ORDER, N_LEADS
 
@@ -158,3 +160,23 @@ def test_right_axis_deviation_signature():
     p = projection_for_axis(120.0, _QRS_MAGNITUDE, QRS_PRECORDIAL)
     assert _limb(p, "I") < 0.0
     assert _limb(p, "aVF") > 0.0
+
+
+def test_zone_boundaries_are_testable_one_by_one():
+    assert zone_for(-30.0) is AxisZone.NORMAL
+    assert zone_for(-31.0) is AxisZone.LEFT
+    assert zone_for(90.0) is AxisZone.NORMAL
+    assert zone_for(91.0) is AxisZone.RIGHT
+    assert zone_for(-90.0) is AxisZone.LEFT
+    assert zone_for(-91.0) is AxisZone.EXTREME
+    assert zone_for(180.0) is AxisZone.RIGHT
+
+
+def test_zone_for_normalizes_before_classifying():
+    # +270° es el mismo eje que −90°: un QRS con orientación +180 y offset +90.
+    assert zone_for(270.0) is zone_for(-90.0)
+
+
+def test_zones_cover_the_whole_circle_without_gaps():
+    for deg in range(-180, 181):
+        assert isinstance(zone_for(float(deg)), AxisZone)
