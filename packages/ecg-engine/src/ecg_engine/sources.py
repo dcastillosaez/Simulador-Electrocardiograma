@@ -19,9 +19,9 @@ from typing import Protocol, Sequence
 import numpy as np
 
 from .conduction import ConductionPolicy
+from .leads import DEFAULT_PROJECTION_SET
 from .overlays import MorphologyOverlay
 from .renderer import (
-    DEFAULT_PROJECTIONS,
     RENDER_MARGIN_S,
     render_events,
     time_grid,
@@ -95,7 +95,7 @@ class BeatBasedSource:
         return render_events(
             events,
             t_s,
-            DEFAULT_PROJECTIONS,
+            DEFAULT_PROJECTION_SET,
             overlays=self._overlays,
             variability=self._variability,
         )

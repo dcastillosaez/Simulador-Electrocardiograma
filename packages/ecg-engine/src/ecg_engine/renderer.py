@@ -14,18 +14,20 @@ señal base → overlays → variabilidad. El ruido lo aplica el orquestador.
 
 from __future__ import annotations
 
-from typing import Mapping, Sequence
+from typing import Sequence
 
 import numpy as np
 
 from .beat import get_template
-from .leads import ATRIAL_PROJECTION, NORMAL_AXIS_PROJECTION, LeadProjection
+from .leads import DEFAULT_PROJECTION_SET, LeadProjectionSet
 from .overlays import MorphologyOverlay
 from .types import (
     N_LEADS,
     CardiacEvent,
     EventKind,
+    GaussianComponent,
     VariabilityParams,
+    WaveTarget,
 )
 from .variability import amplitude_scale
 from .waveform import render_component
@@ -38,11 +40,6 @@ un latido anterior a la ventana sigue contribuyendo dentro de ella. Quien
 llama a `render_events` debe pasar los eventos de `[t0 - margen, t1 + margen)`,
 o aparecerán discontinuidades en las fronteras de chunk.
 """
-
-DEFAULT_PROJECTIONS: dict[EventKind, LeadProjection] = {
-    EventKind.ATRIAL: ATRIAL_PROJECTION,
-    EventKind.VENTRICULAR: NORMAL_AXIS_PROJECTION,
-}
 
 
 def time_grid(start_index: int, n_samples: int, sample_rate_hz: int) -> np.ndarray:
@@ -61,18 +58,21 @@ def time_grid(start_index: int, n_samples: int, sample_rate_hz: int) -> np.ndarr
     return (start_index + np.arange(n_samples, dtype=np.float64)) / float(sample_rate_hz)
 
 
-def _trace_for_event(t_s: np.ndarray, event: CardiacEvent) -> np.ndarray:
-    template = get_template(event.template_id)
+def _trace_for_components(
+    t_s: np.ndarray,
+    components: Sequence[GaussianComponent],
+    offset_s: float,
+) -> np.ndarray:
     trace = np.zeros_like(t_s)
-    for component in template.components:
-        trace += render_component(t_s, component, offset_s=event.t_s)
+    for component in components:
+        trace += render_component(t_s, component, offset_s=offset_s)
     return trace
 
 
 def render_events(
     events: Sequence[CardiacEvent],
     t_s: np.ndarray,
-    projections: Mapping[EventKind, LeadProjection],
+    projections: LeadProjectionSet,
     overlays: Sequence[MorphologyOverlay] = (),
     variability: VariabilityParams | None = None,
 ) -> np.ndarray:
@@ -80,8 +80,26 @@ def render_events(
     signal = np.zeros((N_LEADS, t_s.size), dtype=np.float64)
 
     for event in events:
-        trace = _trace_for_event(t_s, event)
-        signal += projections[event.kind].as_column() * trace[np.newaxis, :]
+        template = get_template(event.template_id)
+        if event.kind is EventKind.ATRIAL:
+            # Las plantillas auriculares contienen solo componentes P, así que
+            # el evento se proyecta entero con el eje de la P.
+            trace = _trace_for_components(t_s, template.components, event.t_s)
+            signal += projections.p.as_column() * trace[np.newaxis, :]
+            continue
+        # El evento ventricular se parte por onda: QRS, ST y T pueden tener
+        # cada uno su propio eje. Con desfases a cero, los tres se proyectan
+        # con coeficientes idénticos y la suma es la misma señal de siempre.
+        for target, projection in (
+            (WaveTarget.QRS, projections.qrs),
+            (WaveTarget.ST, projections.st),
+            (WaveTarget.T, projections.t),
+        ):
+            components = template.components_for(target)
+            if not components:
+                continue
+            trace = _trace_for_components(t_s, components, event.t_s)
+            signal += projection.as_column() * trace[np.newaxis, :]
 
     # Los overlays modifican morfología ventricular. No tocan la aurícula, y
     # por construcción no pueden crear ni mover eventos.
