@@ -78,7 +78,14 @@ const RHYTHM_SUMMARY = {
 const RHYTHM_DETAIL = {
   ...RHYTHM_SUMMARY,
   default_parameters: { heart_rate_hz: 1.1667 },
-  editable_parameters: { heart_rate_hz: { minimum: 1.0, maximum: 1.6667, default: 1.1667 } },
+  editable_parameters: {
+    heart_rate_hz: { minimum: 1.0, maximum: 1.6667, default: 1.1667 },
+    orientation_deg: { minimum: -180, maximum: 180, default: 50 },
+    p_offset_deg: { minimum: -45, maximum: 45, default: 3.4 },
+    qrs_offset_deg: { minimum: -90, maximum: 90, default: 0 },
+    st_offset_deg: { minimum: -180, maximum: 180, default: 0 },
+    t_offset_deg: { minimum: -180, maximum: 180, default: 0 },
+  },
   clinical_description: "...",
   references: [],
   allowed_overlays: [],
@@ -345,5 +352,24 @@ describe("ECGWorkspace", () => {
     });
 
     expect(leadIICtx.clearRect.mock.calls.length).toBeGreaterThan(clearCallsAfterFirstStart);
+  });
+
+  it("muestra el control del eje y su métrica cuando hay un ritmo activo", async () => {
+    stubRhythmFetch();
+    render(
+      <ECGWorkspace
+        wsUrl="ws://test"
+        apiBaseUrl="http://api.test"
+        webSocketFactory={() => fakeSocket as unknown as WebSocket}
+      />
+    );
+    await waitFor(() => screen.getByText("Sinusal normal"));
+    act(() => fakeSocket.dispatch("open", {}));
+    await userEvent.selectOptions(screen.getByLabelText("Seleccionar ritmo"), "sinus_normal");
+
+    await waitFor(() =>
+      expect(screen.getByRole("slider", { name: /eje eléctrico/i })).toBeInTheDocument()
+    );
+    expect(screen.getByText("Eje")).toBeInTheDocument();
   });
 });

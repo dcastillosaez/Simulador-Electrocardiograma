@@ -25,7 +25,14 @@ const RHYTHM_SUMMARY = {
 const RHYTHM_DETAIL = {
   ...RHYTHM_SUMMARY,
   default_parameters: { heart_rate_hz: 1.1667 },
-  editable_parameters: { heart_rate_hz: { minimum: 1.0, maximum: 1.6667, default: 1.1667 } },
+  editable_parameters: {
+    heart_rate_hz: { minimum: 1.0, maximum: 1.6667, default: 1.1667 },
+    orientation_deg: { minimum: -180, maximum: 180, default: 50 },
+    p_offset_deg: { minimum: -45, maximum: 45, default: 3.4 },
+    qrs_offset_deg: { minimum: -90, maximum: 90, default: 0 },
+    st_offset_deg: { minimum: -180, maximum: 180, default: 0 },
+    t_offset_deg: { minimum: -180, maximum: 180, default: 0 },
+  },
   clinical_description: "...",
   references: [],
   allowed_overlays: [],

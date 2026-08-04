@@ -22,6 +22,8 @@ import { RhythmSelector } from "./RhythmSelector";
 import { LayoutPicker } from "./LayoutPicker";
 import { BasicControlPanel } from "./BasicControlPanel";
 import { AdvancedControlPanel } from "./AdvancedControlPanel";
+import { AxisControl } from "./AxisControl";
+import { zoneFor, ZONE_LABEL } from "./AxisControl/axis-zones";
 import { EcgDisplay } from "./EcgDisplay";
 import { useLayoutMetrics } from "./hooks/useLayoutMetrics";
 import { useSimulationRuntime } from "./hooks/useSimulationRuntime";
@@ -284,6 +286,23 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
                 />
               )
             )}
+            {selectedRhythm && currentParams && (
+              <>
+                <SectionTitle>Eje eléctrico</SectionTitle>
+                <AxisControl
+                  valueDeg={currentParams.axis.orientation_deg}
+                  min={selectedRhythm.editable_parameters.orientation_deg.minimum}
+                  max={selectedRhythm.editable_parameters.orientation_deg.maximum}
+                  referenceDeg={selectedRhythm.editable_parameters.orientation_deg.default}
+                  onChange={(orientation_deg) =>
+                    runtime.update({
+                      ...currentParams,
+                      axis: { ...currentParams.axis, orientation_deg },
+                    })
+                  }
+                />
+              </>
+            )}
           </Panel>
         </Sidebar>
       }
@@ -327,6 +346,15 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
                 unavailable={!selectedRhythm}
               />
               <Metric label="FC" value={bpm === null ? "" : String(bpm)} unit="lpm" unavailable={bpm === null} />
+              <Metric
+                label="Eje"
+                value={
+                  currentParams
+                    ? `${Math.round(currentParams.axis.orientation_deg)}° ${ZONE_LABEL[zoneFor(currentParams.axis.orientation_deg)]}`
+                    : ""
+                }
+                unavailable={!currentParams}
+              />
               {/* Los intervalos los mide el servidor sobre la señal realmente
                   generada, no sobre los valores nominales del ritmo: son los
                   del trazado que se está viendo. */}
