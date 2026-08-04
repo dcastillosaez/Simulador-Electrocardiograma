@@ -115,3 +115,26 @@ def test_server_message_builders_produce_the_documented_shape():
         ]
         == 1.0
     )
+
+
+def test_axis_round_trips_through_engine_params():
+    payload = EngineParamsPayload.model_validate(
+        {
+            "heart_rate_hz": 70 / 60,
+            "axis": {"orientation_deg": -30.0, "qrs_offset_deg": 15.0},
+        }
+    )
+    engine = payload.to_engine_params()
+    assert engine.axis.orientation_deg == -30.0
+    assert engine.axis.qrs_offset_deg == 15.0
+    # p_offset_deg no venía en el payload: cae al default de diseño.
+    assert engine.axis.p_offset_deg == 3.4
+
+    dumped = engine_params_to_dict(engine)
+    assert dumped["axis"]["orientation_deg"] == -30.0
+    assert dumped["axis"]["qrs_offset_deg"] == 15.0
+
+
+def test_axis_is_optional_and_defaults_to_the_reference_orientation():
+    payload = EngineParamsPayload.model_validate({"heart_rate_hz": 1.0})
+    assert payload.to_engine_params().axis.orientation_deg == 50.0

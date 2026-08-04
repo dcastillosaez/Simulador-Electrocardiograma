@@ -41,7 +41,7 @@ from typing import Literal, Union
 
 from pydantic import Field, ValidationError
 
-from ecg_engine import EngineParams, NoiseParams, VariabilityParams
+from ecg_engine import AxisParams, EngineParams, NoiseParams, VariabilityParams
 
 
 class NoiseParamsPayload(BaseModel):
@@ -59,18 +59,28 @@ class VariabilityParamsPayload(BaseModel):
     rr_jitter_fraction: float = 0.015
 
 
+class AxisParamsPayload(BaseModel):
+    orientation_deg: float = 50.0
+    p_offset_deg: float = 3.4
+    qrs_offset_deg: float = 0.0
+    st_offset_deg: float = 0.0
+    t_offset_deg: float = 0.0
+
+
 class EngineParamsPayload(BaseModel):
     heart_rate_hz: float
     noise: NoiseParamsPayload = Field(default_factory=NoiseParamsPayload)
     variability: VariabilityParamsPayload = Field(
         default_factory=VariabilityParamsPayload
     )
+    axis: AxisParamsPayload = Field(default_factory=AxisParamsPayload)
 
     def to_engine_params(self) -> EngineParams:
         return EngineParams(
             heart_rate_hz=self.heart_rate_hz,
             noise=NoiseParams(**self.noise.model_dump()),
             variability=VariabilityParams(**self.variability.model_dump()),
+            axis=AxisParams(**self.axis.model_dump()),
         )
 
 
@@ -83,6 +93,7 @@ def engine_params_to_dict(params: EngineParams) -> dict:
         "heart_rate_hz": params.heart_rate_hz,
         "noise": asdict(params.noise),
         "variability": asdict(params.variability),
+        "axis": asdict(params.axis),
     }
 
 
