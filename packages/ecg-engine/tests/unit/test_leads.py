@@ -114,8 +114,8 @@ def test_augmented_leads_follow_their_definitions():
 
 def test_projection_for_axis_reproduces_the_normal_qrs_table():
     # La tabla histórica está redondeada a tres decimales y aVR/aVL/aVF se
-    # escribieron desde esos valores ya redondeados: media unidad del ultimo
-    # decimal es la mejor reproduccion posible, no 1e-9.
+    # escribieron desde esos valores ya redondeados: media unidad del último
+    # decimal es la mejor reproducción posible, no 1e-9.
     computed = projection_for_axis(50.0, _QRS_MAGNITUDE, QRS_PRECORDIAL)
     np.testing.assert_allclose(
         computed.coefficients, NORMAL_AXIS_PROJECTION.coefficients, atol=5e-4
@@ -135,7 +135,7 @@ def _limb(projection, lead):
 
 
 def test_einthoven_is_a_theorem_over_the_whole_range():
-    # I + III = II para cualquier angulo: identidad trigonometrica, no tres
+    # I + III = II para cualquier ángulo: identidad trigonométrica, no tres
     # casos sueltos.
     for deg in range(-180, 181):
         p = projection_for_axis(float(deg), _QRS_MAGNITUDE, QRS_PRECORDIAL)

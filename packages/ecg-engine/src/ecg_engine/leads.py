@@ -103,10 +103,10 @@ ATRIAL_PROJECTION: LeadProjection = projection_from_mapping(
 
 # --- Proyección paramétrica en el plano frontal ---------------------------
 #
-# Las tablas de arriba no son doce numeros a mano: sus derivaciones de
-# miembros son M·cos(ref − angulo_derivacion), y aVR/aVL/aVF salen de las
-# relaciones de Goldberger. Esta seccion generaliza esa construccion a
-# cualquier angulo, de modo que projection_for_axis(50°) reproduce la tabla.
+# Las tablas de arriba no son doce números a mano: sus derivaciones de
+# miembros son M·cos(ref − ángulo_derivación), y aVR/aVL/aVF salen de las
+# relaciones de Goldberger. Esta sección generaliza esa construcción a
+# cualquier ángulo, de modo que projection_for_axis(50°) reproduce la tabla.
 
 _LEAD_II_DEG: float = 60.0
 """Ángulo de la derivación II en el plano frontal. Es el eje sobre el que se
@@ -122,19 +122,19 @@ mover el eje es la dirección del vector, no su tamaño; renormalizar en cada
 150°, donde cos(II) es cero."""
 
 _P_MAGNITUDE: float = 1.0 / math.cos(math.radians(_P_REFERENCE_DEG - _LEAD_II_DEG))
-"""Módulo del vector P: 1/cos(53.4°−60°) = 1.00667. Distinto del del QRS: con
+"""Módulo del vector P: 1/cos(53.4°−60°) = 1.00667. Distinto del módulo del QRS: con
 una sola magnitud compartida, el II de la proyección auricular saldría 1,009
 en vez del 1,000 de la tabla."""
 
 _LIMB_ANGLE_DEG: dict[str, float] = {"I": 0.0, "II": 60.0, "III": 120.0}
 """Ángulos de las tres derivaciones bipolares. Las aumentadas no están aquí:
-se derivan de estas por Goldberger, no por coseno directo sobre su angulo."""
+se derivan de estas por Goldberger, no por coseno directo sobre su ángulo."""
 
 QRS_PRECORDIAL: dict[str, float] = {
     "V1": -0.45, "V2": -0.15, "V3": 0.55, "V4": 1.15, "V5": 1.30, "V6": 0.95,
 }
-"""Precordiales del QRS. El eje frontal no las gobierna: V1–V6 estan en el
-plano horizontal y dependen de la rotacion horaria, un giro distinto. ST y T
+"""Precordiales del QRS. El eje frontal no las gobierna: V1–V6 están en el
+plano horizontal y dependen de la rotación horaria, un giro distinto. ST y T
 comparten estas mismas precordiales, como hoy al compartir traza con el QRS."""
 
 ATRIAL_PRECORDIAL: dict[str, float] = {
