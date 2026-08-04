@@ -220,9 +220,33 @@ class LeadProjectionSet:
     t: LeadProjection
 
 
+DEFAULT_PROJECTION_SET: LeadProjectionSet = LeadProjectionSet(
+    p=ATRIAL_PROJECTION,
+    qrs=NORMAL_AXIS_PROJECTION,
+    st=NORMAL_AXIS_PROJECTION,
+    t=NORMAL_AXIS_PROJECTION,
+)
+"""Conjunto por defecto: las tablas históricas literales, clínicamente
+validadas y las que fijan los golden signals. La orientación de referencia
+usa estas tablas bit a bit; solo un eje desviado se calcula por trigonometría
+(ver projection_set_for_axis). Así el eje eléctrico no obliga a regenerar
+ningún golden."""
+
+
+_REFERENCE_AXIS: AxisParams = AxisParams()
+
+
 def projection_set_for_axis(axis: AxisParams) -> LeadProjectionSet:
     """Construye las cuatro proyecciones desde el eje. El eje efectivo de cada
-    onda es `orientation_deg + su desfase`."""
+    onda es `orientation_deg + su desfase`.
+
+    En la orientación de referencia se devuelven las tablas históricas
+    literales, bit a bit: son las validadas y las que fijan los golden
+    signals, y `projection_for_axis` solo las reproduce dentro de la
+    tolerancia del redondeo. Cualquier desviación del eje sí se calcula por
+    trigonometría."""
+    if axis == _REFERENCE_AXIS:
+        return DEFAULT_PROJECTION_SET
     return LeadProjectionSet(
         p=projection_for_axis(
             axis.orientation_deg + axis.p_offset_deg, _P_MAGNITUDE, ATRIAL_PRECORDIAL
@@ -237,8 +261,3 @@ def projection_set_for_axis(axis: AxisParams) -> LeadProjectionSet:
             axis.orientation_deg + axis.t_offset_deg, _QRS_MAGNITUDE, QRS_PRECORDIAL
         ),
     )
-
-
-DEFAULT_PROJECTION_SET: LeadProjectionSet = projection_set_for_axis(AxisParams())
-"""Conjunto por defecto: reproduce las tablas históricas. Es lo que usa una
-fuente hasta que el motor le fija un eje."""

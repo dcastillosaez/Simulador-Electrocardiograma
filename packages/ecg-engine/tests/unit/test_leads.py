@@ -205,6 +205,19 @@ def test_st_and_t_share_the_qrs_projection_at_zero_offset():
 
 
 def test_a_qrs_offset_moves_only_the_qrs_projection():
-    s = projection_set_for_axis(AxisParams(qrs_offset_deg=30.0))
-    assert s.qrs.coefficients != s.t.coefficients  # solo el QRS rotó
-    assert s.t.coefficients == DEFAULT_PROJECTION_SET.t.coefficients
+    # Dos ejes desviados que solo difieren en el desfase del QRS: la T no se
+    # mueve. Se parte de una orientación distinta de la de referencia para que
+    # ambos conjuntos se calculen por trigonometría y la comparación no cruce
+    # la costura tabla-literal / cálculo.
+    base = projection_set_for_axis(AxisParams(orientation_deg=40.0))
+    moved = projection_set_for_axis(AxisParams(orientation_deg=40.0, qrs_offset_deg=30.0))
+    assert moved.qrs.coefficients != base.qrs.coefficients  # el QRS rotó
+    assert moved.t.coefficients == base.t.coefficients       # la T no
+
+
+def test_reference_axis_uses_the_literal_validated_tables():
+    # La orientación de referencia devuelve las tablas históricas literales,
+    # bit a bit, para no romper los golden signals.
+    s = projection_set_for_axis(AxisParams())
+    assert s.qrs.coefficients == NORMAL_AXIS_PROJECTION.coefficients
+    assert s.p.coefficients == ATRIAL_PROJECTION.coefficients
