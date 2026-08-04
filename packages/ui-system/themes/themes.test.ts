@@ -14,6 +14,7 @@ function allColorStrings(theme: Theme): string[] {
   walk(theme.ecg);
   walk(theme.panel);
   walk(theme.inspector);
+  walk(theme.axis);
   walk(theme.text);
   walk(theme.surface);
   return out;
@@ -57,5 +58,14 @@ describe("temas", () => {
   it("getTheme sin argumento devuelve el tema activo", () => {
     setTheme("light");
     expect(getTheme().name).toBe("light");
+  });
+
+  it("cada tema declara los cuatro roles de zona del eje", () => {
+    for (const name of ["dark", "light"] as const) {
+      const axis = getTheme(name).axis;
+      for (const role of ["normal", "left", "right", "extreme"] as const) {
+        expect(axis[role]).toMatch(/^#[0-9A-Fa-f]{6}$/);
+      }
+    }
   });
 });

@@ -40,6 +40,10 @@
   --inspector-ok: #32D583;
   --inspector-warning: #FBBF24;
   --inspector-critical: #EF4444;
+  --axis-normal: #2E7D5B;
+  --axis-left: #3B6EA5;
+  --axis-right: #B7791F;
+  --axis-extreme: #7A2E2E;
   --text-primary: #F4F5F7;
   --text-muted: #B6BDC8;
   --surface-background: #111315;
@@ -58,6 +62,10 @@
   --inspector-ok: #32D583;
   --inspector-warning: #FBBF24;
   --inspector-critical: #EF4444;
+  --axis-normal: #2E7D5B;
+  --axis-left: #3B6EA5;
+  --axis-right: #B7791F;
+  --axis-extreme: #7A2E2E;
   --text-primary: #111315;
   --text-muted: #2E3440;
   --surface-background: #FFFFFF;

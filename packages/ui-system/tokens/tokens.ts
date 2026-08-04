@@ -34,6 +34,13 @@ export const palette = {
   paperGridDim: "#F4C6C6",
   paperGridBright: "#E08080",
   paperInk: "#000000",
+
+  // Zonas del eje eléctrico: verde tenue en normal, azul en desviación
+  // izquierda, ámbar en derecha, rojo oscuro en eje extremo.
+  axisNormal: "#2E7D5B",
+  axisLeft: "#3B6EA5",
+  axisRight: "#B7791F",
+  axisExtreme: "#7A2E2E",
 } as const;
 
 export const space = {

@@ -18,6 +18,7 @@ export interface Theme {
   ecg: EcgTheme;
   panel: { background: string; border: string; hover: string };
   inspector: { ok: string; warning: string; critical: string };
+  axis: { normal: string; left: string; right: string; extreme: string };
   text: { primary: string; muted: string };
   surface: { background: string };
 }

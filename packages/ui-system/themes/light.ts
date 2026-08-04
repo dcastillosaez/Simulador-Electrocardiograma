@@ -25,6 +25,12 @@ export const lightTheme: Theme = {
     warning: palette.signalWarning,
     critical: palette.signalError,
   },
+  axis: {
+    normal: palette.axisNormal,
+    left: palette.axisLeft,
+    right: palette.axisRight,
+    extreme: palette.axisExtreme,
+  },
   text: {
     primary: palette.ink900,
     muted: palette.ink700,
