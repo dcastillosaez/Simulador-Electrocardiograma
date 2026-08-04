@@ -56,4 +56,24 @@ describe("AxisControl", () => {
     setup(-60);
     expect(screen.getByText(/desviación izquierda/i)).toBeInTheDocument();
   });
+
+  it("Home redondea además de recortar (referencia no entera)", () => {
+    const onChange = vi.fn();
+    render(
+      <AxisControl valueDeg={20} min={-180} max={180} referenceDeg={50.4} onChange={onChange} />
+    );
+    fireEvent.keyDown(screen.getByRole("slider"), { key: "Home" });
+    expect(onChange).toHaveBeenLastCalledWith(50);
+  });
+
+  it("la zona del aria-valuetext concuerda con el ángulo redondeado", () => {
+    render(
+      <AxisControl valueDeg={90.4} min={-180} max={180} referenceDeg={50} onChange={() => {}} />
+    );
+    const slider = screen.getByRole("slider");
+    expect(slider).toHaveAttribute("aria-valuenow", "90");
+    // zoneFor(90) es "normal"; sin el arreglo, zoneFor(90.4) daría "right".
+    expect(slider.getAttribute("aria-valuetext")).toMatch(/90°/);
+    expect(slider.getAttribute("aria-valuetext")).toMatch(/normal/i);
+  });
 });

@@ -25,7 +25,7 @@ function clamp(value: number, min: number, max: number): number {
 export function AxisControl({ valueDeg, min, max, referenceDeg, onChange }: AxisControlProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const rounded = Math.round(valueDeg);
-  const zone = zoneFor(valueDeg);
+  const zone = zoneFor(rounded);
 
   const emit = useCallback(
     (next: number) => onChange(clamp(Math.round(next), min, max)),
@@ -47,7 +47,7 @@ export function AxisControl({ valueDeg, min, max, referenceDeg, onChange }: Axis
           break;
         case "Home":
           event.preventDefault();
-          onChange(clamp(referenceDeg, min, max));
+          emit(referenceDeg);
           break;
         default:
           break;
