@@ -83,7 +83,7 @@ describe("SessionRuntime", () => {
     const runtime = new SessionRuntime("ws://test", () => fake as unknown as WebSocket);
     runtime.connect();
 
-    runtime.start("sinus_normal", { heart_rate_hz: 70 / 60, noise: { emg_v: 0, mains_v: 0, baseline_v: 0, motion_v: 0, clip_v: null }, variability: { respiration_hz: 0.25, rsa_fraction: 0.04, amplitude_fraction: 0.03, rr_jitter_fraction: 0.015 } }, 123);
+    runtime.start("sinus_normal", { heart_rate_hz: 70 / 60, noise: { emg_v: 0, mains_v: 0, baseline_v: 0, motion_v: 0, clip_v: null }, variability: { respiration_hz: 0.25, rsa_fraction: 0.04, amplitude_fraction: 0.03, rr_jitter_fraction: 0.015 }, axis: { orientation_deg: 50, p_offset_deg: 3.4, qrs_offset_deg: 0, st_offset_deg: 0, t_offset_deg: 0 } }, 123);
 
     expect(fake.lastSentMessage()).toMatchObject({
       type: "start",

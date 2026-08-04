@@ -49,6 +49,13 @@ const DEFAULT_VARIABILITY = {
   rr_jitter_fraction: 0.015,
 };
 const SILENT_NOISE = { emg_v: 0, mains_v: 0, baseline_v: 0, motion_v: 0, clip_v: null };
+const DEFAULT_AXIS = {
+  orientation_deg: 50,
+  p_offset_deg: 3.4,
+  qrs_offset_deg: 0,
+  st_offset_deg: 0,
+  t_offset_deg: 0,
+};
 const DEFAULT_SAMPLE_RATE_HZ = 500;
 const PAPER_SPEED_MM_S = 25;
 
@@ -176,6 +183,7 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
       heart_rate_hz: detail.default_parameters.heart_rate_hz,
       noise: SILENT_NOISE,
       variability: DEFAULT_VARIABILITY,
+      axis: DEFAULT_AXIS,
     });
   };
 
@@ -186,6 +194,7 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
           heart_rate_hz: selectedRhythm.default_parameters.heart_rate_hz,
           noise: SILENT_NOISE,
           variability: DEFAULT_VARIABILITY,
+          axis: DEFAULT_AXIS,
         }
       : null);
 
