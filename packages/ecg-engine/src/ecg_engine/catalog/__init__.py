@@ -2,14 +2,30 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from .definitions import (
+    AXIS_PARAMETER_RANGES,
     DEFINITIONS,
     ParameterRange,
     RhythmCategory,
     RhythmDefinition,
 )
 
-_BY_ID: dict[str, RhythmDefinition] = {d.rhythm_id: d for d in DEFINITIONS}
+
+def _with_axis(definition: RhythmDefinition) -> RhythmDefinition:
+    """Añade los rangos del eje a `editable_parameters` sin tocar las doce
+    definiciones a mano. Punto único de fusión: el catálogo entero pasa por
+    aquí, así que ningún ritmo puede quedarse sin los ejes."""
+    return replace(
+        definition,
+        editable_parameters={**definition.editable_parameters, **AXIS_PARAMETER_RANGES},
+    )
+
+
+_ALL: tuple[RhythmDefinition, ...] = tuple(_with_axis(d) for d in DEFINITIONS)
+
+_BY_ID: dict[str, RhythmDefinition] = {d.rhythm_id: d for d in _ALL}
 
 RHYTHM_IDS: tuple[str, ...] = tuple(_BY_ID)
 
@@ -24,7 +40,7 @@ __all__ = [
 
 
 def list_rhythms() -> tuple[RhythmDefinition, ...]:
-    return DEFINITIONS
+    return _ALL
 
 
 def get_rhythm(rhythm_id: str) -> RhythmDefinition:

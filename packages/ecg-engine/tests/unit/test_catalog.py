@@ -282,6 +282,27 @@ def test_fibrillation_waves_are_smaller_than_flutter_waves():
     assert abs(f_wave.amplitude_v) < abs(flutter_wave.amplitude_v) / 2
 
 
+def test_every_rhythm_exposes_the_axis_ranges():
+    for definition in list_rhythms():
+        editable = definition.editable_parameters
+        for name in (
+            "orientation_deg",
+            "p_offset_deg",
+            "qrs_offset_deg",
+            "st_offset_deg",
+            "t_offset_deg",
+        ):
+            assert name in editable, f"{definition.rhythm_id} sin {name}"
+
+
+def test_axis_ranges_match_the_design_limits():
+    editable = get_rhythm("sinus_normal").editable_parameters
+    assert (editable["orientation_deg"].minimum, editable["orientation_deg"].maximum) == (-180.0, 180.0)
+    assert (editable["qrs_offset_deg"].minimum, editable["qrs_offset_deg"].maximum) == (-90.0, 90.0)
+    assert (editable["p_offset_deg"].minimum, editable["p_offset_deg"].maximum) == (-45.0, 45.0)
+    assert editable["orientation_deg"].default == 50.0
+
+
 def test_no_rhythm_specific_branching_in_the_engine():
     """Principio arquitectónico 3: cero casos especiales por ritmo.
 

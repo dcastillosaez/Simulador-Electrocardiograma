@@ -19,14 +19,14 @@ from typing import Protocol, Sequence
 import numpy as np
 
 from .conduction import ConductionPolicy
-from .leads import DEFAULT_PROJECTION_SET
+from .leads import DEFAULT_PROJECTION_SET, LeadProjectionSet, projection_set_for_axis
 from .overlays import MorphologyOverlay
 from .renderer import (
     RENDER_MARGIN_S,
     render_events,
     time_grid,
 )
-from .types import N_LEADS, CardiacEvent, EventKind, VariabilityParams
+from .types import N_LEADS, AxisParams, CardiacEvent, EventKind, VariabilityParams
 
 
 class _Train(Protocol):
@@ -53,6 +53,7 @@ class BeatBasedSource:
         self._overlays = tuple(overlays)
         self._variability = variability
         self._rng = rng if rng is not None else np.random.default_rng(0)
+        self._projection_set: LeadProjectionSet = DEFAULT_PROJECTION_SET
 
     def set_rate_hz(self, rate_hz: float) -> None:
         """Propaga la frecuencia a quien la gobierne en este ritmo.
@@ -66,6 +67,12 @@ class BeatBasedSource:
         setter = getattr(self._conduction, "set_rate_hz", None)
         if setter is not None:
             setter(rate_hz)
+
+    def set_axis(self, axis: AxisParams) -> None:
+        """Recalcula el conjunto de proyecciones al cambiar el eje eléctrico.
+        Espejo de `set_rate_hz`: el motor lo llama cuando el usuario mueve el
+        eje, y el conjunto se guarda para no recomputarlo en cada trozo."""
+        self._projection_set = projection_set_for_axis(axis)
 
     def events(self, t0_s: float, t1_s: float) -> list[CardiacEvent]:
         atrial = list(self._atrial.events(t0_s, t1_s))
@@ -95,7 +102,7 @@ class BeatBasedSource:
         return render_events(
             events,
             t_s,
-            DEFAULT_PROJECTION_SET,
+            self._projection_set,
             overlays=self._overlays,
             variability=self._variability,
         )
@@ -144,6 +151,10 @@ class VentricularFibrillationSource:
 
     def set_rate_hz(self, rate_hz: float) -> None:
         """La FV no tiene frecuencia cardíaca. El control no aplica."""
+        return None
+
+    def set_axis(self, axis: AxisParams) -> None:
+        """La FV es señal caótica sin dipolo proyectable. El eje no aplica."""
         return None
 
     def render(

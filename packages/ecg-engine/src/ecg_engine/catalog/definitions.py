@@ -251,6 +251,20 @@ def _fixed(rate_hz: float) -> ParameterRange:
     return ParameterRange(minimum=rate_hz, maximum=rate_hz, default=rate_hz)
 
 
+AXIS_PARAMETER_RANGES: Mapping[str, ParameterRange] = {
+    "orientation_deg": ParameterRange(-180.0, 180.0, 50.0),
+    "p_offset_deg": ParameterRange(-45.0, 45.0, 3.4),
+    "qrs_offset_deg": ParameterRange(-90.0, 90.0, 0.0),
+    "st_offset_deg": ParameterRange(-180.0, 180.0, 0.0),
+    "t_offset_deg": ParameterRange(-180.0, 180.0, 0.0),
+}
+"""Rangos del eje, compartidos por los doce ritmos. Una sola definición: doce
+copias serían doce sitios donde desincronizar. Se fusionan en cada ritmo desde
+`catalog/__init__.py`. No son un límite del motor —sabe calcular cualquier
+ángulo— sino la declaración de qué considera el sistema fisiológicamente
+razonable, y viajan al cliente por la API."""
+
+
 DEFINITIONS: tuple[RhythmDefinition, ...] = (
     RhythmDefinition(
         rhythm_id="sinus_normal",

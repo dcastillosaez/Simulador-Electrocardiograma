@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from ecg_engine import EcgEngine, EngineParams, NoiseParams
-from ecg_engine.types import N_LEADS
+from ecg_engine import AxisParams, EcgEngine, EngineParams, NoiseParams
+from ecg_engine.types import LEAD_ORDER, N_LEADS
 
 
 def engine(rhythm_id: str = "sinus_normal", seed: int = 20260725) -> EcgEngine:
@@ -147,3 +147,33 @@ def test_every_catalog_rhythm_drives_the_engine(rhythm_id):
     signal = EcgEngine(rhythm_id=rhythm_id, seed=7).generate(2500)
     assert signal.shape == (N_LEADS, 2500)
     assert np.isfinite(signal).all()
+
+
+def _first_beat_signal(axis):
+    engine = EcgEngine(
+        rhythm_id="sinus_normal",
+        seed=20260803,
+        params=EngineParams(heart_rate_hz=70 / 60, axis=axis),
+    )
+    return engine.generate(1000)  # 2 s a 500 Hz
+
+
+def test_rotating_the_axis_changes_limb_leads_not_precordials():
+    baseline = _first_beat_signal(AxisParams())
+    rotated = _first_beat_signal(AxisParams(orientation_deg=90.0))
+    lead_i = LEAD_ORDER.index("I")
+    v3 = LEAD_ORDER.index("V3")
+    # I cae a casi cero con el eje a +90° (perpendicular a I).
+    assert np.abs(rotated[lead_i]).max() < np.abs(baseline[lead_i]).max()
+    # Las precordiales no se inmutan: el eje frontal no las gobierna.
+    np.testing.assert_allclose(rotated[v3], baseline[v3], atol=1e-9)
+
+
+def test_clamped_axis_respects_the_catalog_ranges():
+    engine = EcgEngine(
+        rhythm_id="sinus_normal",
+        seed=1,
+        params=EngineParams(axis=AxisParams(qrs_offset_deg=200.0)),
+    )
+    # qrs_offset_deg tiene rango ±90: 200 se recorta a 90.
+    assert engine.params.axis.qrs_offset_deg == 90.0

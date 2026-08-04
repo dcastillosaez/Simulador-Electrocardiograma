@@ -14,7 +14,7 @@ import numpy as np
 from .catalog import get_rhythm
 from .noise import apply_noise
 from .renderer import time_grid
-from .types import DEFAULT_SAMPLE_RATE_HZ, EngineParams, SignalSource
+from .types import DEFAULT_SAMPLE_RATE_HZ, AxisParams, EngineParams, SignalSource
 
 
 class EcgEngine:
@@ -46,19 +46,29 @@ class EcgEngine:
         """Cada fuente recibe su propio generador, derivado de la semilla."""
         source = self._definition.build_source(np.random.default_rng(self._seed))
         source.set_rate_hz(self._params.heart_rate_hz)
+        source.set_axis(self._params.axis)
         self._noise_rng = np.random.default_rng(self._seed + 1)
         return source
 
     def _clamped(self, params: EngineParams) -> EngineParams:
-        """Recorta la frecuencia al rango clínico declarado por el ritmo."""
-        rate_range = self._definition.editable_parameters["heart_rate_hz"]
-        clamped_hz = rate_range.clamp(params.heart_rate_hz)
-        if clamped_hz == params.heart_rate_hz:
+        """Recorta frecuencia y eje a los rangos clínicos que declara el ritmo."""
+        editable = self._definition.editable_parameters
+        clamped_hz = editable["heart_rate_hz"].clamp(params.heart_rate_hz)
+        axis = params.axis
+        clamped_axis = AxisParams(
+            orientation_deg=editable["orientation_deg"].clamp(axis.orientation_deg),
+            p_offset_deg=editable["p_offset_deg"].clamp(axis.p_offset_deg),
+            qrs_offset_deg=editable["qrs_offset_deg"].clamp(axis.qrs_offset_deg),
+            st_offset_deg=editable["st_offset_deg"].clamp(axis.st_offset_deg),
+            t_offset_deg=editable["t_offset_deg"].clamp(axis.t_offset_deg),
+        )
+        if clamped_hz == params.heart_rate_hz and clamped_axis == axis:
             return params
         return EngineParams(
             heart_rate_hz=clamped_hz,
             noise=params.noise,
             variability=params.variability,
+            axis=clamped_axis,
         )
 
     # --- propiedades -------------------------------------------------------
@@ -99,6 +109,7 @@ class EcgEngine:
         """Aplica parámetros nuevos sin reiniciar la simulación."""
         self._params = self._clamped(params)
         self._source.set_rate_hz(self._params.heart_rate_hz)
+        self._source.set_axis(self._params.axis)
 
     def reset(self) -> None:
         """Devuelve el reloj al origen y reinicia los flujos aleatorios.
