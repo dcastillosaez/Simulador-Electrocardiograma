@@ -128,7 +128,7 @@ Con los desfases de ST y T en cero, los tres grupos ventriculares se proyectan c
 
 Además, el componente ST tiene amplitud `0.00000` en las tres plantillas base: es isoeléctrico, y la elevación del STEMI viene de los overlays, que ya se aplican por su propio `lead_mask()` al margen del sistema de proyección. Hoy el grupo del ST aporta exactamente cero.
 
-Los golden signals comparan con `np.testing.assert_allclose` y tolerancia, no bit a bit, así que pasan sin regenerarse. Regenerar goldens para acomodar una refactorización es precisamente lo que los goldens existen para impedir.
+Los golden signals comparan con `np.testing.assert_allclose` a tolerancia `1e-12` —efectivamente bit a bit—, así que una refactorización solo pasa si reproduce la señal con esa exactitud. La reasociación de punto flotante de arriba (1e-19 V) cabe de sobra dentro de esa tolerancia. Lo que no cabe es sustituir la proyección de producción por la calculada: `projection_for_axis(50°)` reproduce la tabla histórica solo dentro del redondeo (~3e-4), no bit a bit. Por eso la **orientación de referencia usa las tablas literales validadas** —`projection_set_for_axis` devuelve `DEFAULT_PROJECTION_SET`, las tablas históricas, cuando el eje es el de referencia— y solo un eje desviado se calcula por trigonometría. Así los goldens pasan sin regenerarse, que es precisamente lo que existen para garantizar.
 
 ## 6. Precordiales
 
@@ -176,7 +176,8 @@ El inspector gana además una métrica con el eje y su zona, que es donde un cl�
 | Fronteras de `zone_for` | Los cuatro límites, por ambos lados |
 | Normalización de `zone_for` | +270° clasifica igual que −90° |
 | Cobertura sin huecos de las zonas | Barrido de −180 a +180: ninguna devuelve `None` |
-| Los goldens siguen pasando | Suite existente, sin regenerar |
+| Los goldens siguen pasando | Suite existente (tolerancia `1e-12`, bit a bit), sin regenerar. La orientación de referencia usa las tablas literales; solo los ejes desviados se calculan |
+| La referencia usa las tablas literales | `projection_set_for_axis(AxisParams())` reproduce `NORMAL_AXIS_PROJECTION`/`ATRIAL_PROJECTION` bit a bit |
 | Espejo TS de las zonas | Test de contrato contra los mismos límites |
 | Accesibilidad del disco | Rol, valores ARIA, navegación por flechas |
 

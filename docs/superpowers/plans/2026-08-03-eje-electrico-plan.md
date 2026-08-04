@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **Regresión cero.** Los golden signals comparan con `np.testing.assert_allclose` y tolerancia, nunca bit a bit. Deben pasar **sin regenerarse**. Regenerar un golden para acomodar esta refactorización es un fallo del plan.
+- **Regresión cero.** Los golden signals comparan con `np.testing.assert_allclose` a tolerancia `1e-12` (efectivamente bit a bit). Deben pasar **sin regenerarse**. Para lograrlo, la orientación de referencia (el `AxisParams` por defecto) usa las tablas históricas literales —`projection_set_for_axis` hace short-circuit a `DEFAULT_PROJECTION_SET`—, y solo un eje desviado se calcula por trigonometría; `projection_for_axis(50°)` reproduce la tabla solo dentro del redondeo (~3e-4), no bit a bit. Regenerar un golden para acomodar esta refactorización es un fallo del plan.
 - **Solo derivaciones de miembros.** El eje frontal gobierna I, II, III, aVR, aVL, aVF y **nada más**. V1–V6 conservan sus tablas actuales (`QRS_PRECORDIAL`, `ATRIAL_PRECORDIAL`).
 - **aVR/aVL/aVF por Goldberger, sin amplificar.** `aVR = −(I+II)/2`, `aVL = (I−III)/2`, `aVF = (II+III)/2`. No se aplica el factor √3/2.
 - **Dos magnitudes constantes**, una por familia de onda: `1/cos(50°−60°) = 1.01543` para QRS/ST/T y `1/cos(53.4°−60°) = 1.00667` para P. La magnitud **no se recalcula** al mover el eje: lo que rota es la dirección del vector, no su módulo.
