@@ -4,6 +4,8 @@ import pytest
 from ecg_engine.leads import (
     ATRIAL_PRECORDIAL,
     ATRIAL_PROJECTION,
+    DEFAULT_PROJECTION_SET,
+    LeadProjectionSet,
     NORMAL_AXIS_PROJECTION,
     QRS_PRECORDIAL,
     AxisZone,
@@ -13,9 +15,10 @@ from ecg_engine.leads import (
     project,
     projection_for_axis,
     projection_from_mapping,
+    projection_set_for_axis,
     zone_for,
 )
-from ecg_engine.types import LEAD_ORDER, N_LEADS
+from ecg_engine.types import AxisParams, LEAD_ORDER, N_LEADS
 
 
 def test_projection_has_one_coefficient_per_lead():
@@ -180,3 +183,28 @@ def test_zone_for_normalizes_before_classifying():
 def test_zones_cover_the_whole_circle_without_gaps():
     for deg in range(-180, 181):
         assert isinstance(zone_for(float(deg)), AxisZone)
+
+
+def test_default_projection_set_matches_the_historical_tables():
+    np.testing.assert_allclose(
+        DEFAULT_PROJECTION_SET.qrs.coefficients,
+        NORMAL_AXIS_PROJECTION.coefficients,
+        atol=5e-4,
+    )
+    np.testing.assert_allclose(
+        DEFAULT_PROJECTION_SET.p.coefficients,
+        ATRIAL_PROJECTION.coefficients,
+        atol=5e-3,
+    )
+
+
+def test_st_and_t_share_the_qrs_projection_at_zero_offset():
+    s = projection_set_for_axis(AxisParams())
+    assert s.st.coefficients == s.qrs.coefficients
+    assert s.t.coefficients == s.qrs.coefficients
+
+
+def test_a_qrs_offset_moves_only_the_qrs_projection():
+    s = projection_set_for_axis(AxisParams(qrs_offset_deg=30.0))
+    assert s.qrs.coefficients != s.t.coefficients  # solo el QRS rotó
+    assert s.t.coefficients == DEFAULT_PROJECTION_SET.t.coefficients

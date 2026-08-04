@@ -17,7 +17,7 @@ from typing import Mapping
 
 import numpy as np
 
-from .types import LEAD_ORDER, N_LEADS
+from .types import AxisParams, LEAD_ORDER, N_LEADS
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,3 +206,39 @@ def zone_for(deg: float) -> AxisZone:
     if 90.0 < a <= 180.0:
         return AxisZone.RIGHT
     return AxisZone.EXTREME  # −180 < a < −90
+
+
+@dataclass(frozen=True, slots=True)
+class LeadProjectionSet:
+    """Proyección por onda. La T puede tener eje propio porque cada onda lleva
+    su propia `LeadProjection`. Se llama así, y no `ProjectionSet`, porque el
+    nombre tiene que seguir teniendo sentido el día de la onda U."""
+
+    p: LeadProjection
+    qrs: LeadProjection
+    st: LeadProjection
+    t: LeadProjection
+
+
+def projection_set_for_axis(axis: AxisParams) -> LeadProjectionSet:
+    """Construye las cuatro proyecciones desde el eje. El eje efectivo de cada
+    onda es `orientation_deg + su desfase`."""
+    return LeadProjectionSet(
+        p=projection_for_axis(
+            axis.orientation_deg + axis.p_offset_deg, _P_MAGNITUDE, ATRIAL_PRECORDIAL
+        ),
+        qrs=projection_for_axis(
+            axis.orientation_deg + axis.qrs_offset_deg, _QRS_MAGNITUDE, QRS_PRECORDIAL
+        ),
+        st=projection_for_axis(
+            axis.orientation_deg + axis.st_offset_deg, _QRS_MAGNITUDE, QRS_PRECORDIAL
+        ),
+        t=projection_for_axis(
+            axis.orientation_deg + axis.t_offset_deg, _QRS_MAGNITUDE, QRS_PRECORDIAL
+        ),
+    )
+
+
+DEFAULT_PROJECTION_SET: LeadProjectionSet = projection_set_for_axis(AxisParams())
+"""Conjunto por defecto: reproduce las tablas históricas. Es lo que usa una
+fuente hasta que el motor le fija un eje."""
