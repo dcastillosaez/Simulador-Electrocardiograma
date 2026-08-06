@@ -2314,7 +2314,9 @@ git commit -m "feat(web): el renderer alimenta el indice de muestras y publica l
 
 **Interfaces:**
 - Consumes: `MeasurementSession`, `StripLayout`, `TraceView`, `EcgTheme`, formateadores de `measure/formulas`.
-- Produces: `OverlayFrame { session, layout, view, sampleRateHz, capacity, theme, magnifier }`; `drawOverlay(ctx, frame): void`; `CURSOR_LABEL_PX`, `MARKER_HANDLE_PX`.
+- Produces: `OverlayFrame { session, layout, view, sampleRateHz, capacity, writtenCount, theme, magnifier }`; `drawOverlay(ctx, frame): void`; `CURSOR_LABEL_PX`, `MARKER_HANDLE_PX`.
+
+**Color:** `EcgTheme` ya reserva un rol `cursor` (`themes/types.ts:13`) para exactamente esto. Se usa ese, no `trace`. El cursor vivo se dibuja con trazo discontinuo y las marcas fijadas con trazo continuo: distingue de un vistazo «dónde está el puntero» de «dónde he dejado una marca», sin añadir un segundo color.
 
 - [ ] **Step 1: Escribir el test que falla**
 
