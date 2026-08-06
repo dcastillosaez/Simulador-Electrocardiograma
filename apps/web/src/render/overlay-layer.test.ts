@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { getTheme } from "@ui-system/themes/index";
 import { computeLayoutMetrics } from "./layout-engine";
 import { PX_PER_MM } from "./grid-layer";
-import { drawOverlay } from "./overlay-layer";
+import { drawOverlay, MAGNIFIER_WIDTH_PX } from "./overlay-layer";
 import { createSession } from "../measure/session";
 import type { MeasurePoint } from "../measure/tools";
 import { SweepBuffer } from "./sweep-buffer";
@@ -23,6 +23,8 @@ function makeCtx() {
     setLineDash: vi.fn(),
     save: vi.fn(),
     restore: vi.fn(),
+    rect: vi.fn(),
+    clip: vi.fn(),
     strokeStyle: "",
     fillStyle: "",
     lineWidth: 0,
@@ -30,6 +32,12 @@ function makeCtx() {
     textAlign: "left",
     textBaseline: "top",
   } as unknown as CanvasRenderingContext2D;
+}
+
+/** Todas las coordenadas por las que ha pasado el lápiz. */
+function penCoords(ctx: CanvasRenderingContext2D): Array<[number, number]> {
+  const calls = (fn: unknown) => (fn as ReturnType<typeof vi.fn>).mock.calls;
+  return [...calls(ctx.moveTo), ...calls(ctx.lineTo)] as Array<[number, number]>;
 }
 
 const METRICS = computeLayoutMetrics({
@@ -185,5 +193,91 @@ describe("lupa", () => {
     drawOverlay(ctx, { ...frameWith(createSession("caliper")), magnifier: true });
 
     expect(ctx.fillRect).not.toHaveBeenCalled();
+  });
+
+  it("dibuja el trazo con coordenadas finitas sea cual sea el ancho de tira", () => {
+    // Las muestras que caben en la lupa dependen del ancho. Si sale un numero
+    // IMPAR, media ventana es fraccionaria; un indice de anillo fraccionario
+    // hace que `Float32Array[173.5]` devuelva `undefined`, que se propaga como
+    // NaN hasta `lineTo` y deja el canvas SIN PINTAR NADA: recuadro negro con
+    // su rotulo y ni un trazo dentro.
+    //
+    // Se recorren varios anchos a proposito: el defecto no es de un ancho
+    // concreto, es de la paridad, y con un solo caso se cuela.
+    for (const availableWidthPx of [648, 944.88, 1285, 1600]) {
+      const metrics = computeLayoutMetrics({
+        availableWidthPx,
+        availableHeightPx: 600,
+        rowCount: 6,
+        columnCount: 1,
+        gain: 5,
+        paperSpeedMmS: 25,
+      });
+      const ctx = makeCtx();
+      drawOverlay(ctx, {
+        ...frameWith({ ...createSession("caliper"), hover: point(500) }),
+        layout: { leadColumns: [["I", "II", "III", "aVR", "aVL", "aVF"]], metrics },
+        magnifier: true,
+      });
+
+      const ys = penCoords(ctx).map(([, y]) => y);
+      expect(ys.length, `ancho ${availableWidthPx}`).toBeGreaterThan(0);
+      expect(
+        ys.every((y) => Number.isFinite(y)),
+        `ancho ${availableWidthPx}: hay coordenadas no finitas`
+      ).toBe(true);
+    }
+  });
+
+  it("recorta su contenido al recuadro", () => {
+    // A ganancia 5mm/mV, una R de 1,2mV amplificada x4 se sale del alto de la
+    // lupa. Sin recorte, el trazo se pintaria por encima del ECG de al lado.
+    const ctx = makeCtx();
+    const session = { ...createSession("caliper"), hover: point(500) };
+    drawOverlay(ctx, { ...frameWith(session), magnifier: true });
+
+    expect(ctx.clip).toHaveBeenCalled();
+    expect(ctx.save).toHaveBeenCalled();
+    expect(ctx.restore).toHaveBeenCalled();
+  });
+
+  it("la rejilla tiene lineas en los dos ejes", () => {
+    // Solo con verticales se puede contar tiempo pero no amplitud, y la lupa
+    // esta justamente para mirar ondas pequeñas.
+    //
+    // Se busca el tramo COMPLETO de lado a lado del recuadro: una linea base
+    // plana tambien produce puntos consecutivos a la misma altura, asi que
+    // comparar solo "misma y" daria por buena una rejilla sin horizontales.
+    const ctx = makeCtx();
+    const session = { ...createSession("caliper"), hover: point(500) };
+    drawOverlay(ctx, { ...frameWith(session), magnifier: true });
+
+    const moves = (ctx.moveTo as ReturnType<typeof vi.fn>).mock.calls;
+    const lines = (ctx.lineTo as ReturnType<typeof vi.fn>).mock.calls;
+    const horizontalCompleta = moves.some(([mx, my]) =>
+      lines.some(([lx, ly]) => ly === my && Math.abs(lx - mx) === MAGNIFIER_WIDTH_PX)
+    );
+    expect(horizontalCompleta).toBe(true);
+  });
+
+  it("no tapa la lectura del cursor", () => {
+    // El rotulo se dibuja a 8px del cursor y la lupa a 12px: si van al mismo
+    // lado, la lupa se come el unico sitio donde se lee el voltaje.
+    const ctx = makeCtx();
+    const session = { ...createSession("caliper"), hover: point(500) };
+    drawOverlay(ctx, { ...frameWith(session), magnifier: true });
+
+    const textos = (ctx.fillText as ReturnType<typeof vi.fn>).mock.calls;
+    const rotuloCursor = textos.find((c) => c[0] === "II");
+    const rotuloLupa = textos.find((c) => c[0] === "×4");
+    expect(rotuloCursor, "falta la lectura del cursor").toBeDefined();
+    expect(rotuloLupa).toBeDefined();
+
+    // El rotulo del cursor va alineado a la derecha cuando la lupa esta a su
+    // derecha, asi que crece hacia la IZQUIERDA desde su anclaje: comparar los
+    // dos anclajes no dice nada. Lo que importa es que su anclaje quede fuera
+    // del recuadro de la lupa.
+    const lupaLeft = rotuloLupa![1] - 4;
+    expect(rotuloCursor![1]).toBeLessThanOrEqual(lupaLeft);
   });
 });

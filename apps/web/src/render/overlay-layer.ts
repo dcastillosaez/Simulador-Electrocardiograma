@@ -27,6 +27,14 @@ export const MAGNIFIER_HEIGHT_PX = 120;
 export const MAGNIFIER_FACTOR = 4;
 const MAGNIFIER_MARGIN_PX = 12;
 
+/** Dónde ha quedado la lupa. `onRight` lo necesita el rótulo del cursor para
+ * irse al lado contrario en vez de quedarse debajo. */
+interface MagnifierBox {
+  left: number;
+  top: number;
+  onRight: boolean;
+}
+
 export interface OverlayFrame {
   session: MeasurementSession;
   layout: StripLayout;
@@ -73,10 +81,40 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, frame: OverlayFrame):
   }
   drawTimeLine(ctx, hover.ringPos, frame, pps, heightPx, true);
   drawVoltageLine(ctx, hover, frame, widthPx);
-  drawCursorLabel(ctx, hover, frame, pps, widthPx);
-  if (frame.magnifier) {
-    drawMagnifier(ctx, hover, frame, pps, widthPx, heightPx);
+
+  // La lupa se coloca ANTES de escribir el rótulo, porque el rótulo necesita
+  // saber de qué lado ha quedado para no acabar debajo.
+  const magnifier = frame.magnifier
+    ? placeMagnifier(hover, frame, pps, widthPx, heightPx)
+    : null;
+  if (magnifier) {
+    drawMagnifier(ctx, hover, frame, pps, magnifier);
   }
+  drawCursorLabel(ctx, hover, frame, pps, widthPx, magnifier);
+}
+
+/** Dónde cabe la lupa, o `null` si la derivación no está en pantalla. */
+function placeMagnifier(
+  hover: MeasurePoint,
+  frame: OverlayFrame,
+  pps: number,
+  widthPx: number,
+  heightPx: number
+): MagnifierBox | null {
+  const position = locate(hover, frame);
+  if (!position) return null;
+
+  const cursorX = position.left + ringPosToPx(hover.ringPos, frame.view, pps, frame.capacity);
+  // Al lado opuesto del cursor, y volteada cerca de los bordes: la lupa no
+  // puede tapar justo lo que se está mirando.
+  const onRight = cursorX + MAGNIFIER_MARGIN_PX + MAGNIFIER_WIDTH_PX <= widthPx;
+  return {
+    left: onRight
+      ? cursorX + MAGNIFIER_MARGIN_PX
+      : cursorX - MAGNIFIER_MARGIN_PX - MAGNIFIER_WIDTH_PX,
+    top: Math.min(Math.max(0, position.top), Math.max(0, heightPx - MAGNIFIER_HEIGHT_PX)),
+    onRight,
+  };
 }
 
 /** Ventana ampliada alrededor del cursor, dibujada DESDE EL ANILLO.
@@ -95,54 +133,69 @@ function drawMagnifier(
   hover: MeasurePoint,
   frame: OverlayFrame,
   pps: number,
-  widthPx: number,
-  heightPx: number
+  box: MagnifierBox
 ): void {
   const sweep = frame.sweeps.get(hover.lead);
-  const position = locate(hover, frame);
-  if (!sweep || !position) return;
+  if (!sweep) return;
 
-  const cursorX = position.left + ringPosToPx(hover.ringPos, frame.view, pps, frame.capacity);
-  // Al lado opuesto del cursor, y volteada cerca de los bordes: la lupa no
-  // puede tapar justo lo que se está mirando.
-  const left =
-    cursorX + MAGNIFIER_MARGIN_PX + MAGNIFIER_WIDTH_PX > widthPx
-      ? cursorX - MAGNIFIER_MARGIN_PX - MAGNIFIER_WIDTH_PX
-      : cursorX + MAGNIFIER_MARGIN_PX;
-  const top = Math.min(Math.max(0, position.top), heightPx - MAGNIFIER_HEIGHT_PX);
+  const { left, top } = box;
+  const zoomPxPerSample = pps * MAGNIFIER_FACTOR;
+  const zoomPxPerMm = frame.layout.metrics.viewportScalePxPerMm * MAGNIFIER_FACTOR;
+  const centerX = left + MAGNIFIER_WIDTH_PX / 2;
+  const centerY = top + MAGNIFIER_HEIGHT_PX / 2;
+
+  // Media ventana EN ENTERO. Con un número impar de muestras visibles, una
+  // mitad fraccionaria produce un índice de anillo fraccionario, y
+  // `Float32Array[173.5]` es `undefined`: se propaga como NaN hasta `lineTo` y
+  // el canvas no pinta nada — recuadro negro con su rótulo y sin trazo.
+  const halfSamples = Math.max(1, Math.floor(MAGNIFIER_WIDTH_PX / zoomPxPerSample / 2));
+
+  // Se recorta al recuadro: a ganancia baja, una R amplificada ×4 se sale por
+  // arriba, y sin recorte se pintaría encima del ECG de al lado.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(left, top, MAGNIFIER_WIDTH_PX, MAGNIFIER_HEIGHT_PX);
+  ctx.clip();
 
   ctx.fillStyle = frame.theme.background;
   ctx.fillRect(left, top, MAGNIFIER_WIDTH_PX, MAGNIFIER_HEIGHT_PX);
 
-  const zoomPxPerSample = pps * MAGNIFIER_FACTOR;
-  const zoomPxPerMm = frame.layout.metrics.viewportScalePxPerMm * MAGNIFIER_FACTOR;
-  const samples = Math.round(MAGNIFIER_WIDTH_PX / zoomPxPerSample);
-  const centerY = top + MAGNIFIER_HEIGHT_PX / 2;
-
-  // Rejilla propia, a la escala propia.
+  // Rejilla propia, a la escala propia y en LOS DOS EJES: solo con verticales
+  // se contaría tiempo pero no amplitud, y la lupa está para mirar ondas
+  // pequeñas.
   ctx.strokeStyle = frame.theme.gridMinor;
   ctx.lineWidth = 0.5;
-  for (let mm = 0; mm * zoomPxPerMm <= MAGNIFIER_WIDTH_PX; mm++) {
-    const x = left + mm * zoomPxPerMm;
-    ctx.beginPath();
-    ctx.moveTo(x, top);
-    ctx.lineTo(x, top + MAGNIFIER_HEIGHT_PX);
-    ctx.stroke();
+  for (let mm = 0; mm * zoomPxPerMm <= MAGNIFIER_WIDTH_PX / 2; mm++) {
+    for (const x of [centerX - mm * zoomPxPerMm, centerX + mm * zoomPxPerMm]) {
+      ctx.beginPath();
+      ctx.moveTo(x, top);
+      ctx.lineTo(x, top + MAGNIFIER_HEIGHT_PX);
+      ctx.stroke();
+    }
+  }
+  for (let mm = 0; mm * zoomPxPerMm <= MAGNIFIER_HEIGHT_PX / 2; mm++) {
+    for (const y of [centerY - mm * zoomPxPerMm, centerY + mm * zoomPxPerMm]) {
+      ctx.beginPath();
+      ctx.moveTo(left, y);
+      ctx.lineTo(left + MAGNIFIER_WIDTH_PX, y);
+      ctx.stroke();
+    }
   }
 
+  // La muestra del cursor cae en el centro exacto del recuadro.
   ctx.strokeStyle = frame.theme.trace;
   ctx.lineWidth = 1;
   ctx.beginPath();
-  for (let i = 0; i <= samples; i++) {
-    const ringPos =
-      (((hover.ringPos - samples / 2 + i) % frame.capacity) + frame.capacity) % frame.capacity;
-    const x = left + i * zoomPxPerSample;
-    const y =
-      centerY - voltageToPx(sweep.at(ringPos), frame.layout.metrics) * MAGNIFIER_FACTOR;
-    if (i === 0) ctx.moveTo(x, y);
+  for (let i = -halfSamples; i <= halfSamples; i++) {
+    const ringPos = wrapIndex(hover.ringPos + i, frame.capacity);
+    const x = centerX + i * zoomPxPerSample;
+    const y = centerY - voltageToPx(sweep.at(ringPos), frame.layout.metrics) * MAGNIFIER_FACTOR;
+    if (i === -halfSamples) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   }
   ctx.stroke();
+
+  ctx.restore();
 
   ctx.fillStyle = frame.theme.trace;
   ctx.font = `${CURSOR_LABEL_PX}px monospace`;
@@ -256,12 +309,15 @@ function drawCursorLabel(
   point: MeasurePoint,
   frame: OverlayFrame,
   pps: number,
-  widthPx: number
+  widthPx: number,
+  magnifier: MagnifierBox | null
 ): void {
   const position = locate(point, frame);
   if (!position) return;
   const x = position.left + ringPosToPx(point.ringPos, frame.view, pps, frame.capacity);
-  const flip = x > widthPx - LABEL_BLOCK_WIDTH_PX;
+  // Con la lupa puesta manda ella: el rótulo se va al lado contrario. Si no,
+  // la lupa —que es mucho más ancha que el rótulo— lo taparía entero.
+  const flip = magnifier ? magnifier.onRight : x > widthPx - LABEL_BLOCK_WIDTH_PX;
 
   ctx.fillStyle = frame.theme.cursor;
   ctx.font = `${CURSOR_LABEL_PX}px monospace`;
@@ -277,6 +333,10 @@ function drawCursorLabel(
   lines.forEach((line, index) => {
     ctx.fillText(line, textX, position.top + 2 + index * LABEL_LINE_HEIGHT_PX);
   });
+}
+
+function wrapIndex(index: number, modulus: number): number {
+  return ((index % modulus) + modulus) % modulus;
 }
 
 /** Esquina de la tira de esa derivación, o `null` si no está en pantalla. */
