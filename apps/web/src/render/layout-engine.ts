@@ -44,13 +44,23 @@ export const GAIN_STEPS_MM_PER_MV = [20, 10, 5, 2.5] as const;
  * fija el usuario. */
 export type GainSetting = "auto" | number;
 
-/** Segundos de papel que muestra la pantalla completa.
+/** Velocidad de papel de referencia: la estándar de un electrocardiógrafo.
  *
- * Diez segundos es la tira de ritmo estándar: es lo que se imprime, lo que se
- * mira para contar una arritmia y lo que el alumno va a encontrarse. Fijarlo
- * —en vez de dejar que dependa del ancho de la ventana, que es lo que pasaba
- * antes— hace que dos personas con monitores distintos vean lo mismo. */
-export const SCREEN_SECONDS = 10;
+ * Es la que fija la escala de la pantalla. El zoom temporal la sube a 50 o 100
+ * sin que la rejilla cambie de tamaño: lo que cambia es cuánto tiempo cabe. */
+export const REFERENCE_PAPER_SPEED_MM_S = 25;
+
+/** Ancho de papel que muestra la pantalla completa, en milímetros.
+ *
+ * Antes esta constante eran diez segundos. Que fueran segundos era un
+ * accidente: en un electrocardiógrafo la constante es el papel y los segundos
+ * salen de dividirlo por la velocidad. 250 mm son exactamente los mismos diez
+ * segundos a 25 mm/s, dichos en las unidades correctas — y así el zoom
+ * temporal es una división más, no un caso especial.
+ *
+ * Fijarlo —en vez de dejar que dependa del ancho de la ventana— hace que dos
+ * personas con monitores distintos vean lo mismo. */
+export const VIEWPORT_WIDTH_MM = 250;
 
 /** Hueco entre columnas en el formato de dos columnas. Es `--space-2`. */
 export const COLUMN_GAP_PX = 8;
@@ -163,21 +173,23 @@ export function computeLayoutMetrics({
     1,
     (availableWidthPx - COLUMN_GAP_PX * (columns - 1)) / columns
   );
-  const stripSeconds = SCREEN_SECONDS / columns;
+  // El ancho de papel por tira es la constante; los segundos son consecuencia
+  // de la velocidad. A la velocidad de referencia esto da exactamente lo mismo
+  // que la formulación anterior en segundos fijos: regresión cero.
+  const viewportWidthMm = VIEWPORT_WIDTH_MM / columns;
 
-  // LA ESCALA SALE DEL ANCHO, no de una suposición de 96dpi.
+  // LA ESCALA SALE DEL ANCHO, no de una suposición de 96dpi, y **no depende de
+  // la velocidad de papel**: subirla no agranda la rejilla, muestra menos
+  // tiempo. Lo importante —y lo que arregló el defecto de la cuadrícula— es
+  // que esta misma escala gobierne los DOS ejes: mientras eso se cumpla, la
+  // celda es cuadrada, un segundo son cinco cuadros grandes y medir contando
+  // cuadros es exacto, valga lo que valga el milímetro en píxeles.
   //
-  // El display tiene que mostrar `stripSeconds` de papel exactamente, así que
-  // los píxeles por milímetro son los que hagan falta para que quepan. Lo
-  // importante —y lo que arregló el defecto de la cuadrícula— es que esta
-  // misma escala gobierne los DOS ejes: mientras eso se cumpla, la celda es
-  // cuadrada, un segundo son cinco cuadros grandes y medir contando cuadros
-  // es exacto, valga lo que valga el milímetro en píxeles.
-  //
-  // Como el ancho de columna y los segundos por tira se dividen los dos entre
-  // el número de columnas, la escala es la MISMA en una columna que en dos: el
+  // Como el ancho de columna y el ancho de papel se dividen los dos entre el
+  // número de columnas, la escala es la MISMA en una columna que en dos: el
   // formato partido no comprime el trazado, solo enseña menos tiempo.
-  const viewportScalePxPerMm = stripWidthPx / (stripSeconds * paperSpeedMmS);
+  const viewportScalePxPerMm = stripWidthPx / viewportWidthMm;
+  const stripSeconds = viewportWidthMm / paperSpeedMmS;
 
   const gainIsAuto = gain === "auto";
   const clinicalGainMmPerMv = gainIsAuto
