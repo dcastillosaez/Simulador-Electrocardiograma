@@ -7,6 +7,7 @@ import {
   type LayoutMetrics,
 } from "../../render/layout-engine";
 import { drawSweepSegment, type LeadCanvasOptions } from "../../render/lead-canvas";
+import { SampleIndexRing } from "../../render/sample-index";
 import { advanceClock } from "../../render/sweep-clock";
 import { SweepRebuilder } from "../../render/sweep-rebuilder";
 import { SweepBuffer, sweepCapacitySamples } from "../../render/sweep-buffer";
@@ -35,6 +36,21 @@ export interface UseSweepRendererResult {
    * nada dibujado. Vive aquí y no en el componente de exportación porque
    * quien sabe qué canvas existen y cómo se apilan es este hook. */
   composeSnapshot: (options?: SnapshotOptions) => HTMLCanvasElement | null;
+  /** Los anillos que la capa de medición necesita leer, o `null` si todavía no
+   * hay nada escrito.
+   *
+   * Se entrega como función y no como valor para que el consumidor lea el
+   * estado del momento sin que el hook tenga que volver a renderizar cuando los
+   * anillos se recrean. */
+  getMeasureSource: () => MeasureSource | null;
+}
+
+/** Lo que hay que saber para medir sobre el trazado: la señal de cada
+ * derivación y la identidad de cada muestra. */
+export interface MeasureSource {
+  sweeps: ReadonlyMap<LeadName, SweepBuffer>;
+  indexRing: SampleIndexRing;
+  capacity: number;
 }
 
 export interface SnapshotOptions {
@@ -63,6 +79,9 @@ export function useSweepRenderer({
   const traceCanvases = useRef(new Map<LeadName, HTMLCanvasElement>());
   const gridCanvases = useRef(new Map<LeadName, HTMLCanvasElement>());
   const sweeps = useRef(new Map<LeadName, SweepBuffer>());
+  // Uno solo para las doce derivaciones: se escriben en el mismo tick desde el
+  // mismo trozo multicanal, así que comparten eje por construcción.
+  const indexRing = useRef(new SampleIndexRing(1));
   const [isAwaitingSignal, setIsAwaitingSignal] = useState(false);
 
   // En una `ref` y no en las dependencias del efecto: congelar no debe
@@ -91,6 +110,7 @@ export function useSweepRenderer({
     const next = new Map<LeadName, SweepBuffer>();
     for (const lead of leads) next.set(lead, new SweepBuffer(capacity));
     sweeps.current = next;
+    indexRing.current = new SampleIndexRing(capacity);
   }, [leads, widthPx, metrics.pixelsPerSecond, sampleRateHz]);
 
   // Al arrancar una sesión el eje de tiempo empieza de cero: se vacían los
@@ -99,6 +119,7 @@ export function useSweepRenderer({
   useEffect(() => {
     const onStarted = () => {
       for (const sweep of sweeps.current.values()) sweep.reset();
+      indexRing.current.reset();
       for (const canvas of traceCanvases.current.values()) {
         canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
       }
@@ -162,6 +183,10 @@ export function useSweepRenderer({
       // llegará al reanudar, y tirarlo abriría un hueco artificial.
       if (!frozenRef.current) {
         runtime.buffer.advance(elapsedS);
+        // Se lee una vez por tick y no por derivación: el eje es el mismo para
+        // las doce. Va antes del dibujo para que la posición del anillo de
+        // índices y la de los de señal avancen juntas.
+        indexRing.current.push(runtime.buffer.consumedSampleIndices());
         // Se dibuja lo que advance() haya liberado ESTE tick, aunque el buffer
         // haya quedado vacío al hacerlo: si no, el último trozo consumido antes
         // de un underrun se perdería sin llegar a pintarse. Con cero muestras
@@ -254,5 +279,22 @@ export function useSweepRenderer({
     [leadColumns, leads, theme]
   );
 
-  return { registerTrace, registerGrid, isAwaitingSignal, composeSnapshot };
+  const getMeasureSource = useCallback((): MeasureSource | null => {
+    // Sin muestras escritas no hay nada que medir, y devolver los anillos
+    // vacíos dejaría al overlay midiendo los ceros de relleno.
+    if (indexRing.current.writtenCount === 0) return null;
+    return {
+      sweeps: sweeps.current,
+      indexRing: indexRing.current,
+      capacity: indexRing.current.capacity,
+    };
+  }, []);
+
+  return {
+    registerTrace,
+    registerGrid,
+    isAwaitingSignal,
+    composeSnapshot,
+    getMeasureSource,
+  };
 }
