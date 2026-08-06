@@ -3020,10 +3020,12 @@ Crear `apps/web/src/ui/MeasureOverlay.module.css`:
 }
 
 .overlay:focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--inspector-ok);
   outline-offset: -2px;
 }
 ```
+
+`--inspector-ok` y no `--color-accent`, que no existe en `tokens.css`: es el mismo rol de foco que ya usa `SegmentedControl.module.css`.
 
 Crear `apps/web/src/ui/MeasureOverlay.tsx`:
 
@@ -3244,7 +3246,7 @@ y mover a `.grid` las propiedades de disposición que hoy tenga `.display`, deja
 npx vitest run src/ui/MeasureOverlay.test.tsx
 ```
 
-Esperado: PASS, 4 tests.
+Esperado: PASS, 4 tests. jsdom no implementa el contexto 2D de canvas, así que sin un stub de `getContext` cada tick del bucle de dibujo escupe `Not implemented: HTMLCanvasElement.prototype.getContext` a stderr — el test pasa igual, pero para mantener la salida limpia se añade el mismo stub que ya usa `ECGWorkspace.test.tsx`: un `beforeEach` con `vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(...)` devolviendo un objeto con los métodos que `drawOverlay` llama, y un `afterEach` con `vi.restoreAllMocks()` (el proyecto no tiene `restoreMocks` en la config de Vitest, así que sin esto el stub se filtraría a otros ficheros de test).
 
 - [ ] **Step 7: Commit**
 
