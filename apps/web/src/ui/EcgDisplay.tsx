@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { LayoutMetrics } from "../render/layout-engine";
 import type { LeadName } from "../render/layout";
 import styles from "./EcgDisplay.module.css";
@@ -10,6 +11,10 @@ export interface EcgDisplayProps {
   metrics: LayoutMetrics;
   registerTrace: (lead: LeadName, element: HTMLCanvasElement | null) => void;
   registerGrid: (lead: LeadName, element: HTMLCanvasElement | null) => void;
+  /** El canvas de medición, si está activo. Se posiciona sobre la rejilla de
+   * tiras y NO sobre el contenedor con su padding: sus dimensiones tienen que
+   * coincidir exactamente con las que compone la exportación. */
+  overlay?: ReactNode;
 }
 
 /** Las columnas van sincronizadas: muestran el mismo instante con
@@ -23,23 +28,27 @@ export function EcgDisplay({
   metrics,
   registerTrace,
   registerGrid,
+  overlay,
 }: EcgDisplayProps) {
   return (
     <div className={styles.display} ref={containerRef}>
-      {leadColumns.map((leads, index) => (
-        <div className={styles.column} key={index}>
-          {leads.map((lead) => (
-            <LeadStrip
-              key={lead}
-              lead={lead}
-              widthPx={metrics.stripWidthPx}
-              heightPx={metrics.stripHeightPx}
-              registerTrace={registerTrace}
-              registerGrid={registerGrid}
-            />
-          ))}
-        </div>
-      ))}
+      <div className={styles.grid}>
+        {leadColumns.map((leads, index) => (
+          <div className={styles.column} key={index}>
+            {leads.map((lead) => (
+              <LeadStrip
+                key={lead}
+                lead={lead}
+                widthPx={metrics.stripWidthPx}
+                heightPx={metrics.stripHeightPx}
+                registerTrace={registerTrace}
+                registerGrid={registerGrid}
+              />
+            ))}
+          </div>
+        ))}
+        {overlay}
+      </div>
     </div>
   );
 }

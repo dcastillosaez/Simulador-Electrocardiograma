@@ -3,7 +3,7 @@ import { PX_PER_MM } from "./grid-layer";
 import {
   COLUMN_GAP_PX,
   GAIN_STEPS_MM_PER_MV,
-  SCREEN_SECONDS,
+  VIEWPORT_WIDTH_MM,
   STRIP_COMPACT_PX,
   STRIP_FLOOR_PX,
   STRIP_GAP_PX,
@@ -14,6 +14,10 @@ import {
 } from "./layout-engine";
 
 const SPEED = 25;
+/** Los mismos diez segundos de antes, ahora derivados: la constante del
+ * sistema es el ancho de papel y los segundos salen de dividirlo por la
+ * velocidad. Ninguna asercion numerica de este fichero cambia de valor. */
+const SCREEN_SECONDS = VIEWPORT_WIDTH_MM / SPEED;
 /** Ancho que hace que un milimetro mida PX_PER_MM, para que los tests puedan
  * seguir razonando en la escala fisica de referencia. */
 const WIDTH = SCREEN_SECONDS * SPEED * PX_PER_MM;
@@ -254,5 +258,65 @@ describe("segundos por pantalla", () => {
         expect(m.pixelsPerSecond / bigSquarePx, `${width}px/${columns}col`).toBeCloseTo(5);
       }
     }
+  });
+});
+
+describe("velocidad de papel", () => {
+  it("a 25mm/s la tira muestra los diez segundos de siempre", () => {
+    const metrics = metricsFor(600, 6, "auto");
+    expect(metrics.stripSeconds).toBe(10);
+  });
+
+  it("al doblar la velocidad se ve la mitad de tiempo", () => {
+    const metrics = computeLayoutMetrics({
+      availableWidthPx: WIDTH,
+      availableHeightPx: 600,
+      rowCount: 6,
+      columnCount: 1,
+      gain: "auto",
+      paperSpeedMmS: 50,
+    });
+    expect(metrics.stripSeconds).toBe(5);
+  });
+
+  it("a 100mm/s se ven 2,5 segundos", () => {
+    const metrics = computeLayoutMetrics({
+      availableWidthPx: WIDTH,
+      availableHeightPx: 600,
+      rowCount: 6,
+      columnCount: 1,
+      gain: "auto",
+      paperSpeedMmS: 100,
+    });
+    expect(metrics.stripSeconds).toBe(2.5);
+  });
+
+  it("el cuadro pequeno conserva su tamano fisico al cambiar la velocidad", () => {
+    // Es la diferencia entre velocidad de papel y zoom optico, y la razon de
+    // ser de todo el diseno: contar cuadros tiene que seguir siendo exacto.
+    const lenta = metricsFor(600, 6, "auto");
+    const rapida = computeLayoutMetrics({
+      availableWidthPx: WIDTH,
+      availableHeightPx: 600,
+      rowCount: 6,
+      columnCount: 1,
+      gain: "auto",
+      paperSpeedMmS: 100,
+    });
+    expect(rapida.viewportScalePxPerMm).toBeCloseTo(lenta.viewportScalePxPerMm);
+    expect(rapida.pixelsPerMillivolt).toBeCloseTo(lenta.pixelsPerMillivolt);
+  });
+
+  it("al cuadruplicar la velocidad, un segundo ocupa cuatro veces mas pixeles", () => {
+    const lenta = metricsFor(600, 6, "auto");
+    const rapida = computeLayoutMetrics({
+      availableWidthPx: WIDTH,
+      availableHeightPx: 600,
+      rowCount: 6,
+      columnCount: 1,
+      gain: "auto",
+      paperSpeedMmS: 100,
+    });
+    expect(rapida.pixelsPerSecond).toBeCloseTo(lenta.pixelsPerSecond * 4);
   });
 });

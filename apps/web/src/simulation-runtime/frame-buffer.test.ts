@@ -303,4 +303,60 @@ describe("FrameBuffer", () => {
 
     expect(late).toBeLessThan(Math.max(early * 4, 1));
   });
+
+  it("consumedSampleIndices numera las muestras desde el inicio de la sesion", () => {
+    // Invariante del backend: el motor genera de forma contigua desde t=0 en
+    // trozos de tamano fijo, asi que tStartS * sampleRateHz es exactamente el
+    // indice de la primera muestra del trozo.
+    const buffer = new FrameBuffer();
+    buffer.push(makeFrame({ tStartS: 0 }));
+    buffer.push(makeFrame({ tStartS: 0.1, sequenceNumber: 1 }));
+    buffer.push(makeFrame({ tStartS: 0.2, sequenceNumber: 2 }));
+    buffer.push(makeFrame({ tStartS: 0.3, sequenceNumber: 3 }));
+    buffer.push(makeFrame({ tStartS: 0.4, sequenceNumber: 4 }));
+    buffer.push(makeFrame({ tStartS: 0.5, sequenceNumber: 5 }));
+    buffer.advance(0.2);
+
+    const indices = buffer.consumedSampleIndices();
+
+    expect(indices.length).toBe(100);
+    expect(indices[0]).toBe(0);
+    expect(indices[49]).toBe(49);
+    expect(indices[50]).toBe(50);
+    expect(indices[99]).toBe(99);
+  });
+
+  it("consumedSampleIndices tiene la misma longitud que consumeNewSamples", () => {
+    const buffer = new FrameBuffer();
+    for (let i = 0; i < 6; i++) {
+      buffer.push(makeFrame({ tStartS: i * 0.1, sequenceNumber: i }));
+    }
+    buffer.advance(0.3);
+
+    expect(buffer.consumedSampleIndices().length).toBe(
+      buffer.consumeNewSamples(0).length
+    );
+  });
+
+  it("los indices saltan cuando hay un hueco, en vez de seguir contando", () => {
+    const buffer = new FrameBuffer();
+    buffer.push(makeFrame({ tStartS: 0 }));
+    buffer.push(makeFrame({ tStartS: 0.1, sequenceNumber: 1 }));
+    buffer.push(makeFrame({ tStartS: 0.2, sequenceNumber: 2 }));
+    buffer.push(makeFrame({ tStartS: 0.3, sequenceNumber: 3 }));
+    buffer.push(makeFrame({ tStartS: 0.4, sequenceNumber: 4 }));
+    // Se pierden los frames de 0.5 y 0.6: el siguiente empieza en 0.7.
+    buffer.push(makeFrame({ tStartS: 0.7, sequenceNumber: 7 }), { gapBefore: true });
+    buffer.advance(0.6);
+
+    const indices = buffer.consumedSampleIndices();
+
+    expect(indices[249]).toBe(249);
+    expect(indices[250]).toBe(350);
+  });
+
+  it("consumedSampleIndices esta vacio si advance no libero nada", () => {
+    const buffer = new FrameBuffer();
+    expect(buffer.consumedSampleIndices().length).toBe(0);
+  });
 });

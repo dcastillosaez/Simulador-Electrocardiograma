@@ -22,6 +22,7 @@ const PATHS = {
     "M17.5 9l2-1.5",
   ],
   heart: ["M12 20s-7-4.5-7-9.5A4 4 0 0 1 12 7a4 4 0 0 1 7 3.5c0 5-7 9.5-7 9.5z"],
+  zoom: ["M11 5a6 6 0 1 0 0 12 6 6 0 0 0 0-12z", "M15.5 15.5l4.5 4.5"],
 } as const;
 
 export type IconName = keyof typeof PATHS;

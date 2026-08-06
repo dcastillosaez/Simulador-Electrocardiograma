@@ -1,0 +1,13 @@
+.overlay {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+}
+
+/* Foco visible: sin esto, activar el overlay con teclado (Tab) es invisible.
+   `--inspector-ok` y no un color nuevo: es el mismo rol de foco que ya usa
+   `SegmentedControl`. */
+.overlay:focus-visible {
+  outline: 2px solid var(--inspector-ok);
+  outline-offset: -2px;
+}
