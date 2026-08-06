@@ -7,6 +7,7 @@ import {
   type LayoutMetrics,
 } from "../../render/layout-engine";
 import { drawSweepSegment, type LeadCanvasOptions } from "../../render/lead-canvas";
+import { advanceClock } from "../../render/sweep-clock";
 import { SweepRebuilder } from "../../render/sweep-rebuilder";
 import { SweepBuffer, sweepCapacitySamples } from "../../render/sweep-buffer";
 import { leadIndex, type LeadName } from "../../render/layout";
@@ -20,6 +21,10 @@ export interface UseSweepRendererParams {
   sampleRateHz: number;
   metrics: LayoutMetrics;
   theme: Theme;
+  /** Congelado: el bucle sigue vivo pero no consume ni dibuja. Ocurre en el
+   * mismo frame que el clic, sin esperar a que el servidor confirme la pausa
+   * ni a que se vacíe el buffer de red. */
+  frozen: boolean;
 }
 
 export interface UseSweepRendererResult {
@@ -51,6 +56,7 @@ export function useSweepRenderer({
   sampleRateHz,
   metrics,
   theme,
+  frozen,
 }: UseSweepRendererParams): UseSweepRendererResult {
   const leads = useMemo(() => leadColumns.flat(), [leadColumns]);
   const widthPx = metrics.stripWidthPx;
@@ -58,6 +64,11 @@ export function useSweepRenderer({
   const gridCanvases = useRef(new Map<LeadName, HTMLCanvasElement>());
   const sweeps = useRef(new Map<LeadName, SweepBuffer>());
   const [isAwaitingSignal, setIsAwaitingSignal] = useState(false);
+
+  // En una `ref` y no en las dependencias del efecto: congelar no debe
+  // desmontar y remontar el bucle de dibujo.
+  const frozenRef = useRef(frozen);
+  frozenRef.current = frozen;
 
   const registerTrace = useCallback((lead: LeadName, element: HTMLCanvasElement | null) => {
     if (element) traceCanvases.current.set(lead, element);
@@ -138,34 +149,44 @@ export function useSweepRenderer({
     let lastS: number | undefined;
 
     const tick = (nowMs: number) => {
-      const nowS = nowMs / 1000;
-      const elapsedS = lastS === undefined ? 0 : nowS - lastS;
-      lastS = nowS;
+      const { elapsedS, nextPreviousS } = advanceClock(
+        frozenRef.current,
+        lastS,
+        nowMs / 1000
+      );
+      lastS = nextPreviousS;
 
-      runtime.buffer.advance(elapsedS);
-      // Se dibuja lo que advance() haya liberado ESTE tick, aunque el buffer
-      // haya quedado vacío al hacerlo: si no, el último trozo consumido antes
-      // de un underrun se perdería sin llegar a pintarse. Con cero muestras
-      // nuevas, drawSweepSegment no toca el canvas y el trazo se congela en la
-      // última muestra, sin interpolar jamás.
-      //
-      // El hueco es el mismo para las doce derivaciones (viene del mismo trozo
-      // multicanal), así que se lee una vez por tick y no por derivación.
-      const hadGap = runtime.buffer.justConsumedHadGap;
-      for (const lead of leads) {
-        const canvas = traceCanvases.current.get(lead);
-        const ctx = canvas?.getContext("2d");
-        const sweep = sweeps.current.get(lead);
-        if (!canvas || !ctx || !sweep) continue;
-        const samples = runtime.buffer.consumeNewSamples(leadIndex(lead));
-        drawSweepSegment(
-          ctx, sweep, samples, sampleRateHz, options, canvas.height, hadGap
-        );
+      // Congelado no se consume ni se dibuja: la imagen queda exactamente
+      // donde estaba. El buffer tampoco se drena por detrás — el motor congela
+      // también su reloj, así que lo que queda dentro es contiguo con lo que
+      // llegará al reanudar, y tirarlo abriría un hueco artificial.
+      if (!frozenRef.current) {
+        runtime.buffer.advance(elapsedS);
+        // Se dibuja lo que advance() haya liberado ESTE tick, aunque el buffer
+        // haya quedado vacío al hacerlo: si no, el último trozo consumido antes
+        // de un underrun se perdería sin llegar a pintarse. Con cero muestras
+        // nuevas, drawSweepSegment no toca el canvas y el trazo se congela en la
+        // última muestra, sin interpolar jamás.
+        //
+        // El hueco es el mismo para las doce derivaciones (viene del mismo trozo
+        // multicanal), así que se lee una vez por tick y no por derivación.
+        const hadGap = runtime.buffer.justConsumedHadGap;
+        for (const lead of leads) {
+          const canvas = traceCanvases.current.get(lead);
+          const ctx = canvas?.getContext("2d");
+          const sweep = sweeps.current.get(lead);
+          if (!canvas || !ctx || !sweep) continue;
+          const samples = runtime.buffer.consumeNewSamples(leadIndex(lead));
+          drawSweepSegment(
+            ctx, sweep, samples, sampleRateHz, options, canvas.height, hadGap
+          );
+        }
+
+        // "Esperando señal" cubre los dos motivos opuestos de no reproducir: no
+        // queda nada (underrun) o aún no hay reserva suficiente (pre-roll).
+        setIsAwaitingSignal(runtime.buffer.isUnderrun || !runtime.buffer.isPreRolled);
       }
 
-      // "Esperando señal" cubre los dos motivos opuestos de no reproducir: no
-      // queda nada (underrun) o aún no hay reserva suficiente (pre-roll).
-      setIsAwaitingSignal(runtime.buffer.isUnderrun || !runtime.buffer.isPreRolled);
       frameId = requestAnimationFrame(tick);
     };
 

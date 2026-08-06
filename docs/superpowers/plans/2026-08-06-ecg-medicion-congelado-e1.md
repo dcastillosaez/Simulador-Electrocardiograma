@@ -1988,10 +1988,11 @@ describe("advanceClock", () => {
   });
 
   it("en marcha devuelve el tiempo transcurrido desde el tick anterior", () => {
-    expect(advanceClock(false, 100, 100.016)).toEqual({
-      elapsedS: 0.016,
-      nextPreviousS: 100.016,
-    });
+    const tick = advanceClock(false, 100, 100.016);
+    // La resta de dos instantes de reloj no es exacta en coma flotante, y
+    // tampoco necesita serlo: son segundos de reproduccion, no una medida.
+    expect(tick.elapsedS).toBeCloseTo(0.016, 9);
+    expect(tick.nextPreviousS).toBe(100.016);
   });
 
   it("congelado no consume nada", () => {
@@ -2158,17 +2159,42 @@ Añadir a `apps/web/src/ui/ECGWorkspace.test.tsx`:
 ```tsx
   it("el indicador de congelado aparece al pulsar, sin esperar al servidor", async () => {
     // Es la diferencia entre una herramienta que responde y una que parece
-    // tener medio segundo de retardo.
-    const user = userEvent.setup();
-    renderWorkspace();
+    // tener medio segundo de retardo. El socket falso NUNCA devuelve el
+    // mensaje `paused`: si el indicador dependiese del servidor, este test
+    // no pasaria jamas.
+    stubRhythmFetch();
+    render(
+      <ECGWorkspace
+        wsUrl="ws://test"
+        apiBaseUrl="http://api.test"
+        webSocketFactory={() => fakeSocket as unknown as WebSocket}
+      />
+    );
+    await waitFor(() => screen.getByText("Sinusal normal"));
+    act(() => fakeSocket.dispatch("open", {}));
+    await userEvent.selectOptions(screen.getByLabelText("Seleccionar ritmo"), "sinus_normal");
+    // Sin el `started` la sesion no esta en marcha y el boton sigue
+    // deshabilitado: `freezeDisabled` depende de `connectionState`.
+    act(() => {
+      fakeSocket.dispatch("message", {
+        data: JSON.stringify({
+          type: "started",
+          session_id: "11111111-1111-1111-1111-111111111111",
+          seed: 1,
+          sample_rate_hz: 500,
+          channels: 12,
+        }),
+      });
+    });
 
-    await user.click(screen.getByRole("button", { name: /congelar/i }));
+    await userEvent.click(screen.getByRole("button", { name: /congelar/i }));
 
     expect(screen.getByText(/trazado congelado/i)).toBeInTheDocument();
+    // Y el `pause` sale hacia el motor de todas formas: congelar el cliente no
+    // debe dejar al servidor generando señal que nadie va a ver.
+    expect(fakeSocket.sentMessages.some((m) => m.includes('"pause"'))).toBe(true);
   });
 ```
-
-(Usa el helper de renderizado que ya exista en ese fichero; si el botón está deshabilitado sin sesión, inicia antes una sesión como hacen los demás tests del fichero.)
 
 - [ ] **Step 8: Ejecutar la suite entera**
 

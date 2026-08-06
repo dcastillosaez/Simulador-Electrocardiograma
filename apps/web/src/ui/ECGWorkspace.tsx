@@ -87,6 +87,10 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
   const [themeName, setThemeName] = useState<ThemeName>("dark");
   const [gain, setGain] = useState<GainSetting>("auto");
   const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
+  // El congelado es LOCAL y no espera al servidor: el usuario ve el trazado
+  // parado en el mismo frame en que pulsa. El `pause` viaja en paralelo para
+  // que el motor deje de generar.
+  const [isFrozen, setIsFrozen] = useState(false);
 
   const leadColumns = useMemo(() => leadColumnsForLayout(layout), [layout]);
   const sampleRateHz = store.sampleRateHz ?? DEFAULT_SAMPLE_RATE_HZ;
@@ -107,6 +111,7 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
     sampleRateHz,
     metrics,
     theme,
+    frozen: isFrozen,
   });
 
   const now = useClock();
@@ -122,12 +127,17 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
     composeSnapshot: snapshotWithStamp,
   });
 
-  const isPaused = store.connectionState === "paused";
-  const hasSession = store.connectionState === "running" || isPaused;
+  const hasSession =
+    store.connectionState === "running" || store.connectionState === "paused";
 
-  const togglePause = () => {
-    if (isPaused) runtime.resume();
-    else runtime.pause();
+  const toggleFreeze = () => {
+    if (isFrozen) {
+      setIsFrozen(false);
+      runtime.resume();
+    } else {
+      setIsFrozen(true);
+      runtime.pause();
+    }
   };
 
   // El CSS toma su juego de custom properties del atributo del elemento raíz.
@@ -144,6 +154,9 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
   const handleRhythmSelect = (rhythmId: string, detail: RhythmDetail) => {
     setSelectedRhythm(detail);
     store.selectRhythm(rhythmId);
+    // Un ritmo nuevo arranca un trazado nuevo: dejarlo congelado mostraría el
+    // ritmo anterior detenido mientras el motor genera otro distinto.
+    setIsFrozen(false);
     runtime.start(rhythmId, {
       heart_rate_hz: detail.default_parameters.heart_rate_hz,
       noise: SILENT_NOISE,
@@ -175,8 +188,8 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
           onThemeChange={setThemeName}
           gain={gain}
           onGainChange={setGain}
-          isFrozen={isPaused}
-          onToggleFreeze={togglePause}
+          isFrozen={isFrozen}
+          onToggleFreeze={toggleFreeze}
           freezeDisabled={!hasSession}
           onExportPng={exportPng}
           isRecording={isRecording}
@@ -248,7 +261,7 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
           connectionState={store.connectionState}
           hasConnectedOnce={hasConnectedOnce}
           isAwaitingSignal={isAwaitingSignal}
-          isFrozen={isPaused}
+          isFrozen={isFrozen}
           gainFits={metrics.gainFits}
           exportError={exportError}
           rhythmName={selectedRhythm?.display_name ?? null}
