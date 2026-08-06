@@ -1,5 +1,9 @@
 import { Inspector, Metric, MetricGrid, Panel, SectionTitle } from "@ui-system";
 import { zoneFor, ZONE_LABEL } from "./AxisControl/axis-zones";
+import { MeasurePanel } from "./MeasurePanel";
+import type { MeasurementSession } from "../measure/session";
+import type { SnapMode } from "../measure/snap";
+import type { ToolId } from "../measure/tools";
 import type { SessionState } from "../simulation-runtime/session-runtime";
 
 const GAIN_CLIPPING_HINT =
@@ -18,6 +22,12 @@ export interface WorkspaceInspectorProps {
   bpm: number | null;
   axisDeg: number | null;
   measurements: Record<string, number | null> | null;
+  /** `null` mientras no está congelado: la sesión de medición describe un
+   * anillo que en marcha se está sobrescribiendo, así que no hay nada que
+   * mostrar. */
+  measureSession: MeasurementSession | null;
+  onToolChange: (tool: ToolId) => void;
+  onSnapChange: (mode: SnapMode) => void;
 }
 
 /** El panel de información del puesto de simulación: estado de la sesión y
@@ -34,6 +44,9 @@ export function WorkspaceInspector({
   bpm,
   axisDeg,
   measurements,
+  measureSession,
+  onToolChange,
+  onSnapChange,
 }: WorkspaceInspectorProps) {
   /** Una medida del servidor, lista para pasar a `Metric`.
    *
@@ -71,6 +84,13 @@ export function WorkspaceInspector({
             dice lo que va a ver y como arreglarlo. */}
         {!gainFits && <p role="status">{GAIN_CLIPPING_HINT}</p>}
         {exportError && <p role="alert">{exportError}</p>}
+        {measureSession && (
+          <MeasurePanel
+            session={measureSession}
+            onToolChange={onToolChange}
+            onSnapChange={onSnapChange}
+          />
+        )}
         <MetricGrid>
           <Metric label="Ritmo" value={rhythmName ?? ""} unavailable={rhythmName === null} />
           <Metric

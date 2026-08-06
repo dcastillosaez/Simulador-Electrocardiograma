@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AppShell,
   Badge,
@@ -17,6 +17,7 @@ import { BasicControlPanel } from "./BasicControlPanel";
 import { AdvancedControlPanel } from "./AdvancedControlPanel";
 import { AxisControl } from "./AxisControl";
 import { EcgDisplay } from "./EcgDisplay";
+import { MeasureOverlay, type MeasureOverlayHandle } from "./MeasureOverlay";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import { WorkspaceInspector } from "./WorkspaceInspector";
 import { useLayoutMetrics } from "./hooks/useLayoutMetrics";
@@ -24,6 +25,9 @@ import { useSimulationRuntime } from "./hooks/useSimulationRuntime";
 import { useSweepRenderer } from "./hooks/useSweepRenderer";
 import { formatClock, useClock } from "./hooks/useClock";
 import { useExport } from "./hooks/useExport";
+import type { MeasurementSession } from "../measure/session";
+import type { SnapMode } from "../measure/snap";
+import type { ToolId } from "../measure/tools";
 import {
   columnsForLayout,
   leadColumnsForLayout,
@@ -105,14 +109,28 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
     paperSpeedMmS: PAPER_SPEED_MM_S,
   });
 
-  const { registerTrace, registerGrid, isAwaitingSignal, composeSnapshot } = useSweepRenderer({
-    runtime,
-    leadColumns,
-    sampleRateHz,
-    metrics,
-    theme,
-    frozen: isFrozen,
-  });
+  const { registerTrace, registerGrid, isAwaitingSignal, composeSnapshot, getMeasureSource } =
+    useSweepRenderer({
+      runtime,
+      leadColumns,
+      sampleRateHz,
+      metrics,
+      theme,
+      frozen: isFrozen,
+    });
+
+  // La ventana visible del anillo. Hasta que exista el zoom temporal es el
+  // anillo entero: la misma cuenta que usa `sweepCapacitySamples` para
+  // dimensionarlo (ancho de tira / px-por-muestra = segundos de tira ×
+  // frecuencia de muestreo), así que las dos coinciden sin tener que exponer
+  // la capacidad real del anillo hasta que haya una muestra escrita.
+  const measureView = useMemo(
+    () => ({ startRingPos: 0, visibleSamples: Math.round(metrics.stripSeconds * sampleRateHz) }),
+    [metrics.stripSeconds, sampleRateHz]
+  );
+
+  const measureOverlayRef = useRef<MeasureOverlayHandle>(null);
+  const [measureSession, setMeasureSession] = useState<MeasurementSession | null>(null);
 
   const now = useClock();
   const clock = formatClock(now);
@@ -177,6 +195,16 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
       : null);
 
   const bpm = currentParams ? Math.round(currentParams.heart_rate_hz * 60) : null;
+
+  // El panel de medición vive en el inspector y la sesión vive dentro del
+  // overlay: sin este puente, cambiar de herramienta desde el panel no tendría
+  // forma de llegar hasta el `MeasurementSession` que el overlay dibuja.
+  const handleToolChange = useCallback((tool: ToolId) => {
+    measureOverlayRef.current?.setTool(tool);
+  }, []);
+  const handleSnapChange = useCallback((mode: SnapMode) => {
+    measureOverlayRef.current?.setSnapMode(mode);
+  }, []);
 
   return (
     <AppShell
@@ -253,6 +281,20 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
           metrics={metrics}
           registerTrace={registerTrace}
           registerGrid={registerGrid}
+          overlay={
+            <MeasureOverlay
+              ref={measureOverlayRef}
+              active={isFrozen}
+              layout={{ leadColumns, metrics }}
+              sampleRateHz={sampleRateHz}
+              paperSpeedMmS={PAPER_SPEED_MM_S}
+              theme={theme.ecg}
+              view={measureView}
+              magnifier={false}
+              getSource={getMeasureSource}
+              onResultChange={setMeasureSession}
+            />
+          }
         />
       }
       inspector={
@@ -268,6 +310,9 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
           bpm={bpm}
           axisDeg={currentParams?.axis.orientation_deg ?? null}
           measurements={store.measurements}
+          measureSession={isFrozen ? measureSession : null}
+          onToolChange={handleToolChange}
+          onSnapChange={handleSnapChange}
         />
       }
       status={

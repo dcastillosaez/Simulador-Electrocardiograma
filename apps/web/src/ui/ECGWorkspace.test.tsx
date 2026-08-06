@@ -407,5 +407,11 @@ describe("ECGWorkspace", () => {
     // Y el `pause` sale hacia el motor de todas formas: congelar el cliente no
     // debe dejar al servidor generando señal que nadie va a ver.
     expect(fakeSocket.sentMessages.some((m) => m.includes('"pause"'))).toBe(true);
+    // La superficie de medicion solo existe congelado: lo dibujado en canvas
+    // no existe para un lector de pantalla, y este rol y nombre son la unica
+    // via por la que sabe que hay algo interactivo ahi.
+    expect(
+      screen.getByRole("application", { name: /medición sobre el trazado/i })
+    ).toBeInTheDocument();
   });
 });

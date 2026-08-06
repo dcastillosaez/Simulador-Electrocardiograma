@@ -3456,36 +3456,59 @@ Si `MetricGrid` no acepta `role`, envolver cada `MetricGrid` en `<div role="stat
 
 - [ ] **Step 4: Cablear el panel**
 
-En `apps/web/src/ui/WorkspaceInspector.tsx`, añadir a los props `measureSession: MeasurementSession | null`, `onToolChange`, `onSnapChange`, y renderizar `<MeasurePanel .../>` **antes** del `MetricGrid` de las medidas del servidor cuando `measureSession` no sea `null`.
+**Hueco del plan, resuelto aquí:** la sesión de medición vive dentro de `useMeasure`, que a su vez vive dentro de `MeasureOverlay` (Task 13) — pero el panel de herramientas vive en `WorkspaceInspector`, fuera del overlay. `onResultChange` solo informa hacia afuera de los cambios fríos; no hay ningún camino de vuelta para que el panel le diga a la sesión "cambia de herramienta". Sin resolver esto, los botones de `MeasurePanel` quedarían conectados a nada.
 
-En `apps/web/src/ui/ECGWorkspace.tsx`, guardar la sesión fría publicada por el overlay:
+La solución: `MeasureOverlay` pasa a ser un `forwardRef` que expone un asa imperativa mínima:
 
 ```tsx
-  const [measureSession, setMeasureSession] = useState<MeasurementSession | null>(null);
+export interface MeasureOverlayHandle {
+  setTool: (tool: ToolId) => void;
+  setSnapMode: (mode: SnapMode) => void;
+}
+
+export const MeasureOverlay = forwardRef<MeasureOverlayHandle, MeasureOverlayProps>(
+  function MeasureOverlay({ active, layout, sampleRateHz, paperSpeedMmS, theme, view, magnifier, getSource, onResultChange }, handleRef) {
+    // ...igual que antes, pero desestructurando tambien setTool y setSnapMode de useMeasure...
+    useImperativeHandle(handleRef, () => ({ setTool, setSnapMode }), [setTool, setSnapMode]);
+    // ...resto sin cambios...
+  }
+);
 ```
 
-pasar `onResultChange={setMeasureSession}` a `<MeasureOverlay />`, `measureSession={isFrozen ? measureSession : null}` a `<WorkspaceInspector />`, y montar el overlay vía el prop `overlay` de `EcgDisplay`.
+En `apps/web/src/ui/WorkspaceInspector.tsx`, añadir a los props `measureSession: MeasurementSession | null`, `onToolChange`, `onSnapChange`, y renderizar `<MeasurePanel .../>` **antes** del `MetricGrid` de las medidas del servidor cuando `measureSession` no sea `null`.
+
+En `apps/web/src/ui/ECGWorkspace.tsx`:
+
+```tsx
+  const measureOverlayRef = useRef<MeasureOverlayHandle>(null);
+  const [measureSession, setMeasureSession] = useState<MeasurementSession | null>(null);
+
+  const handleToolChange = useCallback((tool: ToolId) => {
+    measureOverlayRef.current?.setTool(tool);
+  }, []);
+  const handleSnapChange = useCallback((mode: SnapMode) => {
+    measureOverlayRef.current?.setSnapMode(mode);
+  }, []);
+```
+
+pasar `ref={measureOverlayRef}` y `onResultChange={setMeasureSession}` a `<MeasureOverlay />`, `measureSession={isFrozen ? measureSession : null}`, `onToolChange={handleToolChange}` y `onSnapChange={handleSnapChange}` a `<WorkspaceInspector />`, y montar el overlay vía el prop `overlay` de `EcgDisplay`. La `view` para esta tarea (antes del zoom de la Task 15) es el anillo entero: `{ startRingPos: 0, visibleSamples: Math.round(metrics.stripSeconds * sampleRateHz) }` — la misma cuenta con la que `sweepCapacitySamples` dimensiona el anillo, así que coinciden sin tener que exponer la capacidad real antes de que exista una muestra escrita.
 
 - [ ] **Step 5: Extender el contrato de accesibilidad**
 
-Añadir a `apps/web/src/ui/accessibility-contract.test.tsx`:
+**Desviación del plan:** `accessibility-contract.test.tsx` usa una `SilentSocket` que no implementa `dispatch` — nunca llega a `started`, así que no hay forma de congelar dentro de ese fichero sin ampliar esa clase, lo que sería alcance añadido fuera de esta tarea. En su lugar, la comprobación de rol y nombre accesible se añade al test que ya existe en `ECGWorkspace.test.tsx` ("el indicador de congelado aparece al pulsar..."), que sí usa `FakeWebSocket` con `dispatch` y ya deja la sesión congelada:
 
 ```tsx
-  it("la superficie de medicion tiene rol y nombre accesible", async () => {
-    // Un canvas sin nombre es un agujero negro para un lector de pantalla, y
-    // toda la fase E1 ocurre encima de el.
-    const user = userEvent.setup();
-    renderWorkspace();
-    await startSession(user);
-    await user.click(screen.getByRole("button", { name: /congelar/i }));
-
+    expect(screen.getByText(/trazado congelado/i)).toBeInTheDocument();
+    expect(fakeSocket.sentMessages.some((m) => m.includes('"pause"'))).toBe(true);
+    // La superficie de medicion solo existe congelado: lo dibujado en canvas
+    // no existe para un lector de pantalla, y este rol y nombre son la unica
+    // via por la que sabe que hay algo interactivo ahi.
     expect(
       screen.getByRole("application", { name: /medición sobre el trazado/i })
     ).toBeInTheDocument();
-  });
 ```
 
-(Reutiliza los helpers de renderizado e inicio de sesión que ya tenga ese fichero.)
+`accessibility-contract.test.tsx` no se toca.
 
 - [ ] **Step 6: Ejecutar la suite entera**
 

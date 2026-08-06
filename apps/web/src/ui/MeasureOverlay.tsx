@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from "react";
 import type { EcgTheme } from "@ui-system/themes/types";
 import { COLUMN_GAP_PX, STRIP_GAP_PX } from "../render/layout-engine";
 import type { StripLayout, TraceView } from "../render/measure-geometry";
 import { drawOverlay } from "../render/overlay-layer";
 import type { MeasurementSession } from "../measure/session";
+import type { SnapMode } from "../measure/snap";
+import type { ToolId } from "../measure/tools";
 import { useMeasure } from "./hooks/useMeasure";
 import type { MeasureSource } from "./hooks/useSweepRenderer";
 import styles from "./MeasureOverlay.module.css";
@@ -28,145 +30,164 @@ export interface MeasureOverlayProps {
   onResultChange: (session: MeasurementSession) => void;
 }
 
-export function MeasureOverlay({
-  active,
-  layout,
-  sampleRateHz,
-  paperSpeedMmS,
-  theme,
-  view,
-  magnifier,
-  getSource,
-  onResultChange,
-}: MeasureOverlayProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const pressRef = useRef<{ x: number; y: number } | null>(null);
-  const { sessionRef, dirtyRef, pointAt, dispatch, moveCursorBySamples } = useMeasure({
-    layout,
-    sampleRateHz,
-    paperSpeedMmS,
-    view,
-    getSource,
-    onResultChange,
-  });
-
-  const columns = layout.leadColumns.length;
-  const rows = Math.max(...layout.leadColumns.map((column) => column.length));
-  const widthPx = layout.metrics.stripWidthPx * columns + COLUMN_GAP_PX * (columns - 1);
-  const heightPx = layout.metrics.stripHeightPx * rows + STRIP_GAP_PX * (rows - 1);
-
-  // Bucle propio, independiente del barrido —que estando congelado no tiene
-  // nada que hacer—. Solo pinta cuando algo ha cambiado.
-  useEffect(() => {
-    if (!active) return;
-    let frameId: number;
-    const tick = () => {
-      const canvas = canvasRef.current;
-      const ctx = canvas?.getContext("2d");
-      const source = getSource();
-      if (canvas && ctx && source && dirtyRef.current) {
-        dirtyRef.current = false;
-        drawOverlay(ctx, {
-          session: sessionRef.current,
-          layout,
-          view,
-          sampleRateHz,
-          capacity: source.capacity,
-          writtenCount: source.indexRing.writtenCount,
-          theme,
-          magnifier,
-        });
-      }
-      frameId = requestAnimationFrame(tick);
-    };
-    frameId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frameId);
-  }, [active, layout, view, sampleRateHz, theme, magnifier, getSource, dirtyRef, sessionRef]);
-
-  // Al desactivarse se limpia: las marcas describen un anillo que se va a
-  // sobrescribir, y conservar los números sería conservar una referencia a un
-  // trazado que ya no está.
-  useEffect(() => {
-    if (!active) dispatch({ type: "clear" });
-  }, [active, dispatch]);
-
-  const localPoint = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
-  };
-
-  const handlePointerMove = useCallback(
-    (event: React.PointerEvent<HTMLCanvasElement>) => {
-      const { x, y } = localPoint(event);
-      dispatch({ type: "hover", point: pointAt(x, y) });
-    },
-    [dispatch, pointAt]
-  );
-
-  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
-    pressRef.current = localPoint(event);
-  }, []);
-
-  const handlePointerUp = useCallback(
-    (event: React.PointerEvent<HTMLCanvasElement>) => {
-      const press = pressRef.current;
-      pressRef.current = null;
-      if (!press) return;
-      const { x, y } = localPoint(event);
-      if (Math.hypot(x - press.x, y - press.y) > DRAG_THRESHOLD_PX) return;
-      const point = pointAt(x, y);
-      if (point) dispatch({ type: "place", point });
-    },
-    [dispatch, pointAt]
-  );
-
-  const handleKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLCanvasElement>) => {
-      // Un milímetro de papel en muestras: lo que avanza una pulsación con
-      // Shift. Es la unidad con la que se lee un ECG.
-      const samplesPerMm = sampleRateHz / paperSpeedMmS;
-      const step = event.shiftKey ? Math.round(samplesPerMm) : 1;
-      switch (event.key) {
-        case "ArrowRight":
-          event.preventDefault();
-          moveCursorBySamples(step);
-          break;
-        case "ArrowLeft":
-          event.preventDefault();
-          moveCursorBySamples(-step);
-          break;
-        case "Enter": {
-          event.preventDefault();
-          const point = sessionRef.current.hover;
-          if (point) dispatch({ type: "place", point });
-          else moveCursorBySamples(0);
-          break;
-        }
-        case "Escape":
-          event.preventDefault();
-          dispatch({ type: "clear" });
-          break;
-      }
-    },
-    [dispatch, moveCursorBySamples, paperSpeedMmS, sampleRateHz, sessionRef]
-  );
-
-  if (!active) return null;
-
-  return (
-    <canvas
-      ref={canvasRef}
-      className={styles.overlay}
-      width={widthPx}
-      height={heightPx}
-      role="application"
-      aria-label="Medición sobre el trazado congelado"
-      tabIndex={0}
-      onPointerMove={handlePointerMove}
-      onPointerDown={handlePointerDown}
-      onPointerUp={handlePointerUp}
-      onPointerLeave={() => dispatch({ type: "hover", point: null })}
-      onKeyDown={handleKeyDown}
-    />
-  );
+/** Lo que un consumidor externo puede pedirle al overlay.
+ *
+ * La sesión de medición vive dentro de este componente (en `useMeasure`), pero
+ * el panel de herramientas vive en el inspector, fuera de aquí. Sin este
+ * puente, elegir "RR" en el panel no tendría forma de llegar hasta la sesión
+ * que el overlay dibuja y con la que responde al ratón y al teclado. */
+export interface MeasureOverlayHandle {
+  setTool: (tool: ToolId) => void;
+  setSnapMode: (mode: SnapMode) => void;
 }
+
+export const MeasureOverlay = forwardRef<MeasureOverlayHandle, MeasureOverlayProps>(
+  function MeasureOverlay(
+    {
+      active,
+      layout,
+      sampleRateHz,
+      paperSpeedMmS,
+      theme,
+      view,
+      magnifier,
+      getSource,
+      onResultChange,
+    },
+    handleRef
+  ) {
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const pressRef = useRef<{ x: number; y: number } | null>(null);
+    const { sessionRef, dirtyRef, pointAt, dispatch, moveCursorBySamples, setTool, setSnapMode } =
+      useMeasure({
+        layout,
+        sampleRateHz,
+        paperSpeedMmS,
+        view,
+        getSource,
+        onResultChange,
+      });
+
+    useImperativeHandle(handleRef, () => ({ setTool, setSnapMode }), [setTool, setSnapMode]);
+
+    const columns = layout.leadColumns.length;
+    const rows = Math.max(...layout.leadColumns.map((column) => column.length));
+    const widthPx = layout.metrics.stripWidthPx * columns + COLUMN_GAP_PX * (columns - 1);
+    const heightPx = layout.metrics.stripHeightPx * rows + STRIP_GAP_PX * (rows - 1);
+
+    // Bucle propio, independiente del barrido —que estando congelado no tiene
+    // nada que hacer—. Solo pinta cuando algo ha cambiado.
+    useEffect(() => {
+      if (!active) return;
+      let frameId: number;
+      const tick = () => {
+        const canvas = canvasRef.current;
+        const ctx = canvas?.getContext("2d");
+        const source = getSource();
+        if (canvas && ctx && source && dirtyRef.current) {
+          dirtyRef.current = false;
+          drawOverlay(ctx, {
+            session: sessionRef.current,
+            layout,
+            view,
+            sampleRateHz,
+            capacity: source.capacity,
+            writtenCount: source.indexRing.writtenCount,
+            theme,
+            magnifier,
+          });
+        }
+        frameId = requestAnimationFrame(tick);
+      };
+      frameId = requestAnimationFrame(tick);
+      return () => cancelAnimationFrame(frameId);
+    }, [active, layout, view, sampleRateHz, theme, magnifier, getSource, dirtyRef, sessionRef]);
+
+    // Al desactivarse se limpia: las marcas describen un anillo que se va a
+    // sobrescribir, y conservar los números sería conservar una referencia a un
+    // trazado que ya no está.
+    useEffect(() => {
+      if (!active) dispatch({ type: "clear" });
+    }, [active, dispatch]);
+
+    const localPoint = (event: React.PointerEvent<HTMLCanvasElement>) => {
+      const rect = event.currentTarget.getBoundingClientRect();
+      return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    };
+
+    const handlePointerMove = useCallback(
+      (event: React.PointerEvent<HTMLCanvasElement>) => {
+        const { x, y } = localPoint(event);
+        dispatch({ type: "hover", point: pointAt(x, y) });
+      },
+      [dispatch, pointAt]
+    );
+
+    const handlePointerDown = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+      pressRef.current = localPoint(event);
+    }, []);
+
+    const handlePointerUp = useCallback(
+      (event: React.PointerEvent<HTMLCanvasElement>) => {
+        const press = pressRef.current;
+        pressRef.current = null;
+        if (!press) return;
+        const { x, y } = localPoint(event);
+        if (Math.hypot(x - press.x, y - press.y) > DRAG_THRESHOLD_PX) return;
+        const point = pointAt(x, y);
+        if (point) dispatch({ type: "place", point });
+      },
+      [dispatch, pointAt]
+    );
+
+    const handleKeyDown = useCallback(
+      (event: React.KeyboardEvent<HTMLCanvasElement>) => {
+        // Un milímetro de papel en muestras: lo que avanza una pulsación con
+        // Shift. Es la unidad con la que se lee un ECG.
+        const samplesPerMm = sampleRateHz / paperSpeedMmS;
+        const step = event.shiftKey ? Math.round(samplesPerMm) : 1;
+        switch (event.key) {
+          case "ArrowRight":
+            event.preventDefault();
+            moveCursorBySamples(step);
+            break;
+          case "ArrowLeft":
+            event.preventDefault();
+            moveCursorBySamples(-step);
+            break;
+          case "Enter": {
+            event.preventDefault();
+            const point = sessionRef.current.hover;
+            if (point) dispatch({ type: "place", point });
+            else moveCursorBySamples(0);
+            break;
+          }
+          case "Escape":
+            event.preventDefault();
+            dispatch({ type: "clear" });
+            break;
+        }
+      },
+      [dispatch, moveCursorBySamples, paperSpeedMmS, sampleRateHz, sessionRef]
+    );
+
+    if (!active) return null;
+
+    return (
+      <canvas
+        ref={canvasRef}
+        className={styles.overlay}
+        width={widthPx}
+        height={heightPx}
+        role="application"
+        aria-label="Medición sobre el trazado congelado"
+        tabIndex={0}
+        onPointerMove={handlePointerMove}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={() => dispatch({ type: "hover", point: null })}
+        onKeyDown={handleKeyDown}
+      />
+    );
+  }
+);
