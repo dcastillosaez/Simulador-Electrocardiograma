@@ -1,0 +1,24 @@
+id: atropine
+name: Atropina
+category: parasympatholytic
+routes: [IV, IO]
+dose_unit: mg
+reference_dose: 1
+max_cumulative_dose: 3
+onset_s: 20
+peak_s: 90
+duration_s: 1800
+half_life_s: 500
+effects:
+  heart_rate_delta_bpm: {slope: 28}
+  pr_delta_ms: {slope: -25}
+  blood_pressure_delta_mmhg: {slope: 8}
+  sinus_rate: {multiplier: 1.35}
+  av_conduction: {multiplier: 1.35}
+  automaticity: {multiplier: 1.20}
+clinical_note: >
+  Antagonista muscarínico. Levanta la frecuencia retirando el freno vagal,
+  por lo que solo funciona donde el vago manda: acelera el bloqueo AV
+  suprahisiano y no hace nada en el infrahisiano.
+references:
+  - "AHA ACLS 2020 — Adult Bradycardia Algorithm"

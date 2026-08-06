@@ -75,3 +75,30 @@ async def stream_measurements(
                 await publish(payload)
         next_tick += interval_s
         await asyncio.sleep(max(0.0, next_tick - asyncio.get_running_loop().time()))
+
+
+async def stream_pharmacology(
+    manager: SimulationManager,
+    publish: Callable[[dict], Awaitable[None]],
+    *,
+    interval_s: float = MEASUREMENT_INTERVAL_S,
+) -> None:
+    """Publica el estado farmacológico a la misma cadencia que las medidas.
+
+    A la misma cadencia pero en su propio bucle: son dos contratos
+    independientes, y fusionarlos obligaría a versionar el payload de
+    medidas cada vez que la farmacología añadiera un campo.
+
+    En pausa no publica, por la misma razón que las medidas: el reloj de
+    simulación no avanza, así que la barra de un fármaco no debe moverse.
+    Una pausa congela también la farmacocinética — que es lo correcto en un
+    simulador docente, donde pausar es «paremos a mirar esto».
+    """
+    next_tick = asyncio.get_running_loop().time()
+    while True:
+        if manager.state is SimulationState.RUNNING:
+            payload = manager.pharmacology_payload()
+            if payload is not None:
+                await publish(payload)
+        next_tick += interval_s
+        await asyncio.sleep(max(0.0, next_tick - asyncio.get_running_loop().time()))

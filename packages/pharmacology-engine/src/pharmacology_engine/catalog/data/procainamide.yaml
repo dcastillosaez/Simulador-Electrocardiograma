@@ -1,0 +1,27 @@
+id: procainamide
+name: Procainamida
+category: antiarrhythmic
+routes: [IV]
+dose_unit: mg
+reference_dose: 500
+max_cumulative_dose: 1200
+onset_s: 180
+peak_s: 900
+duration_s: 3600
+half_life_s: 900
+effects:
+  qrs_delta_ms: {slope: 18}
+  qt_delta_ms: {slope: 35}
+  pr_delta_ms: {slope: 20}
+  heart_rate_delta_bpm: {slope: -6}
+  blood_pressure_delta_mmhg: {slope: -18}
+  ventricular_conduction: {multiplier: 0.80}
+  atrial_conduction: {multiplier: 0.85}
+  automaticity: {multiplier: 0.75}
+  contractility: {multiplier: 0.90}
+clinical_note: >
+  Clase Ia. Es el fármaco que enseña el criterio de parada por
+  ensanchamiento del QRS: se suspende si el QRS crece más de un 50 %
+  sobre el basal, antes de alcanzar la dosis máxima.
+references:
+  - "ESC 2022 — Ventricular arrhythmias and sudden cardiac death"

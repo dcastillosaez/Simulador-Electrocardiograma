@@ -18,9 +18,11 @@ import numpy as np
 
 from ecg_engine import EcgEngine, EngineParams
 from ecg_engine.catalog import get_rhythm
+from pharmacology_engine import DrugAdministration, PharmacologyError, Route
 
-from .errors import RhythmNotFoundError
+from .errors import InvalidParamsError, RhythmNotFoundError
 from .measuring import MeasurementWindow, measurements_payload
+from .pharmacology import PharmacologySession
 
 CHUNK_SAMPLES = 50  # 100 ms a 500 Hz — la cadencia de streaming del diseño
 _SEED_UPPER_BOUND = 2**31
@@ -47,6 +49,15 @@ class SimulationManager:
         self._engine: EcgEngine | None = None
         self._sequence_number: int = 0
         self._window: MeasurementWindow | None = None
+        # Los parámetros **de mando**: lo que el usuario pidió, no lo que el
+        # motor está generando. Los dos coinciden mientras no haya fármacos
+        # a bordo y divergen en cuanto los hay, y separarlos es lo que
+        # impide que un `update` posterior tome como punto de partida una
+        # frecuencia que puso la adrenalina. Es también lo que se persiste:
+        # una sesión guarda las órdenes del operador y la lista de
+        # administraciones, no el resultado de mezclarlas.
+        self._command_params: EngineParams | None = None
+        self._pharmacology: PharmacologySession | None = None
 
     def start(
         self,
@@ -70,6 +81,12 @@ class SimulationManager:
         # nuevo, y medir a caballo entre dos ritmos promediaria dos
         # fisiologias distintas.
         self._window = MeasurementWindow(self._engine.sample_rate_hz)
+        # El motor ya recortó los parámetros a los rangos del ritmo, así que
+        # el mando se toma de él y no del mensaje: arrancar un bloqueo AV a
+        # 300 lpm dejaría un basal farmacológico que el motor de señal nunca
+        # llegó a usar.
+        self._command_params = self._engine.params
+        self._pharmacology = PharmacologySession(self._command_params)
         self.state = SimulationState.RUNNING
         return self.session_id
 
@@ -85,8 +102,23 @@ class SimulationManager:
 
     @property
     def params(self) -> EngineParams:
-        assert self._engine is not None
-        return self._engine.params
+        """Los de mando. Es lo que se devuelve en `updated` y lo que se
+        persiste: si aquí se devolviera lo que el motor está generando, la
+        interfaz vería su propio deslizador moverse solo al administrar
+        atropina, y una sesión guardada mezclaría órdenes con fármacos."""
+        assert self._command_params is not None
+        return self._command_params
+
+    @property
+    def pharmacology(self) -> PharmacologySession:
+        assert self._pharmacology is not None
+        return self._pharmacology
+
+    @property
+    def administrations(self) -> tuple[DrugAdministration, ...]:
+        if self._pharmacology is None:
+            return ()
+        return self._pharmacology.administrations
 
     @property
     def duration_s(self) -> float:
@@ -102,7 +134,60 @@ class SimulationManager:
     def update(self, params: EngineParams) -> EngineParams:
         assert self._engine is not None
         self._engine.update_params(params)
-        return self._engine.params
+        # El recorte lo hace el motor, así que el mando se relee de él.
+        self._command_params = self._engine.params
+        self.pharmacology.rebase(self._command_params)
+        # Reaplicar de inmediato: sin esto, un `update` con fármacos a bordo
+        # dejaría el motor generando con la frecuencia de mando pelada hasta
+        # el siguiente chunk, y se vería un salto en el trazado.
+        self._apply_pharmacology()
+        return self._command_params
+
+    def administer(
+        self,
+        drug_id: str,
+        dose: float,
+        route: Route | str,
+        *,
+        operator: str | None = None,
+        notes: str | None = None,
+    ) -> DrugAdministration:
+        """Administra en el instante actual del reloj de simulación.
+
+        En el de simulación y no en el de pared: es lo que hace que un
+        replay reproduzca la sesión y que una pausa no consuma fármaco.
+        """
+        try:
+            administration = self.pharmacology.administer(
+                drug_id, dose, route, self.duration_s, operator=operator, notes=notes
+            )
+        except PharmacologyError as exc:
+            raise InvalidParamsError(str(exc)) from exc
+        self._apply_pharmacology()
+        return administration
+
+    def _apply_pharmacology(self) -> None:
+        """Empuja el estado fisiológico al motor de señal.
+
+        El único punto donde la farmacología toca el ECG, y lo hace sin
+        nombrar un solo fármaco: `engine_params_at` devuelve parámetros de
+        motor, no moléculas.
+        """
+        assert self._engine is not None
+        if self._pharmacology is None or not self._pharmacology.has_administrations:
+            # Sin nada administrado, ni se toca el motor. Una sesión sin
+            # fármacos debe recorrer exactamente el mismo camino de código
+            # que antes de la Fase F, o los golden del motor de señal dejan
+            # de significar nada.
+            return
+        self._engine.update_params(
+            self.pharmacology.engine_params_at(self.duration_s)
+        )
+
+    def pharmacology_payload(self) -> dict | None:
+        if self._pharmacology is None:
+            return None
+        return self._pharmacology.payload(self.duration_s)
 
     def pause(self) -> None:
         self.state = SimulationState.PAUSED
@@ -119,6 +204,10 @@ class SimulationManager:
         normalmente solo mientras `state is RUNNING`; pausar no es más que
         dejar de llamar aquí, igual que en `EcgEngine.generate`."""
         assert self._engine is not None
+        # La cinética avanza con el reloj, así que los parámetros se
+        # recalculan en cada chunk: es lo que hace que la adenosina suba y
+        # baje en treinta segundos sin que nadie la vuelva a tocar.
+        self._apply_pharmacology()
         t_start_s = self._engine.t_s
         channels_v = self._engine.generate(CHUNK_SAMPLES)
         assert self._window is not None

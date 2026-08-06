@@ -13,6 +13,7 @@ dependencies = [
     "alembic>=1.13",
     "numpy>=2.0",
     "ecg-engine",
+    "pharmacology-engine",
 ]
 
 [project.optional-dependencies]
@@ -20,6 +21,7 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "httpx>=0.27", "psycopg2-binary>=2
 
 [tool.uv.sources]
 ecg-engine = { path = "../../packages/ecg-engine", editable = true }
+pharmacology-engine = { path = "../../packages/pharmacology-engine", editable = true }
 
 [build-system]
 requires = ["hatchling"]

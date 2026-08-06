@@ -12,9 +12,10 @@ import datetime as dt
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import ecg_engine
+import pharmacology_engine
 
 from .config import Settings
-from .db.models import SessionRow
+from .db.models import DrugAdministrationRow, SessionRow
 from .schemas import engine_params_to_dict
 from .simulation import SimulationManager
 
@@ -41,16 +42,48 @@ async def persist_session(
             started_at=manager.started_at,
             ended_at=ended_at,
             duration_s=duration_s,
+            # Se graba siempre, aunque no se administrara nada: dice con qué
+            # motor farmacológico corrió la sesión, que es lo que hace
+            # verificable un replay futuro. Un `None` significa «sin motor
+            # farmacológico», no «sin fármacos».
+            pharmacology_semver=pharmacology_engine.__version__,
         )
     )
+    # En el mismo `commit` que la sesión: una administración cuya sesión no
+    # llegó a escribirse es un registro clínico huérfano, y la FK la
+    # rechazaría de todos modos.
+    for administration in manager.administrations:
+        session.add(
+            DrugAdministrationRow(
+                id=administration.id,
+                session_id=manager.session_id,
+                drug_id=administration.drug_id,
+                dose=administration.dose,
+                dose_unit=administration.dose_unit,
+                route=administration.route.value,
+                t_s=administration.t_s,
+                operator=administration.operator,
+                notes=administration.notes,
+            )
+        )
     await session.commit()
 
 
 def should_persist(manager: SimulationManager) -> bool:
     """La regla de las sesiones sin `stop` explícito: se persiste si el
     cliente desconectó habiendo simulado al menos 5 s. Tiempo simulado, no
-    de reloj de pared — determinista y rápido de testear."""
+    de reloj de pared — determinista y rápido de testear.
+
+    Con una excepción: una sesión en la que se administró algo se persiste
+    siempre, dure lo que dure. El umbral de 5 s existe para no llenar la
+    tabla de sesiones abiertas por error, y administrar un fármaco no es un
+    error: es un acto clínico registrado, y tirarlo porque el operador cerró
+    la ventana a los tres segundos sería perder justo el dato que la Fase F
+    existe para guardar.
+    """
+    if manager.session_id is None:
+        return False
     return (
-        manager.session_id is not None
-        and manager.duration_s >= MIN_PERSISTABLE_DURATION_S
+        manager.duration_s >= MIN_PERSISTABLE_DURATION_S
+        or bool(manager.administrations)
     )

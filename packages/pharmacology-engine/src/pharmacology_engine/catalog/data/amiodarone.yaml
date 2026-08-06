@@ -1,0 +1,29 @@
+id: amiodarone
+name: Amiodarona
+category: antiarrhythmic
+routes: [IV, IO]
+dose_unit: mg
+reference_dose: 300
+max_cumulative_dose: 900
+onset_s: 120
+peak_s: 600
+duration_s: 7200
+half_life_s: 1800
+effects:
+  qt_delta_ms: {slope: 40}
+  pr_delta_ms: {slope: 20}
+  qrs_delta_ms: {slope: 6}
+  heart_rate_delta_bpm: {slope: -12}
+  blood_pressure_delta_mmhg: {slope: -10}
+  automaticity: {multiplier: 0.80}
+  ventricular_conduction: {multiplier: 0.90}
+  av_conduction: {multiplier: 0.85}
+  sinus_rate: {multiplier: 0.92}
+  contractility: {multiplier: 0.95}
+clinical_note: >
+  Antiarrítmico de clase III con actividad de las cuatro clases. Alarga la
+  repolarización, y con ella el QT, mucho más de lo que enlentece la
+  conducción: el riesgo docente que ilustra es el QT largo adquirido.
+references:
+  - "AHA ACLS 2020 — Adult Cardiac Arrest Algorithm"
+  - "ESC 2022 — Ventricular arrhythmias and sudden cardiac death"

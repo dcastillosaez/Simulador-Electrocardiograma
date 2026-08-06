@@ -23,6 +23,7 @@ import { LayoutPicker } from "./LayoutPicker";
 import { BasicControlPanel } from "./BasicControlPanel";
 import { AdvancedControlPanel } from "./AdvancedControlPanel";
 import { AxisControl } from "./AxisControl";
+import { PharmacologyPanel } from "./PharmacologyPanel";
 import { zoneFor, ZONE_LABEL } from "./AxisControl/axis-zones";
 import { EcgDisplay } from "./EcgDisplay";
 import { useLayoutMetrics } from "./hooks/useLayoutMetrics";
@@ -216,6 +217,32 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
       : { value: String(Math.round(value)), unavailable: false as const };
   };
 
+  /** Una constante del estado fisiologico publicado por la farmacologia.
+   *
+   * Hueco mientras no ha llegado ninguna publicacion, igual que `measured`.
+   * No se inventa un valor por defecto: mostrar 120/75 antes de que el
+   * servidor haya dicho nada seria afirmar algo sobre un paciente que
+   * todavia no existe. */
+  const physiologic = (key: string, decimals = 0) => {
+    const value = store.physiology?.[key];
+    return value === undefined
+      ? { value: "", unavailable: true as const }
+      : { value: value.toFixed(decimals), unavailable: false as const };
+  };
+
+  /** La tension arterial es dos numeros y una barra: no cabe en
+   * `physiologic`, que devuelve uno. */
+  const vital = (systolicKey: string, diastolicKey: string) => {
+    const systolic = store.physiology?.[systolicKey];
+    const diastolic = store.physiology?.[diastolicKey];
+    return systolic === undefined || diastolic === undefined
+      ? { value: "", unavailable: true as const }
+      : {
+          value: `${Math.round(systolic)}/${Math.round(diastolic)}`,
+          unavailable: false as const,
+        };
+  };
+
   return (
     <AppShell
       header={
@@ -303,6 +330,19 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
                 />
               </>
             )}
+            {/* La farmacologia va en el mismo panel del paciente y no en el
+                inspector: es una accion sobre el enfermo, como elegir el
+                ritmo o mover la frecuencia. El inspector es para leer. */}
+            <SectionTitle>Farmacología</SectionTitle>
+            <PharmacologyPanel
+              catalogClient={catalogClient}
+              activeDrugs={store.activeDrugs}
+              interactions={store.interactions}
+              disabled={!hasSession}
+              onAdminister={(drugId, dose, route) =>
+                runtime.administer(drugId, dose, route)
+              }
+            />
           </Panel>
         </Sidebar>
       }
@@ -369,6 +409,17 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
                   número sin unidades. */}
               <Metric label="QTc (B)" unit="ms" {...measured("qtc_ms")} />
               <Metric label="RR" unit="ms" {...measured("rr_ms")} />
+            </MetricGrid>
+            {/* Las constantes hemodinamicas no se miden sobre la senal: no
+                estan en el ECG. Vienen del estado fisiologico que publica el
+                motor farmacologico, y por eso van en su propia rejilla y no
+                mezcladas con los intervalos. */}
+            <SectionTitle>Constantes</SectionTitle>
+            <MetricGrid>
+              <Metric label="TA" unit="mmHg" {...vital("systolic_bp_mmhg", "diastolic_bp_mmhg")} />
+              <Metric label="FR" unit="rpm" {...physiologic("respiratory_rate_bpm")} />
+              <Metric label="GC" unit="L/min" {...physiologic("cardiac_output_l_min", 1)} />
+              <Metric label="VS" unit="mL" {...physiologic("stroke_volume_ml")} />
             </MetricGrid>
           </Panel>
         </Inspector>

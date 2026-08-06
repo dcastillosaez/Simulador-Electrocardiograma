@@ -1,0 +1,25 @@
+id: magnesium_sulfate
+name: Sulfato de magnesio
+category: electrolyte
+routes: [IV, IO]
+dose_unit: g
+reference_dose: 2
+max_cumulative_dose: 6
+onset_s: 60
+peak_s: 300
+duration_s: 3600
+half_life_s: 1200
+effects:
+  qt_delta_ms: {slope: -25}
+  pr_delta_ms: {slope: 10}
+  heart_rate_delta_bpm: {slope: -4}
+  blood_pressure_delta_mmhg: {slope: -8}
+  automaticity: {multiplier: 0.80}
+  av_conduction: {multiplier: 0.90}
+  ventricular_conduction: {multiplier: 0.95}
+clinical_note: >
+  Tratamiento de la torsade de pointes. Estabiliza la repolarización y
+  acorta el QT incluso con magnesemia normal, que es justo lo que lo hace
+  útil como antídoto del QT largo adquirido.
+references:
+  - "AHA ACLS 2020 — Torsades de pointes"

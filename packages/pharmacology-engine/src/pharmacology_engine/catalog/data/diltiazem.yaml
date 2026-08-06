@@ -1,0 +1,23 @@
+id: diltiazem
+name: Diltiazem
+category: calcium_blocker
+routes: [IV]
+dose_unit: mg
+reference_dose: 20
+max_cumulative_dose: 45
+onset_s: 120
+peak_s: 420
+duration_s: 3000
+half_life_s: 900
+effects:
+  pr_delta_ms: {slope: 28}
+  heart_rate_delta_bpm: {slope: -10}
+  blood_pressure_delta_mmhg: {slope: -12}
+  av_conduction: {multiplier: 0.70}
+  sinus_rate: {multiplier: 0.90}
+  contractility: {multiplier: 0.88}
+clinical_note: >
+  Control de frecuencia en fibrilación auricular rápida. Menos inotrópico
+  negativo que verapamilo a igual freno nodal.
+references:
+  - "ESC 2020 — Atrial fibrillation"

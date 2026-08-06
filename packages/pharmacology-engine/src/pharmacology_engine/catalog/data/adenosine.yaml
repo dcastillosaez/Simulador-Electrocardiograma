@@ -1,0 +1,26 @@
+id: adenosine
+name: Adenosina
+category: antiarrhythmic
+routes: [IV, IO]
+dose_unit: mg
+reference_dose: 6
+max_cumulative_dose: 30
+onset_s: 5
+peak_s: 10
+duration_s: 30
+half_life_s: 6
+effects:
+  av_conduction: {multiplier: 0.05}
+  sinus_rate: {multiplier: 0.45}
+  automaticity: {multiplier: 0.30}
+  heart_rate_delta_bpm: {slope: -28}
+  pr_delta_ms: {slope: 120}
+  blood_pressure_delta_mmhg: {slope: -12}
+clinical_note: >
+  Bloqueo AV transitorio de segundos: interrumpe las taquicardias por
+  reentrada nodal y desenmascara el flutter. Su semivida biológica de
+  segundos es la razón de que se administre en bolo rápido seguido de
+  suero; una infusión lenta no llega al nodo a concentración útil.
+references:
+  - "AHA ACLS 2020 — Adult Tachycardia With a Pulse Algorithm"
+  - "ESC 2019 — Guidelines for supraventricular tachycardia"

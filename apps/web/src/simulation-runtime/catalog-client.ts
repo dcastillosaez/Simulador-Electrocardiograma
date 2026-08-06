@@ -1,4 +1,5 @@
 import type { RhythmDetail, RhythmSummary } from "../types/rhythms";
+import type { DrugDetail, DrugSummary } from "../types/drugs";
 
 export interface CatalogClientOptions {
   baseUrl: string;
@@ -37,5 +38,25 @@ export class CatalogClient {
       throw new Error(`GET /api/rhythms/${rhythmId} devolvió ${response.status}`);
     }
     return (await response.json()) as RhythmDetail;
+  }
+
+  /** El catálogo de fármacos, servido igual que el de ritmos: desde el
+   * motor versionado, no desde la base de datos. */
+  async listDrugs(): Promise<DrugSummary[]> {
+    const response = await this.fetchImpl(`${this.baseUrl}/api/drugs`);
+    if (!response.ok) {
+      throw new Error(`GET /api/drugs devolvió ${response.status}`);
+    }
+    return (await response.json()) as DrugSummary[];
+  }
+
+  async getDrug(drugId: string): Promise<DrugDetail> {
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/api/drugs/${encodeURIComponent(drugId)}`
+    );
+    if (!response.ok) {
+      throw new Error(`GET /api/drugs/${drugId} devolvió ${response.status}`);
+    }
+    return (await response.json()) as DrugDetail;
   }
 }

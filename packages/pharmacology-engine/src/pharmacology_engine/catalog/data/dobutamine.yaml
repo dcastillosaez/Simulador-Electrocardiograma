@@ -1,0 +1,24 @@
+id: dobutamine
+name: Dobutamina
+category: sympathomimetic
+routes: [IV]
+dose_unit: mg
+reference_dose: 5
+max_cumulative_dose: 30
+onset_s: 60
+peak_s: 300
+duration_s: 900
+half_life_s: 240
+effects:
+  heart_rate_delta_bpm: {slope: 12}
+  blood_pressure_delta_mmhg: {slope: 8}
+  contractility: {multiplier: 1.50}
+  stroke_volume: {multiplier: 1.25}
+  automaticity: {multiplier: 1.25}
+  oxygen_consumption: {multiplier: 1.25}
+clinical_note: >
+  Inotrópico beta-1 casi puro. Sube el gasto cardíaco con poco efecto
+  sobre la presión: en el corazón 3D se traduce en una contracción más
+  amplia sin gran cambio de frecuencia.
+references:
+  - "ESC 2021 — Heart failure"

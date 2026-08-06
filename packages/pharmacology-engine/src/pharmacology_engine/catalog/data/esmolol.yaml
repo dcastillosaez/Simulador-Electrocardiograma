@@ -1,0 +1,26 @@
+id: esmolol
+name: Esmolol
+category: beta_blocker
+routes: [IV]
+dose_unit: mg
+reference_dose: 50
+max_cumulative_dose: 300
+onset_s: 30
+peak_s: 90
+duration_s: 600
+half_life_s: 120
+effects:
+  heart_rate_delta_bpm: {slope: -14}
+  pr_delta_ms: {slope: 14}
+  blood_pressure_delta_mmhg: {slope: -14}
+  sinus_rate: {multiplier: 0.85}
+  av_conduction: {multiplier: 0.82}
+  automaticity: {multiplier: 0.78}
+  contractility: {multiplier: 0.85}
+  oxygen_consumption: {multiplier: 0.85}
+clinical_note: >
+  El betabloqueante de semivida ultracorta. Mismo perfil que metoprolol
+  con una duración diez veces menor: sirve para enseñar que el error se
+  revierte solo en minutos.
+references:
+  - "ESC 2020 — Atrial fibrillation"

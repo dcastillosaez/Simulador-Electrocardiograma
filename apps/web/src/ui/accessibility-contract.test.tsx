@@ -13,6 +13,12 @@ import { LEAD_ORDER } from "../render/layout";
 const REQUIRED_LABELS = [
   "Seleccionar ritmo", // lo usa tambien el e2e de Playwright
   "Derivaciones visibles",
+  // Fase F: los dos desplegables del panel de farmacologia estan visibles
+  // desde el arranque, antes de elegir ritmo, porque el catalogo se carga al
+  // montar. El boton de administrar si depende de haber elegido ritmo, asi
+  // que se comprueba en su propio test y no aqui.
+  "Categoría",
+  "Medicamento",
 ];
 
 const RHYTHM_SUMMARY = {
@@ -38,6 +44,19 @@ const RHYTHM_DETAIL = {
   allowed_overlays: [],
 };
 
+const DRUG_SUMMARY = {
+  drug_id: "atropine",
+  display_name: "Atropina",
+  category: "parasympatholytic",
+  routes: ["IV", "IO"],
+  dose_unit: "mg",
+  reference_dose: 1,
+  max_cumulative_dose: 3,
+  onset_s: 20,
+  peak_s: 90,
+  duration_s: 1800,
+};
+
 class SilentSocket {
   static OPEN = 1;
   readyState = 1;
@@ -54,7 +73,12 @@ function renderWorkspace() {
     vi.fn().mockImplementation((url: string) =>
       Promise.resolve({
         ok: true,
-        json: async () => (url.endsWith("/api/rhythms") ? [RHYTHM_SUMMARY] : RHYTHM_DETAIL),
+        json: async () => {
+        if (url.endsWith("/api/rhythms")) return [RHYTHM_SUMMARY];
+        // El panel de farmacologia pide su catalogo al montar.
+        if (url.endsWith("/api/drugs")) return [DRUG_SUMMARY];
+        return RHYTHM_DETAIL;
+      },
       })
     )
   );

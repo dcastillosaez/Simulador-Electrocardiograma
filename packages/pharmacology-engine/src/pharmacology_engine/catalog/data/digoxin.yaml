@@ -1,0 +1,27 @@
+id: digoxin
+name: Digoxina
+category: antiarrhythmic
+routes: [IV, PO]
+dose_unit: mg
+reference_dose: 0.5
+max_cumulative_dose: 1.5
+onset_s: 900
+peak_s: 3600
+duration_s: 21600
+half_life_s: 7200
+effects:
+  pr_delta_ms: {slope: 30}
+  qt_delta_ms: {slope: -30}
+  st_shift_mv: {slope: -0.08}
+  heart_rate_delta_bpm: {slope: -10}
+  av_conduction: {multiplier: 0.70}
+  automaticity: {multiplier: 1.15}
+  contractility: {multiplier: 1.25}
+  stroke_volume: {multiplier: 1.10}
+clinical_note: >
+  Glucósido cardiotónico. Frena el nodo AV por vía vagal mientras aumenta
+  la contractilidad, y su impregnación deja la cubeta digitálica: descenso
+  cóncavo del ST con QT corto, que no es signo de intoxicación.
+references:
+  - "ESC 2020 — Atrial fibrillation"
+  - "ESC 2021 — Heart failure"

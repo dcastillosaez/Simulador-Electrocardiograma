@@ -3,9 +3,11 @@ import { WebSocketClient } from "./websocket-client";
 import { decodeFrame } from "./frame-decoder";
 import { FrameBuffer } from "./frame-buffer";
 import type {
+  AdministeredMessage,
   ClientMessage,
   ErrorMessage,
   MeasurementsMessage,
+  PharmacologyMessage,
   PausedMessage,
   ResumedMessage,
   ServerMessage,
@@ -32,6 +34,8 @@ export interface SessionRuntimeEvents {
   resumed: ResumedMessage;
   stopped: StoppedMessage;
   measurements: MeasurementsMessage;
+  administered: AdministeredMessage;
+  pharmacology: PharmacologyMessage;
   error: ErrorMessage;
   frameMeta: { sequenceNumber: number; lost: boolean; sessionId: string };
 }
@@ -107,6 +111,24 @@ export class SessionRuntime extends TypedEventEmitter<SessionRuntimeEvents> {
     this.send({ type: "stop" });
   }
 
+  /** Administra un fármaco. No lleva instante: lo pone el servidor con su
+   * reloj de simulación, que es el único que el replay puede reproducir. */
+  administer(
+    drugId: string,
+    dose: number,
+    route = "IV",
+    extras: { operator?: string | null; notes?: string | null } = {}
+  ): void {
+    this.send({
+      type: "administer",
+      drug_id: drugId,
+      dose,
+      route,
+      operator: extras.operator ?? null,
+      notes: extras.notes ?? null,
+    });
+  }
+
   private send(message: ClientMessage): void {
     this.ws.sendJson(message);
   }
@@ -139,6 +161,14 @@ export class SessionRuntime extends TypedEventEmitter<SessionRuntimeEvents> {
         // No toca `state`: las medidas describen la senal, no el ciclo de
         // vida de la sesion.
         this.emit("measurements", message);
+        break;
+      case "administered":
+        this.emit("administered", message);
+        break;
+      case "pharmacology":
+        // Tampoco toca `state`, por lo mismo: administrar un farmaco no
+        // arranca ni para una sesion.
+        this.emit("pharmacology", message);
         break;
       case "error":
         this.emit("error", message);

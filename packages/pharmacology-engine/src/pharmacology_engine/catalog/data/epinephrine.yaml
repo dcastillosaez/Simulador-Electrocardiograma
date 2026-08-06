@@ -1,0 +1,29 @@
+id: epinephrine
+name: Adrenalina
+category: sympathomimetic
+routes: [IV, IO, IM]
+dose_unit: mg
+reference_dose: 1
+max_cumulative_dose: 5
+onset_s: 15
+peak_s: 90
+duration_s: 420
+half_life_s: 90
+effects:
+  heart_rate_delta_bpm: {slope: 35}
+  qt_delta_ms: {slope: -10}
+  st_shift_mv: {slope: 0.05}
+  blood_pressure_delta_mmhg: {slope: 45}
+  sinus_rate: {multiplier: 1.35}
+  automaticity: {multiplier: 1.80}
+  av_conduction: {multiplier: 1.20}
+  contractility: {multiplier: 1.60}
+  stroke_volume: {multiplier: 1.20}
+  respiratory_rate: {multiplier: 1.20}
+  oxygen_consumption: {multiplier: 1.50}
+clinical_note: >
+  Agonista alfa y beta. Sube frecuencia, contractilidad y presión a la vez,
+  y con ellas el consumo de oxígeno: el precio que paga el miocardio y que
+  el simulador debe hacer visible.
+references:
+  - "AHA ACLS 2020 — Adult Cardiac Arrest Algorithm"

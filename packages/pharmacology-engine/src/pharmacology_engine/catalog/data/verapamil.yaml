@@ -1,0 +1,25 @@
+id: verapamil
+name: Verapamilo
+category: calcium_blocker
+routes: [IV]
+dose_unit: mg
+reference_dose: 5
+max_cumulative_dose: 20
+onset_s: 60
+peak_s: 300
+duration_s: 2400
+half_life_s: 600
+effects:
+  pr_delta_ms: {slope: 35}
+  heart_rate_delta_bpm: {slope: -8}
+  blood_pressure_delta_mmhg: {slope: -18}
+  av_conduction: {multiplier: 0.65}
+  sinus_rate: {multiplier: 0.90}
+  contractility: {multiplier: 0.80}
+  stroke_volume: {multiplier: 0.92}
+clinical_note: >
+  Calcioantagonista no dihidropiridínico. Su freno del nodo AV es el más
+  marcado del catálogo y su efecto inotrópico negativo es real: es el
+  fármaco de la interacción clásica con betabloqueantes.
+references:
+  - "ESC 2019 — Supraventricular tachycardia"

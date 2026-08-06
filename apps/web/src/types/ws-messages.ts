@@ -1,4 +1,9 @@
 import type { EngineParamsPayload } from "./engine-params";
+import type {
+  ActiveDrug,
+  DrugAdministrationRecord,
+  FiredInteraction,
+} from "./drugs";
 
 export interface StartMessage {
   type: "start";
@@ -24,6 +29,21 @@ export interface StopMessage {
   type: "stop";
 }
 
+/** Administracion de un farmaco (fase F).
+ *
+ * Sin instante: se administra en el momento del reloj de simulacion en que
+ * el mensaje llega al servidor. Dejar que el cliente eligiera el `t_s`
+ * abriria la puerta a administraciones en el pasado, que romperian la
+ * monotonia que el replay da por hecha. */
+export interface AdministerMessage {
+  type: "administer";
+  drug_id: string;
+  dose: number;
+  route?: string;
+  operator?: string | null;
+  notes?: string | null;
+}
+
 export interface PingMessage {
   // Reservado: el backend lo reconoce pero no lo despacha en fase 1 (mide
   // latencia de ida y vuelta, hará falta en fase 2). No hay UI que lo
@@ -38,6 +58,7 @@ export type ClientMessage =
   | PauseMessage
   | ResumeMessage
   | StopMessage
+  | AdministerMessage
   | PingMessage;
 
 export interface StartedMessage {
@@ -90,6 +111,31 @@ export interface MeasurementsMessage {
   values: Record<string, number | null>;
 }
 
+/** Acuse de una administracion concreta. Llega antes que el
+ * `pharmacology` que refleja su efecto. */
+export interface AdministeredMessage {
+  type: "administered";
+  administration: DrugAdministrationRecord;
+}
+
+/** Estado farmacologico completo, a 1 Hz mientras la simulacion corre.
+ *
+ * Canal aparte del de medidas, a la misma cadencia pero con su propio
+ * contrato: fusionarlos obligaria a versionar el payload de medidas cada vez
+ * que la farmacologia anadiera un campo.
+ *
+ * `physiology` es un mapa abierto por la misma razon que `values` en
+ * `MeasurementsMessage`: lleva lo que `EngineParams` no sabe representar
+ * —PR, QRS, QT, conduccion AV, contractilidad, presion, gasto cardiaco— y
+ * crecera con el corazon 3D sin romper a un cliente anterior. */
+export interface PharmacologyMessage {
+  type: "pharmacology";
+  t_s: number;
+  active: ActiveDrug[];
+  interactions: FiredInteraction[];
+  physiology: Record<string, number>;
+}
+
 export type ServerMessage =
   | StartedMessage
   | UpdatedMessage
@@ -97,4 +143,6 @@ export type ServerMessage =
   | ResumedMessage
   | StoppedMessage
   | MeasurementsMessage
+  | AdministeredMessage
+  | PharmacologyMessage
   | ErrorMessage;

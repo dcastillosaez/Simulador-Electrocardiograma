@@ -91,12 +91,31 @@ const RHYTHM_DETAIL = {
   allowed_overlays: [],
 };
 
+const DRUG_SUMMARY = {
+  drug_id: "atropine",
+  display_name: "Atropina",
+  category: "parasympatholytic",
+  routes: ["IV", "IO"],
+  dose_unit: "mg",
+  reference_dose: 1,
+  max_cumulative_dose: 3,
+  onset_s: 20,
+  peak_s: 90,
+  duration_s: 1800,
+};
+
 function stubRhythmFetch(): void {
   vi.stubGlobal(
     "fetch",
     vi.fn().mockImplementation((url: string) => {
       if (url.endsWith("/api/rhythms")) {
         return Promise.resolve({ ok: true, json: async () => [RHYTHM_SUMMARY] });
+      }
+      // El panel de farmacologia pide su catalogo al montar. Sin esta rama
+      // el doble devolvia el detalle de un ritmo para /api/drugs y el panel
+      // se caia al recorrerlo, tumbando el workspace entero.
+      if (url.endsWith("/api/drugs")) {
+        return Promise.resolve({ ok: true, json: async () => [DRUG_SUMMARY] });
       }
       return Promise.resolve({ ok: true, json: async () => RHYTHM_DETAIL });
     })

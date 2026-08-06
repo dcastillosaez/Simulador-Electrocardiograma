@@ -21,6 +21,7 @@ from ..errors import SimulationError
 from ..outbox import FrameOutbox
 from ..persistence import persist_session, should_persist
 from ..schemas import (
+    AdministerMessage,
     ClientMessageError,
     PauseMessage,
     PingMessage,
@@ -28,6 +29,7 @@ from ..schemas import (
     StartMessage,
     StopMessage,
     UpdateMessage,
+    administered_message,
     error_message,
     parse_client_message,
     paused_message,
@@ -37,7 +39,7 @@ from ..schemas import (
     updated_message,
 )
 from ..simulation import SimulationManager
-from ..streaming import stream_chunks, stream_measurements
+from ..streaming import stream_chunks, stream_measurements, stream_pharmacology
 
 router = APIRouter()
 logger = logging.getLogger("ecg_api.simulation_ws")
@@ -244,7 +246,15 @@ async def simulation_ws(websocket: WebSocket) -> None:
                 measurements_task = asyncio.create_task(
                     stream_measurements(manager, websocket.send_json)
                 )
-                for task in (producer_task, sender_task, measurements_task):
+                pharmacology_task = asyncio.create_task(
+                    stream_pharmacology(manager, websocket.send_json)
+                )
+                for task in (
+                    producer_task,
+                    sender_task,
+                    measurements_task,
+                    pharmacology_task,
+                ):
                     task.add_done_callback(
                         functools.partial(
                             _on_background_task_done,
@@ -253,13 +263,46 @@ async def simulation_ws(websocket: WebSocket) -> None:
                             close_tasks=close_tasks,
                         )
                     )
-                background_tasks = [producer_task, sender_task, measurements_task]
+                background_tasks = [
+                    producer_task,
+                    sender_task,
+                    measurements_task,
+                    pharmacology_task,
+                ]
 
             elif isinstance(message, UpdateMessage):
                 if await _reject_if_no_active_session(websocket, manager):
                     continue
                 applied = manager.update(message.params.to_engine_params())
                 await websocket.send_json(updated_message(params=applied))
+
+            elif isinstance(message, AdministerMessage):
+                if await _reject_if_no_active_session(websocket, manager):
+                    continue
+                try:
+                    administration = manager.administer(
+                        message.drug_id,
+                        message.dose,
+                        message.route,
+                        operator=message.operator,
+                        notes=message.notes,
+                    )
+                except SimulationError as exc:
+                    await websocket.send_json(
+                        error_message(code=exc.code, detail=str(exc))
+                    )
+                    continue
+                await websocket.send_json(
+                    administered_message(administration=administration)
+                )
+                # Y el estado farmacológico completo de inmediato, sin
+                # esperar al siguiente tic del bucle de 1 Hz: el usuario
+                # acaba de pulsar «administrar» y la lista de fármacos
+                # activos tiene que responder al gesto, no un segundo
+                # después.
+                payload = manager.pharmacology_payload()
+                if payload is not None:
+                    await websocket.send_json(payload)
 
             elif isinstance(message, PauseMessage):
                 if await _reject_if_no_active_session(websocket, manager):

@@ -10,6 +10,10 @@ Proyecto independiente dentro de `F:/Documentos/IA/Medicina/`, sin relación con
 
 **Estado actual:** fase 1 implementada de extremo a extremo. `packages/ecg-engine/` genera los doce ritmos del MVP en las doce derivaciones, de forma determinista, con red de golden signals en tres niveles. `apps/api/` los sirve por WebSocket (frames binarios a 10Hz) y publica las medidas fisiológicas (FC, RR, PR, QRS, QT, QTc) en JSON a 1Hz. `apps/web/` es el puesto de simulación clínica, con su propio sistema de diseño en `packages/ui-system/`.
 
+**Fase F (farmacología) implementada.** `packages/pharmacology-engine/` es un paquete independiente que **no importa nada de `ecg-engine`** —hay un test que lo verifica leyendo los imports de cada módulo—. Quince moléculas como YAML en `catalog/data/`, curvas concentración-tiempo, acumulación de dosis con techo e interacciones declarativas. Su única salida es `PhysiologyState`, y `apps/api/src/ecg_api/pharmacology/projection.py` es el **único** punto del sistema donde ese estado se traduce a `EngineParams`. El resto del estado fisiológico —PR, QRS, QT, conducción AV, contractilidad, presión, gasto— viaja por el canal JSON `pharmacology` a 1Hz, listo para el corazón 3D de la fase D. Las administraciones se registran en `drug_administrations` y la sesión guarda la versión del motor farmacológico, que es lo que hace verificable un replay.
+
+Añadir una molécula es añadir un archivo YAML. Si alguna vez obliga a tocar código fuera de `catalog/data/`, la arquitectura ha fallado.
+
 ## Cómo arrancar
 
 ```bash

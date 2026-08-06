@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from .config import get_settings
 from .db.base import get_engine
 from .db.seed import seed_catalog
+from .routers.drugs import router as drugs_router
 from .routers.health import router as health_router
 from .routers.rhythms import router as rhythms_router
 from .routers.sessions import router as sessions_router
@@ -50,5 +51,6 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(rhythms_router)
+app.include_router(drugs_router)
 app.include_router(sessions_router)
 app.include_router(simulation_ws_router)

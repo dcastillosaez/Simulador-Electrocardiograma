@@ -11,8 +11,8 @@ import uuid
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import select
 
-from ..db.models import SessionRow
-from ..schemas import SessionDetail, SessionSummary
+from ..db.models import DrugAdministrationRow, SessionRow
+from ..schemas import AdministrationRecord, SessionDetail, SessionSummary
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -28,7 +28,9 @@ def _to_summary(row: SessionRow) -> SessionSummary:
     )
 
 
-def _to_detail(row: SessionRow) -> SessionDetail:
+def _to_detail(
+    row: SessionRow, administrations: list[DrugAdministrationRow]
+) -> SessionDetail:
     return SessionDetail(
         **_to_summary(row).model_dump(),
         params=row.params,
@@ -36,6 +38,20 @@ def _to_detail(row: SessionRow) -> SessionDetail:
         engine_semver=row.engine_semver,
         engine_commit=row.engine_commit,
         ended_at=row.ended_at,
+        pharmacology_semver=row.pharmacology_semver,
+        administrations=[
+            AdministrationRecord(
+                id=a.id,
+                drug_id=a.drug_id,
+                dose=float(a.dose),
+                dose_unit=a.dose_unit,
+                route=a.route,
+                t_s=float(a.t_s),
+                operator=a.operator,
+                notes=a.notes,
+            )
+            for a in administrations
+        ],
     )
 
 
@@ -65,6 +81,19 @@ async def get_session(session_id: str, request: Request) -> SessionDetail:
     session_factory = request.app.state.session_factory
     async with session_factory() as db:
         row = await db.get(SessionRow, parsed_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="sesión no encontrada")
-    return _to_detail(row)
+        if row is None:
+            raise HTTPException(status_code=404, detail="sesión no encontrada")
+        # Ordenadas por `t_s`: es el orden en que ocurrieron y el orden en
+        # que un replay debe reinyectarlas.
+        administrations = list(
+            (
+                await db.execute(
+                    select(DrugAdministrationRow)
+                    .where(DrugAdministrationRow.session_id == parsed_id)
+                    .order_by(DrugAdministrationRow.t_s)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return _to_detail(row, administrations)

@@ -1,0 +1,22 @@
+id: lidocaine
+name: Lidocaína
+category: antiarrhythmic
+routes: [IV, IO]
+dose_unit: mg
+reference_dose: 100
+max_cumulative_dose: 300
+onset_s: 45
+peak_s: 120
+duration_s: 1200
+half_life_s: 300
+effects:
+  qrs_delta_ms: {slope: 4}
+  qt_delta_ms: {slope: -12}
+  automaticity: {multiplier: 0.70}
+  ventricular_conduction: {multiplier: 0.92}
+clinical_note: >
+  Clase Ib. Acorta la repolarización en vez de alargarla, así que su QT
+  baja: es el contraejemplo útil frente a amiodarona y procainamida.
+  Actúa sobre miocardio ventricular y apenas toca el nodo AV.
+references:
+  - "AHA ACLS 2020 — Adult Cardiac Arrest Algorithm"

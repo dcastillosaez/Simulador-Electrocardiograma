@@ -42,6 +42,7 @@ from typing import Literal, Union
 from pydantic import Field, ValidationError
 
 from ecg_engine import AxisParams, EngineParams, NoiseParams, VariabilityParams
+from pharmacology_engine import DrugAdministration
 
 
 class NoiseParamsPayload(BaseModel):
@@ -123,6 +124,23 @@ class StopMessage(BaseModel):
     type: Literal["stop"]
 
 
+class AdministerMessage(BaseModel):
+    """Administración de un fármaco (fase F).
+
+    No lleva instante: se administra en el momento del reloj de simulación
+    en que llega el mensaje. Dejar que el cliente eligiera el `t_s` abriría
+    la puerta a administraciones en el pasado, que romperían la monotonía
+    que el replay da por hecha.
+    """
+
+    type: Literal["administer"]
+    drug_id: str
+    dose: float
+    route: str = "IV"
+    operator: str | None = None
+    notes: str | None = None
+
+
 class PingMessage(BaseModel):
     """Reservado. Se reconoce pero no se despacha en fase 1: la versión del
     contrato queda lista para medir latencia sin romper clientes existentes
@@ -133,7 +151,7 @@ class PingMessage(BaseModel):
 
 ClientMessage = Union[
     StartMessage, UpdateMessage, PauseMessage, ResumeMessage, StopMessage,
-    PingMessage,
+    AdministerMessage, PingMessage,
 ]
 
 _MESSAGE_TYPES: dict[str, type[BaseModel]] = {
@@ -142,6 +160,7 @@ _MESSAGE_TYPES: dict[str, type[BaseModel]] = {
     "pause": PauseMessage,
     "resume": ResumeMessage,
     "stop": StopMessage,
+    "administer": AdministerMessage,
     "ping": PingMessage,
 }
 
@@ -203,6 +222,45 @@ def error_message(*, code: str, detail: str) -> dict:
     return {"type": "error", "code": code, "detail": detail}
 
 
+def administered_message(*, administration: DrugAdministration) -> dict:
+    return {"type": "administered", "administration": administration.as_dict()}
+
+
+# --- REST: catálogo de fármacos ---------------------------------------------
+
+
+class DrugSummary(BaseModel):
+    drug_id: str
+    display_name: str
+    category: str
+    routes: list[str]
+    dose_unit: str
+    reference_dose: float
+    max_cumulative_dose: float
+    onset_s: float
+    peak_s: float
+    duration_s: float
+
+
+class DrugDetail(DrugSummary):
+    half_life_s: float
+    clinical_note: str
+    references: list[str]
+    effects: dict[str, float]
+
+
+class InteractionSummary(BaseModel):
+    """Las reglas declaradas, para que la interfaz pueda avisar **antes** de
+    administrar. Es catálogo, no estado: no dice qué está pasando en una
+    sesión sino qué puede pasar."""
+
+    rule_id: str
+    description: str
+    clinical_note: str
+    references: list[str]
+    participants: list[dict]
+
+
 # --- REST: sesiones ---------------------------------------------------------
 
 import datetime as dt
@@ -215,9 +273,26 @@ class SessionSummary(BaseModel):
     duration_s: float | None
 
 
+class AdministrationRecord(BaseModel):
+    id: uuid.UUID
+    drug_id: str
+    dose: float
+    dose_unit: str
+    route: str
+    t_s: float
+    operator: str | None
+    notes: str | None
+
+
 class SessionDetail(SessionSummary):
     params: dict
     seed: int
     engine_semver: str
     engine_commit: str
     ended_at: dt.datetime | None
+    # El replay de una sesión medicada solo es fiel si coinciden semilla,
+    # versión del motor de señal y versión del motor farmacológico: cambiar
+    # una curva de concentración cambia el trazado sin cambiar ni una
+    # administración.
+    pharmacology_semver: str | None = None
+    administrations: list[AdministrationRecord] = Field(default_factory=list)

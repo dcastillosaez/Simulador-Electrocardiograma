@@ -1,0 +1,24 @@
+id: dopamine
+name: Dopamina
+category: sympathomimetic
+routes: [IV, IO]
+dose_unit: mg
+reference_dose: 5
+max_cumulative_dose: 30
+onset_s: 60
+peak_s: 300
+duration_s: 900
+half_life_s: 240
+effects:
+  heart_rate_delta_bpm: {slope: 18}
+  blood_pressure_delta_mmhg: {slope: 22}
+  contractility: {multiplier: 1.35}
+  stroke_volume: {multiplier: 1.15}
+  automaticity: {multiplier: 1.40}
+  oxygen_consumption: {multiplier: 1.30}
+clinical_note: >
+  Efecto dependiente de dosis: a dosis bajas domina el inotropismo y a
+  dosis altas el vasoconstrictor. Es la alternativa a la estimulación
+  transcutánea en la bradicardia sintomática.
+references:
+  - "AHA ACLS 2020 — Adult Bradycardia Algorithm"

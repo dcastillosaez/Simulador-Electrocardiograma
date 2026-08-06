@@ -14,7 +14,11 @@ from sqlalchemy import engine_from_config, pool
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from ecg_api.db.base import Base  # noqa: E402
-from ecg_api.db.models import RhythmRow, SessionRow  # noqa: E402,F401
+from ecg_api.db.models import (  # noqa: E402,F401
+    DrugAdministrationRow,
+    RhythmRow,
+    SessionRow,
+)
 
 config = context.config
 target_metadata = Base.metadata

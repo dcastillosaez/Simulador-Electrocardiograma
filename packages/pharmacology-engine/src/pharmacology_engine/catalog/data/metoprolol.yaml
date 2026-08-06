@@ -1,0 +1,27 @@
+id: metoprolol
+name: Metoprolol
+category: beta_blocker
+routes: [IV]
+dose_unit: mg
+reference_dose: 5
+max_cumulative_dose: 15
+onset_s: 60
+peak_s: 300
+duration_s: 3600
+half_life_s: 900
+effects:
+  heart_rate_delta_bpm: {slope: -12}
+  pr_delta_ms: {slope: 18}
+  blood_pressure_delta_mmhg: {slope: -12}
+  sinus_rate: {multiplier: 0.85}
+  av_conduction: {multiplier: 0.80}
+  automaticity: {multiplier: 0.75}
+  contractility: {multiplier: 0.85}
+  stroke_volume: {multiplier: 0.95}
+  oxygen_consumption: {multiplier: 0.85}
+clinical_note: >
+  Betabloqueante cardioselectivo. Frena el nodo sinusal y el AV y baja el
+  consumo miocárdico de oxígeno, que es la razón de su papel en el
+  síndrome coronario agudo.
+references:
+  - "ESC 2023 — Acute coronary syndromes"
