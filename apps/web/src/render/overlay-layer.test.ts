@@ -5,6 +5,8 @@ import { PX_PER_MM } from "./grid-layer";
 import { drawOverlay } from "./overlay-layer";
 import { createSession } from "../measure/session";
 import type { MeasurePoint } from "../measure/tools";
+import { SweepBuffer } from "./sweep-buffer";
+import type { LeadName } from "./layout";
 
 const CAPACITY = 1000;
 const SAMPLE_RATE_HZ = 500;
@@ -57,6 +59,14 @@ function point(ringPos: number, lead = "II"): MeasurePoint {
   };
 }
 
+function makeSweeps() {
+  const sweep = new SweepBuffer(CAPACITY);
+  const samples = new Float32Array(CAPACITY);
+  samples[500] = 0.0012;
+  sweep.push(samples);
+  return new Map<LeadName, SweepBuffer>([["II", sweep]]);
+}
+
 function frameWith(session: ReturnType<typeof createSession>) {
   return {
     session,
@@ -65,6 +75,7 @@ function frameWith(session: ReturnType<typeof createSession>) {
     sampleRateHz: SAMPLE_RATE_HZ,
     capacity: CAPACITY,
     writtenCount: CAPACITY,
+    sweeps: makeSweeps(),
     theme: getTheme("dark").ecg,
     magnifier: false,
   };
@@ -143,6 +154,35 @@ describe("region medible", () => {
   it("con el anillo lleno no atenua nada", () => {
     const ctx = makeCtx();
     drawOverlay(ctx, { ...frameWith(createSession("caliper")), writtenCount: CAPACITY });
+
+    expect(ctx.fillRect).not.toHaveBeenCalled();
+  });
+});
+
+describe("lupa", () => {
+  it("apagada no dibuja nada extra", () => {
+    const ctx = makeCtx();
+    const session = { ...createSession("caliper"), hover: point(500) };
+    drawOverlay(ctx, { ...frameWith(session), magnifier: false });
+
+    expect(ctx.fillRect).not.toHaveBeenCalled();
+  });
+
+  it("encendida dibuja su marco y su rotulo de aumento", () => {
+    // El rotulo no es decoracion: una lupa sin declarar su escala invita a
+    // contar cuadros sobre una rejilla que no es la de la pantalla.
+    const ctx = makeCtx();
+    const session = { ...createSession("caliper"), hover: point(500) };
+    drawOverlay(ctx, { ...frameWith(session), magnifier: true });
+
+    expect(ctx.fillRect).toHaveBeenCalled();
+    const textos = (ctx.fillText as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+    expect(textos).toContain("×4");
+  });
+
+  it("sin cursor no hay lupa", () => {
+    const ctx = makeCtx();
+    drawOverlay(ctx, { ...frameWith(createSession("caliper")), magnifier: true });
 
     expect(ctx.fillRect).not.toHaveBeenCalled();
   });

@@ -104,6 +104,7 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
   // fuera de pantalla. Al reanudar se vuelve a la velocidad de referencia.
   const [paperSpeedMmS, setPaperSpeedMmS] = useState<number>(REFERENCE_PAPER_SPEED_MM_S);
   const [viewStartRingPos, setViewStartRingPos] = useState(0);
+  const [magnifier, setMagnifier] = useState(false);
 
   const leadColumns = useMemo(() => leadColumnsForLayout(layout), [layout]);
   const sampleRateHz = store.sampleRateHz ?? DEFAULT_SAMPLE_RATE_HZ;
@@ -166,6 +167,7 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
       // donde escribe el barrido.
       setPaperSpeedMmS(REFERENCE_PAPER_SPEED_MM_S);
       setViewStartRingPos(0);
+      setMagnifier(false);
       runtime.resume();
     } else {
       setIsFrozen(true);
@@ -258,6 +260,8 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
           isFrozen={isFrozen}
           onToggleFreeze={toggleFreeze}
           freezeDisabled={!hasSession}
+          magnifier={magnifier}
+          onToggleMagnifier={() => setMagnifier((on) => !on)}
           onExportPng={exportPng}
           isRecording={isRecording}
           onToggleRecording={toggleRecording}
@@ -329,7 +333,7 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
               paperSpeedMmS={paperSpeedMmS}
               theme={theme.ecg}
               view={measureView}
-              magnifier={false}
+              magnifier={magnifier}
               getSource={getMeasureSource}
               onResultChange={setMeasureSession}
               onPan={handlePan}

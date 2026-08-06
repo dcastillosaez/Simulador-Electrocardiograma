@@ -3910,9 +3910,15 @@ Añadir los imports de `LeadName` y `SweepBuffer`, y en `MeasureOverlay.tsx` pas
 
 - [ ] **Step 4: Añadir el conmutador**
 
-En `WorkspaceHeader.tsx`, añadir un `IconButton` con `icon="search"`, `label="Lupa"`, `active={magnifier}`, `disabled={!isFrozen}` y su `onToggleMagnifier`. En `ECGWorkspace.tsx`, el estado `const [magnifier, setMagnifier] = useState(false);` pasado a `<MeasureOverlay magnifier={magnifier} />` y puesto a `false` al descongelar.
+En `WorkspaceHeader.tsx`, añadir un `IconButton` con `icon="zoom"`, `label="Lupa"`, `active={magnifier}`, `disabled={!isFrozen}` y su `onToggleMagnifier`. En `ECGWorkspace.tsx`, el estado `const [magnifier, setMagnifier] = useState(false);` pasado a `<MeasureOverlay magnifier={magnifier} />` y puesto a `false` al descongelar.
 
-Si `Icon` no tiene un glifo `search`, usar el que exista más cercano de los ya definidos en `packages/ui-system/components/foundation/Icon.tsx` — no se añaden componentes nuevos al sistema de diseño.
+**Desviación:** `Icon` no tiene ningún glifo que sirva de lupa —el más cercano, `signal`, son ondas de cobertura y sería engañoso—. Se añade una entrada `zoom` a `PATHS` en `packages/ui-system/components/foundation/Icon.tsx`:
+
+```ts
+  zoom: ["M11 5a6 6 0 1 0 0 12 6 6 0 0 0 0-12z", "M15.5 15.5l4.5 4.5"],
+```
+
+Es un dato dentro de un componente que ya existe, no un componente nuevo, así que no contradice la restricción global; `foundation.test.tsx` ya itera `ICON_NAMES`, de modo que queda cubierto automáticamente.
 
 - [ ] **Step 5: Ejecutar y comprobar que pasa**
 

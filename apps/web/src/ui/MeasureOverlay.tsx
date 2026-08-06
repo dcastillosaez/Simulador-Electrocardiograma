@@ -105,6 +105,7 @@ export const MeasureOverlay = forwardRef<MeasureOverlayHandle, MeasureOverlayPro
             sampleRateHz,
             capacity: source.capacity,
             writtenCount: source.indexRing.writtenCount,
+            sweeps: source.sweeps,
             theme,
             magnifier,
           });

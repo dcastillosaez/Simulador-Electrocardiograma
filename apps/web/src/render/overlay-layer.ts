@@ -3,7 +3,9 @@ import { formatMv, formatSeconds } from "../measure/formulas";
 import type { MeasurementSession } from "../measure/session";
 import type { MeasurePoint } from "../measure/tools";
 import { voltageToPx } from "./grid-layer";
+import type { LeadName } from "./layout";
 import { COLUMN_GAP_PX, STRIP_GAP_PX } from "./layout-engine";
+import type { SweepBuffer } from "./sweep-buffer";
 import {
   pxPerSample,
   ringPosToPx,
@@ -20,6 +22,11 @@ export const MARKER_HANDLE_PX = 5;
  * está el puntero» de «dónde he dejado una marca». */
 const CURSOR_DASH = [4, 3];
 
+export const MAGNIFIER_WIDTH_PX = 180;
+export const MAGNIFIER_HEIGHT_PX = 120;
+export const MAGNIFIER_FACTOR = 4;
+const MAGNIFIER_MARGIN_PX = 12;
+
 export interface OverlayFrame {
   session: MeasurementSession;
   layout: StripLayout;
@@ -29,6 +36,9 @@ export interface OverlayFrame {
   /** Muestras escritas en el anillo. Por debajo de `capacity` hay una zona sin
    * señal que no se puede medir. */
   writtenCount: number;
+  /** La señal de cada derivación. La lupa la vuelve a dibujar a otra escala en
+   * vez de ampliar píxeles del canvas. */
+  sweeps: ReadonlyMap<LeadName, SweepBuffer>;
   theme: EcgTheme;
   magnifier: boolean;
 }
@@ -64,6 +74,81 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, frame: OverlayFrame):
   drawTimeLine(ctx, hover.ringPos, frame, pps, heightPx, true);
   drawVoltageLine(ctx, hover, frame, widthPx);
   drawCursorLabel(ctx, hover, frame, pps, widthPx);
+  if (frame.magnifier) {
+    drawMagnifier(ctx, hover, frame, pps, widthPx, heightPx);
+  }
+}
+
+/** Ventana ampliada alrededor del cursor, dibujada DESDE EL ANILLO.
+ *
+ * No es un escalado de los píxeles del canvas: a la escala de referencia cada
+ * píxel contiene unas seis muestras, así que ampliar la imagen ampliaría el
+ * aliasing en vez de recuperar la señal. Aquí se vuelve a dibujar la señal a
+ * otra escala, que es lo que enseña algo que en la vista normal no está.
+ *
+ * Lleva rejilla propia y rótulo de aumento: una lupa que no declara su escala
+ * invita a contar cuadros sobre una rejilla que no es la de la pantalla, que
+ * es justo el error que este proyecto persigue. Los números del calibrador
+ * salen siempre de las muestras, nunca de lo que se ve aquí. */
+function drawMagnifier(
+  ctx: CanvasRenderingContext2D,
+  hover: MeasurePoint,
+  frame: OverlayFrame,
+  pps: number,
+  widthPx: number,
+  heightPx: number
+): void {
+  const sweep = frame.sweeps.get(hover.lead);
+  const position = locate(hover, frame);
+  if (!sweep || !position) return;
+
+  const cursorX = position.left + ringPosToPx(hover.ringPos, frame.view, pps, frame.capacity);
+  // Al lado opuesto del cursor, y volteada cerca de los bordes: la lupa no
+  // puede tapar justo lo que se está mirando.
+  const left =
+    cursorX + MAGNIFIER_MARGIN_PX + MAGNIFIER_WIDTH_PX > widthPx
+      ? cursorX - MAGNIFIER_MARGIN_PX - MAGNIFIER_WIDTH_PX
+      : cursorX + MAGNIFIER_MARGIN_PX;
+  const top = Math.min(Math.max(0, position.top), heightPx - MAGNIFIER_HEIGHT_PX);
+
+  ctx.fillStyle = frame.theme.background;
+  ctx.fillRect(left, top, MAGNIFIER_WIDTH_PX, MAGNIFIER_HEIGHT_PX);
+
+  const zoomPxPerSample = pps * MAGNIFIER_FACTOR;
+  const zoomPxPerMm = frame.layout.metrics.viewportScalePxPerMm * MAGNIFIER_FACTOR;
+  const samples = Math.round(MAGNIFIER_WIDTH_PX / zoomPxPerSample);
+  const centerY = top + MAGNIFIER_HEIGHT_PX / 2;
+
+  // Rejilla propia, a la escala propia.
+  ctx.strokeStyle = frame.theme.gridMinor;
+  ctx.lineWidth = 0.5;
+  for (let mm = 0; mm * zoomPxPerMm <= MAGNIFIER_WIDTH_PX; mm++) {
+    const x = left + mm * zoomPxPerMm;
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, top + MAGNIFIER_HEIGHT_PX);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = frame.theme.trace;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = 0; i <= samples; i++) {
+    const ringPos =
+      (((hover.ringPos - samples / 2 + i) % frame.capacity) + frame.capacity) % frame.capacity;
+    const x = left + i * zoomPxPerSample;
+    const y =
+      centerY - voltageToPx(sweep.at(ringPos), frame.layout.metrics) * MAGNIFIER_FACTOR;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  ctx.fillStyle = frame.theme.trace;
+  ctx.font = `${CURSOR_LABEL_PX}px monospace`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillText(`×${MAGNIFIER_FACTOR}`, left + 4, top + 4);
 }
 
 /** Vela la parte del anillo que todavía no tiene señal.

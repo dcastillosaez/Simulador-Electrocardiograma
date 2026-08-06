@@ -38,6 +38,8 @@ export interface WorkspaceHeaderProps {
   isFrozen: boolean;
   onToggleFreeze: () => void;
   freezeDisabled: boolean;
+  magnifier: boolean;
+  onToggleMagnifier: () => void;
   onExportPng: () => void;
   isRecording: boolean;
   onToggleRecording: () => void;
@@ -58,6 +60,8 @@ export function WorkspaceHeader({
   isFrozen,
   onToggleFreeze,
   freezeDisabled,
+  magnifier,
+  onToggleMagnifier,
   onExportPng,
   isRecording,
   onToggleRecording,
@@ -90,6 +94,15 @@ export function WorkspaceHeader({
         onClick={onToggleFreeze}
         disabled={freezeDisabled}
         active={isFrozen}
+      />
+      {/* Solo congelado: la lupa dibuja desde el anillo, y con el barrido en
+          marcha lo que hay bajo el cursor cambia 500 veces por segundo. */}
+      <IconButton
+        icon="zoom"
+        label="Lupa"
+        onClick={onToggleMagnifier}
+        disabled={!isFrozen}
+        active={magnifier}
       />
       <IconButton icon="download" label="PNG" onClick={onExportPng} />
       <IconButton
