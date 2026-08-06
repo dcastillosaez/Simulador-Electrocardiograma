@@ -34,7 +34,12 @@ import {
   rowsForLayout,
   type LayoutId,
 } from "../render/layout";
-import { type Compression, type GainSetting } from "../render/layout-engine";
+import {
+  REFERENCE_PAPER_SPEED_MM_S,
+  type Compression,
+  type GainSetting,
+} from "../render/layout-engine";
+import { clampStart, nextPaperSpeed } from "../measure/zoom";
 import type { RhythmDetail } from "../types/rhythms";
 import styles from "./ECGWorkspace.module.css";
 
@@ -53,7 +58,6 @@ const DEFAULT_AXIS = {
   t_offset_deg: 0,
 };
 const DEFAULT_SAMPLE_RATE_HZ = 500;
-const PAPER_SPEED_MM_S = 25;
 
 /** El indicador es clínico, no técnico: en pantalla no aparece nunca un
  * "46 px/tira", porque ni el médico ni el alumno saben qué hacer con ese
@@ -95,6 +99,11 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
   // parado en el mismo frame en que pulsa. El `pause` viaja en paralelo para
   // que el motor deje de generar.
   const [isFrozen, setIsFrozen] = useState(false);
+  // El zoom es una herramienta de congelado: en marcha, la ventana visible es
+  // donde escribe el barrido, y cambiarla a mitad de escritura deja el cursor
+  // fuera de pantalla. Al reanudar se vuelve a la velocidad de referencia.
+  const [paperSpeedMmS, setPaperSpeedMmS] = useState<number>(REFERENCE_PAPER_SPEED_MM_S);
+  const [viewStartRingPos, setViewStartRingPos] = useState(0);
 
   const leadColumns = useMemo(() => leadColumnsForLayout(layout), [layout]);
   const sampleRateHz = store.sampleRateHz ?? DEFAULT_SAMPLE_RATE_HZ;
@@ -106,8 +115,19 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
     rowCount: rowsForLayout(layout),
     columnCount: columnsForLayout(layout),
     gain,
-    paperSpeedMmS: PAPER_SPEED_MM_S,
+    paperSpeedMmS,
   });
+
+  // La ventana visible del anillo. A la velocidad de referencia son los
+  // segundos completos de la tira; al hacer zoom, la misma cuenta da menos
+  // muestras porque `stripSeconds` se deriva de la velocidad vigente.
+  const measureView = useMemo(
+    () => ({
+      startRingPos: viewStartRingPos,
+      visibleSamples: Math.round(metrics.stripSeconds * sampleRateHz),
+    }),
+    [viewStartRingPos, metrics.stripSeconds, sampleRateHz]
+  );
 
   const { registerTrace, registerGrid, isAwaitingSignal, composeSnapshot, getMeasureSource } =
     useSweepRenderer({
@@ -117,17 +137,8 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
       metrics,
       theme,
       frozen: isFrozen,
+      view: measureView,
     });
-
-  // La ventana visible del anillo. Hasta que exista el zoom temporal es el
-  // anillo entero: la misma cuenta que usa `sweepCapacitySamples` para
-  // dimensionarlo (ancho de tira / px-por-muestra = segundos de tira ×
-  // frecuencia de muestreo), así que las dos coinciden sin tener que exponer
-  // la capacidad real del anillo hasta que haya una muestra escrita.
-  const measureView = useMemo(
-    () => ({ startRingPos: 0, visibleSamples: Math.round(metrics.stripSeconds * sampleRateHz) }),
-    [metrics.stripSeconds, sampleRateHz]
-  );
 
   const measureOverlayRef = useRef<MeasureOverlayHandle>(null);
   const [measureSession, setMeasureSession] = useState<MeasurementSession | null>(null);
@@ -151,12 +162,40 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
   const toggleFreeze = () => {
     if (isFrozen) {
       setIsFrozen(false);
+      // El zoom no sobrevive al descongelado: en marcha la ventana visible es
+      // donde escribe el barrido.
+      setPaperSpeedMmS(REFERENCE_PAPER_SPEED_MM_S);
+      setViewStartRingPos(0);
       runtime.resume();
     } else {
       setIsFrozen(true);
       runtime.pause();
     }
   };
+
+  const handleZoom = useCallback((direction: 1 | -1) => {
+    setPaperSpeedMmS((current) => nextPaperSpeed(current, direction));
+    // Al cambiar de escalón la ventana cambia de tamaño; volver al origen es
+    // predecible y evita quedarse mirando un tramo que ya no es el que había
+    // debajo del cursor.
+    setViewStartRingPos(0);
+  }, []);
+
+  const handlePan = useCallback(
+    (deltaSamples: number) => {
+      const source = getMeasureSource();
+      if (!source) return;
+      setViewStartRingPos((start) =>
+        clampStart(
+          start - deltaSamples,
+          measureView.visibleSamples,
+          source.capacity,
+          source.indexRing.writtenCount
+        )
+      );
+    },
+    [getMeasureSource, measureView.visibleSamples]
+  );
 
   // El CSS toma su juego de custom properties del atributo del elemento raíz.
   useEffect(() => {
@@ -287,12 +326,14 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
               active={isFrozen}
               layout={{ leadColumns, metrics }}
               sampleRateHz={sampleRateHz}
-              paperSpeedMmS={PAPER_SPEED_MM_S}
+              paperSpeedMmS={paperSpeedMmS}
               theme={theme.ecg}
               view={measureView}
               magnifier={false}
               getSource={getMeasureSource}
               onResultChange={setMeasureSession}
+              onPan={handlePan}
+              onZoom={handleZoom}
             />
           }
         />
@@ -325,7 +366,10 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
           <span>
             {metrics.clinicalGainMmPerMv} mm/mV{metrics.gainIsAuto ? " (auto)" : ""}
           </span>
-          <span>{PAPER_SPEED_MM_S} mm/s</span>
+          {/* Dinamico desde el zoom temporal: a 50mm/s el mismo intervalo
+              ocupa el doble de papel, y un trazado que no declara su velocidad
+              se lee mal. */}
+          <span>{paperSpeedMmS} mm/s</span>
           {/* Los segundos por tira son la lectura que importa: en el formato
               partido cada una muestra la mitad, y no decirlo llevaria a contar
               mal un intervalo largo. */}

@@ -3,9 +3,11 @@ import type { Theme } from "@ui-system/themes/types";
 import { drawGrid } from "../../render/grid-layer";
 import {
   COLUMN_GAP_PX,
+  REFERENCE_PAPER_SPEED_MM_S,
   STRIP_GAP_PX,
   type LayoutMetrics,
 } from "../../render/layout-engine";
+import type { TraceView } from "../../render/measure-geometry";
 import { drawSweepSegment, type LeadCanvasOptions } from "../../render/lead-canvas";
 import { SampleIndexRing } from "../../render/sample-index";
 import { advanceClock } from "../../render/sweep-clock";
@@ -26,6 +28,9 @@ export interface UseSweepRendererParams {
    * mismo frame que el clic, sin esperar a que el servidor confirme la pausa
    * ni a que se vacíe el buffer de red. */
   frozen: boolean;
+  /** Qué trozo del anillo se repinta. Con el zoom a la velocidad de referencia
+   * es el anillo entero. */
+  view: TraceView;
 }
 
 export interface UseSweepRendererResult {
@@ -73,6 +78,7 @@ export function useSweepRenderer({
   metrics,
   theme,
   frozen,
+  view,
 }: UseSweepRendererParams): UseSweepRendererResult {
   const leads = useMemo(() => leadColumns.flat(), [leadColumns]);
   const widthPx = metrics.stripWidthPx;
@@ -101,17 +107,28 @@ export function useSweepRenderer({
 
   const options: LeadCanvasOptions = { metrics, theme: theme.ecg };
 
+  // Píxeles por segundo A LA VELOCIDAD DE REFERENCIA, que no es lo mismo que
+  // `metrics.pixelsPerSecond` en cuanto hay zoom temporal.
+  //
+  // El anillo se dimensiona con esta y no con la vigente a propósito: subir la
+  // velocidad de papel no captura menos señal, solo enseña un trozo más corto
+  // de la que ya hay. Si la capacidad siguiera a la velocidad vigente, hacer
+  // zoom recrearía los anillos —y borraría el trazado que se quería mirar de
+  // cerca, que es justo lo contrario de lo que el usuario pidió.
+  const referencePixelsPerSecond =
+    REFERENCE_PAPER_SPEED_MM_S * metrics.viewportScalePxPerMm;
+
   // Un anillo por derivación visible, dimensionado a los segundos de papel que
   // caben en el ancho del canvas — NO al buffer de jitter de red, que es dos
   // órdenes de magnitud menor. Se recrea si cambian layout, ancho o frecuencia
   // de muestreo, porque los tres alteran la capacidad.
   useEffect(() => {
-    const capacity = sweepCapacitySamples(widthPx, metrics.pixelsPerSecond, sampleRateHz);
+    const capacity = sweepCapacitySamples(widthPx, referencePixelsPerSecond, sampleRateHz);
     const next = new Map<LeadName, SweepBuffer>();
     for (const lead of leads) next.set(lead, new SweepBuffer(capacity));
     sweeps.current = next;
     indexRing.current = new SampleIndexRing(capacity);
-  }, [leads, widthPx, metrics.pixelsPerSecond, sampleRateHz]);
+  }, [leads, widthPx, referencePixelsPerSecond, sampleRateHz]);
 
   // Al arrancar una sesión el eje de tiempo empieza de cero: se vacían los
   // anillos y se limpian los canvas para no dejar el trazo del ritmo anterior
@@ -151,7 +168,7 @@ export function useSweepRenderer({
       if (trace && traceCtx && sweep) {
         trace.width = widthPx;
         trace.height = metrics.stripHeightPx;
-        rebuilder.rebuild(traceCtx, sweep, sampleRateHz, options, metrics.stripHeightPx);
+        rebuilder.rebuild(traceCtx, sweep, sampleRateHz, options, metrics.stripHeightPx, view);
       }
     }
   }, [
@@ -160,6 +177,10 @@ export function useSweepRenderer({
     metrics.stripHeightPx,
     metrics.viewportScalePxPerMm,
     metrics.pixelsPerSecond,
+    // El zoom y el desplazamiento lateral son repintados completos: cambian
+    // qué trozo del anillo se ve, no lo que hay dentro.
+    view.startRingPos,
+    view.visibleSamples,
     theme.name,
     sampleRateHz,
   ]);

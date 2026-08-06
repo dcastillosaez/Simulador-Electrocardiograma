@@ -3660,14 +3660,28 @@ Pasar `paperSpeedMmS` a `useLayoutMetrics`. Calcular la ventana:
   const view = { startRingPos: viewStartRingPos, visibleSamples };
 ```
 
-Añadir el manejador de rueda sobre el contenedor del ECG, activo solo congelado:
+**Desviación:** la rueda no va en el contenedor del ECG con un guardia `if (!isFrozen) return`, sino en el propio canvas de `MeasureOverlay`, que se monta exactamente cuando el zoom está permitido —solo congelado—. El guardia deja de existir porque la condición ya está expresada en el árbol. `MeasureOverlay` gana un prop `onZoom: (direction: 1 | -1) => void` y `ECGWorkspace` responde:
 
 ```tsx
-  const handleWheel = (event: React.WheelEvent) => {
-    if (!isFrozen) return;
-    event.preventDefault();
-    setPaperSpeedMmS((current) => nextPaperSpeed(current, event.deltaY < 0 ? 1 : -1));
-  };
+  const handleZoom = useCallback((direction: 1 | -1) => {
+    setPaperSpeedMmS((current) => nextPaperSpeed(current, direction));
+    // Al cambiar de escalón la ventana cambia de tamaño; volver al origen es
+    // predecible y evita quedarse mirando un tramo que ya no es el que había
+    // debajo del cursor.
+    setViewStartRingPos(0);
+  }, []);
+```
+
+**Corrección imprescindible en `useSweepRenderer`, que el plan no anticipaba.** La capacidad del anillo se calculaba con `metrics.pixelsPerSecond`, que ahora cambia con el zoom: hacer zoom recrearía los anillos y **borraría el trazado que se quería mirar de cerca**. La capacidad pasa a derivarse de la velocidad de referencia, que no depende del zoom:
+
+```tsx
+  const referencePixelsPerSecond =
+    REFERENCE_PAPER_SPEED_MM_S * metrics.viewportScalePxPerMm;
+
+  useEffect(() => {
+    const capacity = sweepCapacitySamples(widthPx, referencePixelsPerSecond, sampleRateHz);
+    // ...
+  }, [leads, widthPx, referencePixelsPerSecond, sampleRateHz]);
 ```
 
 Y el desplazamiento por arrastre. En `ECGWorkspace.tsx`:

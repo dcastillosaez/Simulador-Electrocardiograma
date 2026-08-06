@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from "react";
 import type { EcgTheme } from "@ui-system/themes/types";
 import { COLUMN_GAP_PX, STRIP_GAP_PX } from "../render/layout-engine";
-import type { StripLayout, TraceView } from "../render/measure-geometry";
+import { pxPerSample, type StripLayout, type TraceView } from "../render/measure-geometry";
 import { drawOverlay } from "../render/overlay-layer";
 import type { MeasurementSession } from "../measure/session";
 import type { SnapMode } from "../measure/snap";
@@ -28,6 +28,11 @@ export interface MeasureOverlayProps {
   magnifier: boolean;
   getSource: () => MeasureSource | null;
   onResultChange: (session: MeasurementSession) => void;
+  /** Desplaza la ventana visible. En muestras, no en píxeles: el consumidor no
+   * tiene por qué conocer la escala. */
+  onPan: (deltaSamples: number) => void;
+  /** Un escalón de velocidad de papel arriba (`1`) o abajo (`-1`). */
+  onZoom: (direction: 1 | -1) => void;
 }
 
 /** Lo que un consumidor externo puede pedirle al overlay.
@@ -53,11 +58,18 @@ export const MeasureOverlay = forwardRef<MeasureOverlayHandle, MeasureOverlayPro
       magnifier,
       getSource,
       onResultChange,
+      onPan,
+      onZoom,
     },
     handleRef
   ) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const pressRef = useRef<{ x: number; y: number } | null>(null);
+    /** Un arrastre ya empezado. Sin esta bandera, el `pointerup` al final de un
+     * desplazamiento colocaría una marca no pedida: `pressRef` se va moviendo
+     * con el puntero, así que la distancia contra la posición final siempre
+     * acaba por debajo del umbral. */
+    const draggedRef = useRef(false);
     const { sessionRef, dirtyRef, pointAt, dispatch, moveCursorBySamples, setTool, setSnapMode } =
       useMeasure({
         layout,
@@ -118,19 +130,36 @@ export const MeasureOverlay = forwardRef<MeasureOverlayHandle, MeasureOverlayPro
     const handlePointerMove = useCallback(
       (event: React.PointerEvent<HTMLCanvasElement>) => {
         const { x, y } = localPoint(event);
+        const press = pressRef.current;
+
+        // Arrastrar desplaza, un clic coloca marca. Distinguirlos por el
+        // movimiento —y no por un modo que haya que activar— es lo que permite
+        // que el mismo botón haga las dos cosas sin ambigüedad.
+        if (press && Math.hypot(x - press.x, y - press.y) > DRAG_THRESHOLD_PX) {
+          draggedRef.current = true;
+          onPan(Math.round((x - press.x) / pxPerSample(layout.metrics, sampleRateHz)));
+          pressRef.current = { x, y };
+          return;
+        }
+
         dispatch({ type: "hover", point: pointAt(x, y) });
       },
-      [dispatch, pointAt]
+      [dispatch, layout.metrics, onPan, pointAt, sampleRateHz]
     );
 
     const handlePointerDown = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
       pressRef.current = localPoint(event);
+      draggedRef.current = false;
     }, []);
 
     const handlePointerUp = useCallback(
       (event: React.PointerEvent<HTMLCanvasElement>) => {
         const press = pressRef.current;
         pressRef.current = null;
+        if (draggedRef.current) {
+          draggedRef.current = false;
+          return;
+        }
         if (!press) return;
         const { x, y } = localPoint(event);
         if (Math.hypot(x - press.x, y - press.y) > DRAG_THRESHOLD_PX) return;
@@ -138,6 +167,16 @@ export const MeasureOverlay = forwardRef<MeasureOverlayHandle, MeasureOverlayPro
         if (point) dispatch({ type: "place", point });
       },
       [dispatch, pointAt]
+    );
+
+    // La rueda vive aquí y no en el contenedor del ECG porque este canvas
+    // existe exactamente cuando el zoom está permitido: solo congelado.
+    const handleWheel = useCallback(
+      (event: React.WheelEvent<HTMLCanvasElement>) => {
+        event.preventDefault();
+        onZoom(event.deltaY < 0 ? 1 : -1);
+      },
+      [onZoom]
     );
 
     const handleKeyDown = useCallback(
@@ -186,6 +225,7 @@ export const MeasureOverlay = forwardRef<MeasureOverlayHandle, MeasureOverlayPro
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerLeave={() => dispatch({ type: "hover", point: null })}
+        onWheel={handleWheel}
         onKeyDown={handleKeyDown}
       />
     );

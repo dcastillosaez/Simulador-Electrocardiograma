@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { getTheme } from "@ui-system/themes/index";
 import { computeLayoutMetrics } from "../render/layout-engine";
@@ -41,7 +41,9 @@ function makeSource() {
 
 function renderOverlay(active = true) {
   const onResult = vi.fn();
-  render(
+  const onPan = vi.fn();
+  const onZoom = vi.fn();
+  const rendered = render(
     <MeasureOverlay
       active={active}
       layout={{ leadColumns: [["II"]], metrics: METRICS }}
@@ -52,9 +54,11 @@ function renderOverlay(active = true) {
       view={{ startRingPos: 0, visibleSamples: CAPACITY }}
       magnifier={false}
       onResultChange={onResult}
+      onPan={onPan}
+      onZoom={onZoom}
     />
   );
-  return onResult;
+  return Object.assign(onResult, { onPan, onZoom, rendered });
 }
 
 describe("MeasureOverlay", () => {
@@ -109,6 +113,19 @@ describe("MeasureOverlay", () => {
     const last = onResult.mock.calls.at(-1)![0];
     expect(last.result.kind).toBe("caliper");
     expect(last.result.readout.deltaMs).toBeCloseTo(164, 6);
+  });
+
+  it("la rueda sube y baja la velocidad de papel", async () => {
+    // La rueda vive en este canvas y no en el contenedor del ECG porque el
+    // canvas existe exactamente cuando el zoom esta permitido: solo congelado.
+    const onResult = renderOverlay();
+    const surface = screen.getByRole("application");
+
+    fireEvent.wheel(surface, { deltaY: -100 });
+    expect(onResult.onZoom).toHaveBeenCalledWith(1);
+
+    fireEvent.wheel(surface, { deltaY: 100 });
+    expect(onResult.onZoom).toHaveBeenCalledWith(-1);
   });
 
   it("Escape limpia la medida", async () => {
