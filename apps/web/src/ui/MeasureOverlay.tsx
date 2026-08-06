@@ -44,6 +44,9 @@ export interface MeasureOverlayProps {
 export interface MeasureOverlayHandle {
   setTool: (tool: ToolId) => void;
   setSnapMode: (mode: SnapMode) => void;
+  /** El canvas de medición, para componer la exportación. `null` mientras no
+   * está congelado: el componente entero no se monta. */
+  getCanvas: () => HTMLCanvasElement | null;
 }
 
 export const MeasureOverlay = forwardRef<MeasureOverlayHandle, MeasureOverlayProps>(
@@ -80,7 +83,11 @@ export const MeasureOverlay = forwardRef<MeasureOverlayHandle, MeasureOverlayPro
         onResultChange,
       });
 
-    useImperativeHandle(handleRef, () => ({ setTool, setSnapMode }), [setTool, setSnapMode]);
+    useImperativeHandle(
+      handleRef,
+      () => ({ setTool, setSnapMode, getCanvas: () => canvasRef.current }),
+      [setTool, setSnapMode]
+    );
 
     const columns = layout.leadColumns.length;
     const rows = Math.max(...layout.leadColumns.map((column) => column.length));

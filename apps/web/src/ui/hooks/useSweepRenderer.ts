@@ -15,6 +15,8 @@ import { SweepRebuilder } from "../../render/sweep-rebuilder";
 import { SweepBuffer, sweepCapacitySamples } from "../../render/sweep-buffer";
 import { leadIndex, type LeadName } from "../../render/layout";
 import type { SessionRuntime } from "../../simulation-runtime/session-runtime";
+import { formatBpm, formatMs, formatMv, formatSeconds } from "../../measure/formulas";
+import type { MeasurementSession } from "../../measure/session";
 
 export interface UseSweepRendererParams {
   runtime: SessionRuntime;
@@ -62,6 +64,30 @@ export interface SnapshotOptions {
   /** Se estampa arriba a la derecha. Un trazado exportado sin fecha no se
    * puede situar después en la historia de nada. */
   stamp?: string;
+  /** El canvas de overlay, tal cual. Se dimensiona exactamente a la rejilla de
+   * tiras, así que entra con un solo `drawImage` en (0,0) y no hay que
+   * reimplementar el layout una segunda vez. */
+  overlay?: HTMLCanvasElement | null;
+  /** Lectura de la medida, estampada bajo el sello temporal. */
+  readout?: readonly string[];
+}
+
+/** Las líneas de texto que acompañan a la captura.
+ *
+ * Se compone aquí y no en el canvas para poder probarla sin canvas, y para que
+ * salga de las mismas funciones de formato que el panel y el rótulo: si
+ * divergieran, la imagen exportada diría un número distinto del que se vio. */
+export function composeSnapshotLines(session: MeasurementSession | null): string[] {
+  const result = session?.result;
+  if (!result) return [];
+  if (result.kind === "cursor") {
+    return [result.lead, formatSeconds(result.timestampS), formatMv(result.voltageV * 1000)];
+  }
+  return [
+    `Δt ${formatMs(result.readout.deltaMs)}`,
+    `ΔV ${formatMv(result.readout.deltaMv)}`,
+    formatBpm(result.readout.equivalentBpm),
+  ];
 }
 
 const SNAPSHOT_LABEL_PX = 11;
@@ -287,12 +313,36 @@ export function useSweepRenderer({
         });
       });
 
+      // El overlay se dimensionó (en `MeasureOverlay.tsx`) con la misma
+      // fórmula que `out.width`/`out.height` de aquí arriba, así que entra sin
+      // recalcular nada: un solo `drawImage` en el origen.
+      if (options.overlay) {
+        ctx.drawImage(options.overlay, 0, 0);
+      }
+
       if (options.stamp) {
         ctx.fillStyle = theme.text.muted;
         ctx.font = `${SNAPSHOT_LABEL_PX}px monospace`;
         ctx.textAlign = "right";
         ctx.textBaseline = "top";
         ctx.fillText(options.stamp, out.width - SNAPSHOT_PADDING_PX, SNAPSHOT_PADDING_PX / 2);
+      }
+
+      // Debajo del sello temporal. Un PNG con dos marcas y ningún número
+      // obliga a volver a medir sobre la imagen, que es justo lo que se acaba
+      // de hacer sobre el trazado.
+      if (options.readout?.length) {
+        ctx.fillStyle = theme.text.muted;
+        ctx.font = `${SNAPSHOT_LABEL_PX}px monospace`;
+        ctx.textAlign = "right";
+        ctx.textBaseline = "top";
+        options.readout.forEach((line, index) => {
+          ctx.fillText(
+            line,
+            out.width - SNAPSHOT_PADDING_PX,
+            SNAPSHOT_PADDING_PX / 2 + (index + 1) * (SNAPSHOT_LABEL_PX + 2)
+          );
+        });
       }
 
       return out;

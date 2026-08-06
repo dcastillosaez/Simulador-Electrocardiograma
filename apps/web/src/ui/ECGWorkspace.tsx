@@ -22,7 +22,7 @@ import { WorkspaceHeader } from "./WorkspaceHeader";
 import { WorkspaceInspector } from "./WorkspaceInspector";
 import { useLayoutMetrics } from "./hooks/useLayoutMetrics";
 import { useSimulationRuntime } from "./hooks/useSimulationRuntime";
-import { useSweepRenderer } from "./hooks/useSweepRenderer";
+import { composeSnapshotLines, useSweepRenderer } from "./hooks/useSweepRenderer";
 import { formatClock, useClock } from "./hooks/useClock";
 import { useExport } from "./hooks/useExport";
 import type { MeasurementSession } from "../measure/session";
@@ -150,8 +150,13 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
   // El sello va DENTRO del PNG, no solo en el nombre del fichero: un fichero
   // se renombra y la imagen se queda sin fecha.
   const snapshotWithStamp = useCallback(
-    () => composeSnapshot({ stamp: clock }),
-    [composeSnapshot, clock]
+    () =>
+      composeSnapshot({
+        stamp: clock,
+        overlay: measureOverlayRef.current?.getCanvas() ?? null,
+        readout: composeSnapshotLines(isFrozen ? measureSession : null),
+      }),
+    [composeSnapshot, clock, isFrozen, measureSession]
   );
   const { exportPng, toggleRecording, isRecording, exportError } = useExport({
     composeSnapshot: snapshotWithStamp,

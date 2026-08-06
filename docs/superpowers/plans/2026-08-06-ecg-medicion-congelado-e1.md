@@ -4066,19 +4066,39 @@ y después del sello:
 
 - [ ] **Step 4: Cablear la exportación**
 
-En `MeasureOverlay.tsx`, aceptar un prop `canvasRefCallback?: (element: HTMLCanvasElement | null) => void` y llamarlo desde el `ref` del canvas, además de guardar la referencia local. En `ECGWorkspace.tsx`:
+**Desviación:** en vez del prop `canvasRefCallback` que proponía el plan (un segundo canal, paralelo al `ref` interno del canvas), se reutiliza el asa imperativa que ya existe desde la Task 14 (`MeasureOverlayHandle`, `forwardRef` + `useImperativeHandle`). Ya había un puente para que `ECGWorkspace` le pida cosas al overlay; abrir uno nuevo solo para el canvas habría sido dos caminos para el mismo propósito. `MeasureOverlayHandle` gana un tercer método:
 
 ```tsx
-  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+export interface MeasureOverlayHandle {
+  setTool: (tool: ToolId) => void;
+  setSnapMode: (mode: SnapMode) => void;
+  /** El canvas de medición, para componer la exportación. `null` mientras no
+   * está congelado: el componente entero no se monta. */
+  getCanvas: () => HTMLCanvasElement | null;
+}
+```
 
+y `useImperativeHandle` lo expone leyendo el `canvasRef` interno:
+
+```tsx
+    useImperativeHandle(
+      handleRef,
+      () => ({ setTool, setSnapMode, getCanvas: () => canvasRef.current }),
+      [setTool, setSnapMode]
+    );
+```
+
+En `ECGWorkspace.tsx` (ya existe `measureOverlayRef` desde la Task 14, no hace falta una ref nueva):
+
+```tsx
   const snapshotWithStamp = useCallback(
     () =>
       composeSnapshot({
         stamp: clock,
-        overlay: overlayCanvasRef.current,
-        readout: composeSnapshotLines(measureSession),
+        overlay: measureOverlayRef.current?.getCanvas() ?? null,
+        readout: composeSnapshotLines(isFrozen ? measureSession : null),
       }),
-    [composeSnapshot, clock, measureSession]
+    [composeSnapshot, clock, isFrozen, measureSession]
   );
 ```
 
