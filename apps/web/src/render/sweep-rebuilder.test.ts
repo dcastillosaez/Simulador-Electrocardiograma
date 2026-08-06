@@ -183,3 +183,56 @@ describe("SweepRebuilder", () => {
     expect(ctx.strokeStyle).toBe(OPTIONS.theme.trace);
   });
 });
+
+describe("repintado por ventana", () => {
+  it("sin ventana pinta lo mismo que con la ventana completa", () => {
+    // Es la garantia de regresion: el camino existente es un caso particular
+    // del nuevo, no una rama distinta.
+    const sweep = new SweepBuffer(64);
+    const samples = new Float32Array(64);
+    for (let i = 0; i < 64; i++) samples[i] = Math.sin(i / 4) / 1000;
+    sweep.push(samples);
+
+    const sinVentana = makeCtx();
+    const conVentana = makeCtx();
+    new SweepRebuilder().rebuild(sinVentana, sweep, SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX);
+    new SweepRebuilder().rebuild(conVentana, sweep, SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX, {
+      startRingPos: 0,
+      visibleSamples: 64,
+    });
+
+    expect((conVentana.lineTo as ReturnType<typeof vi.fn>).mock.calls).toEqual(
+      (sinVentana.lineTo as ReturnType<typeof vi.fn>).mock.calls
+    );
+  });
+
+  it("una ventana de la mitad pinta la mitad de puntos", () => {
+    const sweep = new SweepBuffer(64);
+    sweep.push(new Float32Array(64));
+
+    const ctx = makeCtx();
+    new SweepRebuilder().rebuild(ctx, sweep, SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX, {
+      startRingPos: 0,
+      visibleSamples: 32,
+    });
+
+    const puntos =
+      (ctx.lineTo as ReturnType<typeof vi.fn>).mock.calls.length +
+      (ctx.moveTo as ReturnType<typeof vi.fn>).mock.calls.length;
+    expect(puntos).toBe(32);
+  });
+
+  it("una ventana desplazada empieza a dibujar en x = 0", () => {
+    const sweep = new SweepBuffer(64);
+    sweep.push(new Float32Array(64));
+
+    const ctx = makeCtx();
+    new SweepRebuilder().rebuild(ctx, sweep, SAMPLE_RATE_HZ, OPTIONS, HEIGHT_PX, {
+      startRingPos: 32,
+      visibleSamples: 16,
+    });
+
+    const primerPunto = (ctx.moveTo as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(primerPunto[0]).toBe(0);
+  });
+});
