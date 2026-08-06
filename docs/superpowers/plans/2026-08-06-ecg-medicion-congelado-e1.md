@@ -1058,7 +1058,7 @@ describe("caliperReadout", () => {
 
     expect(r.deltaMs).toBeCloseTo(164, 9);
     expect(r.deltaMv).toBeCloseTo(1.21, 9);
-    expect(r.equivalentBpm).toBeCloseTo(365.853, 3);
+    expect(r.equivalentBpm).toBeCloseTo(365.8537, 4);
     expect(r.smallSquares).toBeCloseTo(4.1, 9);
     expect(r.largeSquares).toBeCloseTo(0.82, 9);
   });
@@ -1066,7 +1066,7 @@ describe("caliperReadout", () => {
   it("reproduce el ejemplo de RR", () => {
     const r = caliperReadout(0, 0, 430, 0, CTX);
     expect(r.deltaMs).toBeCloseTo(860, 9);
-    expect(r.equivalentBpm).toBeCloseTo(69.767, 3);
+    expect(r.equivalentBpm).toBeCloseTo(69.7674, 4);
   });
 
   it("Delta t es siempre positivo, sea cual sea el orden de las marcas", () => {
