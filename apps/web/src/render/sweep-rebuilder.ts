@@ -1,5 +1,6 @@
 import { voltageToPx } from "./grid-layer";
 import { ERASE_BAND_MM, eraseBandAhead, type LeadCanvasOptions } from "./lead-canvas";
+import { fullView, type TraceView } from "./measure-geometry";
 import type { SweepBuffer } from "./sweep-buffer";
 
 /** Repinta el anillo completo sobre un canvas recién invalidado.
@@ -21,11 +22,13 @@ export class SweepRebuilder {
     sweep: SweepBuffer,
     sampleRateHz: number,
     options: LeadCanvasOptions,
-    heightPx: number
+    heightPx: number,
+    view?: TraceView
   ): void {
-    const pxPerSample = options.metrics.pixelsPerSecond / sampleRateHz;
+    const pxPerSampleValue = options.metrics.pixelsPerSecond / sampleRateHz;
     const capacity = sweep.capacity;
-    const sweepWidthPx = capacity * pxPerSample;
+    const window = view ?? fullView(capacity);
+    const sweepWidthPx = window.visibleSamples * pxPerSampleValue;
     const baselineY = heightPx / 2;
 
     ctx.clearRect(0, 0, sweepWidthPx, heightPx);
@@ -41,7 +44,8 @@ export class SweepRebuilder {
     ctx.beginPath();
 
     let penDown = false;
-    for (let ringIndex = 0; ringIndex < capacity; ringIndex++) {
+    for (let k = 0; k < window.visibleSamples; k++) {
+      const ringIndex = (window.startRingPos + k) % capacity;
       // Antes de dar la vuelta, solo [0, cursor) tiene señal escrita: el resto
       // son los ceros de relleno del Float32Array, y pintarlos sería una línea
       // plana en la parte de la tira que nunca se ha usado.
@@ -49,17 +53,17 @@ export class SweepRebuilder {
         break;
       }
 
-      const x = ringIndex * pxPerSample;
+      const x = k * pxPerSampleValue;
       const y = baselineY - voltageToPx(sweep.at(ringIndex), options.metrics);
 
       // Se levanta el lápiz en tres sitios, y ninguno es negociable:
-      //   - x = 0, el borde izquierdo, igual que en el dibujo incremental;
+      //   - k = 0, el borde izquierdo de la ventana;
       //   - una discontinuidad marcada en el anillo (pérdida de frame o
       //     descarte por overrun), que no se interpola jamás;
       //   - la frontera del cursor con el anillo lleno, donde lo anterior es
       //     lo más nuevo y esta posición lo más viejo.
       const lift =
-        ringIndex === 0 ||
+        k === 0 ||
         sweep.isDiscontinuityAt(ringIndex) ||
         (isFull && ringIndex === cursor);
 
@@ -78,7 +82,7 @@ export class SweepRebuilder {
     // círculo y se perdería la referencia de dónde está escribiendo.
     eraseBandAhead(
       ctx,
-      cursor * pxPerSample,
+      ((cursor - window.startRingPos + capacity) % capacity) * pxPerSampleValue,
       ERASE_BAND_MM * options.metrics.viewportScalePxPerMm,
       sweepWidthPx,
       heightPx

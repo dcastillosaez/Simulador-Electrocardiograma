@@ -24,6 +24,9 @@ interface BufferEntry {
  * los que no se completa ningún trozo. */
 const NO_SAMPLES = new Float32Array(0);
 
+/** Igual que `NO_SAMPLES`, para la lista de índices. */
+const NO_INDICES = new Float64Array(0);
+
 /** Amortiguador de jitter de RED: absorbe la variación con la que llegan los
  * trozos del backend (objetivo 500ms, rango sano 300-700ms). NO es la ventana
  * visible en pantalla — esa es `render/sweep-buffer.ts`, que se dimensiona en
@@ -158,6 +161,40 @@ export class FrameBuffer {
         frame.channelsV.subarray(start, start + frame.nSamplesPerChannel),
         offset
       );
+      offset += frame.nSamplesPerChannel;
+    }
+    return result;
+  }
+
+  /** Índices absolutos de las muestras desalojadas por el último `advance()`,
+   * en el mismo orden y con la misma longitud que `consumeNewSamples()`.
+   *
+   * Se apoya en un invariante del backend: el motor genera de forma contigua
+   * desde `t = 0` en trozos de tamaño fijo (`simulation.py:117`), así que
+   * `tStartS * sampleRateHz` es exactamente el índice de la primera muestra
+   * del trozo.
+   *
+   * Con un hueco de red los índices SALTAN, que es justo lo que ocurrió:
+   * seguir contando fingiría una continuidad que no existe, y las medidas que
+   * se tomen a caballo del hueco saldrían cortas.
+   *
+   * Se lee una vez por tick, no una por derivación: las doce comparten eje. */
+  consumedSampleIndices(): Float64Array {
+    if (this.justConsumed.length === 0) {
+      return NO_INDICES;
+    }
+    const totalSamples = this.justConsumed.reduce(
+      (sum, entry) => sum + entry.frame.nSamplesPerChannel,
+      0
+    );
+    const result = new Float64Array(totalSamples);
+    let offset = 0;
+    for (const entry of this.justConsumed) {
+      const frame = entry.frame;
+      const base = Math.round(frame.tStartS * frame.sampleRateHz);
+      for (let i = 0; i < frame.nSamplesPerChannel; i++) {
+        result[offset + i] = base + i;
+      }
       offset += frame.nSamplesPerChannel;
     }
     return result;

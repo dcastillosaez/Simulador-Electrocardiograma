@@ -1,13 +1,25 @@
 .display {
   display: flex;
   flex: 1 1 auto;
-  /* --space-2: el hueco que descuenta computeLayoutMetrics entre columnas. */
-  gap: var(--space-2);
   min-height: 0;
   min-width: 0;
   /* El area de ECG NO scrollea. Un monitor clinico no scrollea, y perderlo
      destruye la sensacion de monitorizacion continua. */
   overflow: hidden;
+}
+
+/* El overlay de medicion se posiciona absoluto DENTRO de este contenedor, no
+   del `.display` de fuera: sus dimensiones tienen que coincidir exactamente
+   con las que ocupan las columnas, ni un pixel de padding de mas, porque son
+   las mismas que compone la exportacion (`composeSnapshot`). */
+.grid {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  /* --space-2: el hueco que descuenta computeLayoutMetrics entre columnas. */
+  gap: var(--space-2);
+  min-height: 0;
+  min-width: 0;
 }
 
 .column {
