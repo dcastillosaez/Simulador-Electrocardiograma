@@ -2,7 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { getTheme } from "@ui-system/themes/index";
 import { computeLayoutMetrics } from "./layout-engine";
 import { PX_PER_MM } from "./grid-layer";
-import { drawOverlay, MAGNIFIER_WIDTH_PX } from "./overlay-layer";
+import {
+  drawOverlay,
+  magnifierCenterPx,
+  MAGNIFIER_HEIGHT_PX,
+  MAGNIFIER_WIDTH_PX,
+} from "./overlay-layer";
 import { createSession } from "../measure/session";
 import type { MeasurePoint } from "../measure/tools";
 import { SweepBuffer } from "./sweep-buffer";
@@ -32,6 +37,49 @@ function makeCtx() {
     textAlign: "left",
     textBaseline: "top",
   } as unknown as CanvasRenderingContext2D;
+}
+
+/** Como `makeCtx`, pero conservando el ORDEN de los trazos: para saber cuál de
+ * las polilíneas es la señal hay que ver qué `lineTo` van seguidos. */
+function makeTracingCtx() {
+  const ops: Array<[string, number, number]> = [];
+  const record = (name: string) =>
+    vi.fn((x: number, y: number) => {
+      ops.push([name, x, y]);
+    });
+  const ctx = {
+    ...(makeCtx() as unknown as Record<string, unknown>),
+    moveTo: record("moveTo"),
+    lineTo: record("lineTo"),
+    beginPath: vi.fn(() => {
+      ops.push(["beginPath", 0, 0]);
+    }),
+  } as unknown as CanvasRenderingContext2D;
+  return { ctx, ops };
+}
+
+/** El trazo de la señal: la tirada más larga de `lineTo` consecutivos. La
+ * rejilla son segmentos sueltos y el cursor son dos; la señal, decenas. */
+function longestPolyline(ops: Array<[string, number, number]>): Array<[number, number]> {
+  let best: Array<[number, number]> = [];
+  let current: Array<[number, number]> = [];
+  for (const [name, x, y] of ops) {
+    if (name === "lineTo") {
+      current.push([x, y]);
+      if (current.length > best.length) best = current;
+    } else {
+      current = [];
+    }
+  }
+  return best;
+}
+
+/** Esquina de la lupa, deducida del anclaje de su rótulo de aumento. */
+function magnifierCorner(ctx: CanvasRenderingContext2D): { left: number; top: number } {
+  const label = (ctx.fillText as ReturnType<typeof vi.fn>).mock.calls.find(
+    (c) => c[0] === "×4"
+  )!;
+  return { left: label[1] - 4, top: label[2] - 4 };
 }
 
 /** Todas las coordenadas por las que ha pasado el lápiz. */
@@ -67,15 +115,15 @@ function point(ringPos: number, lead = "II"): MeasurePoint {
   };
 }
 
-function makeSweeps() {
+function makeSweeps(peakV = 0.0012) {
   const sweep = new SweepBuffer(CAPACITY);
   const samples = new Float32Array(CAPACITY);
-  samples[500] = 0.0012;
+  samples[500] = peakV;
   sweep.push(samples);
   return new Map<LeadName, SweepBuffer>([["II", sweep]]);
 }
 
-function frameWith(session: ReturnType<typeof createSession>) {
+function frameWith(session: ReturnType<typeof createSession>, peakV?: number) {
   return {
     session,
     layout: LAYOUT,
@@ -83,10 +131,15 @@ function frameWith(session: ReturnType<typeof createSession>) {
     sampleRateHz: SAMPLE_RATE_HZ,
     capacity: CAPACITY,
     writtenCount: CAPACITY,
-    sweeps: makeSweeps(),
+    sweeps: makeSweeps(peakV),
     theme: getTheme("dark").ecg,
     magnifier: false,
   };
+}
+
+/** Voltaje cuyo trazo ocupa `zoomPx` píxeles dentro de la lupa. */
+function voltsForZoomPx(zoomPx: number): number {
+  return zoomPx / 4 / METRICS.pixelsPerMillivolt / 1000;
 }
 
 describe("drawOverlay", () => {
@@ -164,6 +217,24 @@ describe("region medible", () => {
     drawOverlay(ctx, { ...frameWith(createSession("caliper")), writtenCount: CAPACITY });
 
     expect(ctx.fillRect).not.toHaveBeenCalled();
+  });
+});
+
+describe("encuadre de la lupa", () => {
+  it("centra la ventana en la señal cuando cabe", () => {
+    expect(magnifierCenterPx(-20, 40, 0, 200)).toBe(10);
+  });
+
+  it("manda el cursor cuando la señal no cabe", () => {
+    // Preferir el punto medido a la onda entera no es una rendicion: es lo que
+    // garantiza que se ve lo que se va a registrar al hacer clic.
+    expect(magnifierCenterPx(-200, 200, 150, 200)).toBe(150);
+  });
+
+  it("deja aire entre la señal y el canto del recuadro", () => {
+    // Un pico que cabe justo pegado al borde se lee como un pico cortado, que
+    // es exactamente lo que hay que evitar.
+    expect(magnifierCenterPx(0, 190, 190, 200)).toBe(190);
   });
 });
 
@@ -258,6 +329,59 @@ describe("lupa", () => {
       lines.some(([lx, ly]) => ly === my && Math.abs(lx - mx) === MAGNIFIER_WIDTH_PX)
     );
     expect(horizontalCompleta).toBe(true);
+  });
+
+  it("encuadra la onda entera cuando cabe en el recuadro", () => {
+    // El encuadre estaba clavado en el 0 mV: a x4, una R normal se salia por
+    // arriba y el recuadro ensenaba el tramo plano de al lado. Ahora la ventana
+    // se desplaza —la escala no cambia— para que la onda quepa.
+    const peakZoomPx = MAGNIFIER_HEIGHT_PX / 2;
+    const peakV = voltsForZoomPx(peakZoomPx);
+    const { ctx, ops } = makeTracingCtx();
+    const hover = { ...point(500), voltageV: peakV };
+    drawOverlay(ctx, { ...frameWith({ ...createSession("caliper"), hover }, peakV), magnifier: true });
+
+    const { top } = magnifierCorner(ctx);
+    const trazo = longestPolyline(ops);
+    expect(trazo.length).toBeGreaterThan(10);
+    const fuera = trazo.filter(([, y]) => y < top || y > top + MAGNIFIER_HEIGHT_PX);
+    expect(fuera, "hay tramo de señal fuera del recuadro").toHaveLength(0);
+  });
+
+  it("con una onda mas alta que el recuadro deja el punto medido en el centro", () => {
+    // Cuando ni desplazando cabe entera, lo que no puede faltar es el punto que
+    // se esta midiendo: es el que va a quedar registrado al hacer clic.
+    const peakV = voltsForZoomPx(MAGNIFIER_HEIGHT_PX * 1.5);
+    const { ctx, ops } = makeTracingCtx();
+    const hover = { ...point(500), voltageV: peakV };
+    drawOverlay(ctx, { ...frameWith({ ...createSession("caliper"), hover }, peakV), magnifier: true });
+
+    const { left, top } = magnifierCorner(ctx);
+    const centerX = left + MAGNIFIER_WIDTH_PX / 2;
+    const trazo = longestPolyline(ops);
+    const enElCursor = trazo.reduce((best, p) =>
+      Math.abs(p[0] - centerX) < Math.abs(best[0] - centerX) ? p : best
+    );
+    // Con holgura de decimas: el anillo guarda en `Float32Array` y el voltaje
+    // del cursor viene del punto, no de la muestra redondeada.
+    expect(enElCursor[1]).toBeCloseTo(top + MAGNIFIER_HEIGHT_PX / 2, 3);
+  });
+
+  it("dibuja dentro el cursor con su lectura", () => {
+    // Colocar una marca con precision exige ver a la vez el punto ampliado y el
+    // numero que va a quedar registrado.
+    const ctx = makeCtx();
+    const session = { ...createSession("caliper"), hover: point(157) };
+    drawOverlay(ctx, { ...frameWith(session), magnifier: true });
+
+    const { left, top } = magnifierCorner(ctx);
+    const dentro = (ctx.fillText as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([, x, y]) =>
+        x > left && x <= left + MAGNIFIER_WIDTH_PX && y >= top && y < top + MAGNIFIER_HEIGHT_PX
+    );
+    const textos = dentro.map((c) => c[0]);
+    expect(textos).toContain("0.314 s");
+    expect(textos).toContain("+0.84 mV");
   });
 
   it("no tapa la lectura del cursor", () => {

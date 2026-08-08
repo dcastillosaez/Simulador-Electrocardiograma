@@ -23,9 +23,34 @@ export const MARKER_HANDLE_PX = 5;
 const CURSOR_DASH = [4, 3];
 
 export const MAGNIFIER_WIDTH_PX = 180;
-export const MAGNIFIER_HEIGHT_PX = 120;
+export const MAGNIFIER_HEIGHT_PX = 180;
 export const MAGNIFIER_FACTOR = 4;
 const MAGNIFIER_MARGIN_PX = 12;
+/** Aire entre la señal y el canto del recuadro al encuadrar. Un pico que cabe
+ * justo pegado al borde se lee como un pico cortado. */
+const MAGNIFIER_PADDING_PX = 10;
+/** Brazo de la cruz que marca la muestra bajo el cursor dentro de la lupa. */
+const MAGNIFIER_CROSS_PX = 4;
+
+/** Qué altura de señal —en píxeles de lupa, positivos hacia arriba— queda en el
+ * centro del recuadro.
+ *
+ * La lupa estaba clavada en el 0 mV: a ×4, cualquier R de tamaño normal se
+ * salía por arriba y el recuadro enseñaba el tramo plano de al lado. Encuadrar
+ * sobre lo que hay en la ventana no toca la escala —sigue siendo ×4 y la
+ * rejilla sigue contando milímetros—, solo mueve por dónde está cortada.
+ *
+ * Cuando ni desplazando cabe la onda entera manda el cursor: el punto que se
+ * está midiendo tiene que verse aunque el resto de la onda no quepa. */
+export function magnifierCenterPx(
+  minPx: number,
+  maxPx: number,
+  cursorPx: number,
+  heightPx: number = MAGNIFIER_HEIGHT_PX
+): number {
+  if (maxPx - minPx > heightPx - 2 * MAGNIFIER_PADDING_PX) return cursorPx;
+  return (minPx + maxPx) / 2;
+}
 
 /** Dónde ha quedado la lupa. `onRight` lo necesita el rótulo del cursor para
  * irse al lado contrario en vez de quedarse debajo. */
@@ -127,7 +152,11 @@ function placeMagnifier(
  * Lleva rejilla propia y rótulo de aumento: una lupa que no declara su escala
  * invita a contar cuadros sobre una rejilla que no es la de la pantalla, que
  * es justo el error que este proyecto persigue. Los números del calibrador
- * salen siempre de las muestras, nunca de lo que se ve aquí. */
+ * salen siempre de las muestras, nunca de lo que se ve aquí.
+ *
+ * Dentro va también el cursor con su lectura: colocar una marca con precisión
+ * exige ver a la vez el punto ampliado y el número que va a quedar registrado,
+ * y el rótulo de fuera queda a tamaño de pantalla, lejos del pico. */
 function drawMagnifier(
   ctx: CanvasRenderingContext2D,
   hover: MeasurePoint,
@@ -139,10 +168,10 @@ function drawMagnifier(
   if (!sweep) return;
 
   const { left, top } = box;
+  const { metrics } = frame.layout;
   const zoomPxPerSample = pps * MAGNIFIER_FACTOR;
-  const zoomPxPerMm = frame.layout.metrics.viewportScalePxPerMm * MAGNIFIER_FACTOR;
+  const zoomPxPerMm = metrics.viewportScalePxPerMm * MAGNIFIER_FACTOR;
   const centerX = left + MAGNIFIER_WIDTH_PX / 2;
-  const centerY = top + MAGNIFIER_HEIGHT_PX / 2;
 
   // Media ventana EN ENTERO. Con un número impar de muestras visibles, una
   // mitad fraccionaria produce un índice de anillo fraccionario, y
@@ -150,8 +179,26 @@ function drawMagnifier(
   // el canvas no pinta nada — recuadro negro con su rótulo y sin trazo.
   const halfSamples = Math.max(1, Math.floor(MAGNIFIER_WIDTH_PX / zoomPxPerSample / 2));
 
-  // Se recorta al recuadro: a ganancia baja, una R amplificada ×4 se sale por
-  // arriba, y sin recorte se pintaría encima del ECG de al lado.
+  // Encuadre: primero se mira qué hay en la ventana, después se decide por
+  // dónde cortarla. Al revés —dibujar y recortar— es lo que dejaba el pico de
+  // la R fuera del recuadro.
+  const cursorPx = voltageToPx(hover.voltageV, metrics) * MAGNIFIER_FACTOR;
+  let minPx = cursorPx;
+  let maxPx = cursorPx;
+  for (let i = -halfSamples; i <= halfSamples; i++) {
+    const value =
+      voltageToPx(sweep.at(wrapIndex(hover.ringPos + i, frame.capacity)), metrics) *
+      MAGNIFIER_FACTOR;
+    if (value < minPx) minPx = value;
+    if (value > maxPx) maxPx = value;
+  }
+  const centerPx = magnifierCenterPx(minPx, maxPx, cursorPx);
+  const toY = (signalPx: number) => top + MAGNIFIER_HEIGHT_PX / 2 - (signalPx - centerPx);
+  const baselineY = toY(0);
+  const cursorY = toY(cursorPx);
+
+  // Se recorta al recuadro: aun encuadrada, una onda más alta que la ventana
+  // se sale, y sin recorte se pintaría encima del ECG de al lado.
   ctx.save();
   ctx.beginPath();
   ctx.rect(left, top, MAGNIFIER_WIDTH_PX, MAGNIFIER_HEIGHT_PX);
@@ -162,19 +209,27 @@ function drawMagnifier(
 
   // Rejilla propia, a la escala propia y en LOS DOS EJES: solo con verticales
   // se contaría tiempo pero no amplitud, y la lupa está para mirar ondas
-  // pequeñas.
-  ctx.strokeStyle = frame.theme.gridMinor;
-  ctx.lineWidth = 0.5;
-  for (let mm = 0; mm * zoomPxPerMm <= MAGNIFIER_WIDTH_PX / 2; mm++) {
-    for (const x of [centerX - mm * zoomPxPerMm, centerX + mm * zoomPxPerMm]) {
+  // pequeñas. Las horizontales cuelgan del 0 mV y no del centro del recuadro:
+  // con el encuadre móvil, una rejilla anclada al centro contaría milímetros
+  // desde una altura que no significa nada.
+  if (zoomPxPerMm >= 1) {
+    ctx.strokeStyle = frame.theme.gridMinor;
+    ctx.lineWidth = 0.5;
+    for (
+      let x = firstGridLine(centerX, left, zoomPxPerMm);
+      x <= left + MAGNIFIER_WIDTH_PX;
+      x += zoomPxPerMm
+    ) {
       ctx.beginPath();
       ctx.moveTo(x, top);
       ctx.lineTo(x, top + MAGNIFIER_HEIGHT_PX);
       ctx.stroke();
     }
-  }
-  for (let mm = 0; mm * zoomPxPerMm <= MAGNIFIER_HEIGHT_PX / 2; mm++) {
-    for (const y of [centerY - mm * zoomPxPerMm, centerY + mm * zoomPxPerMm]) {
+    for (
+      let y = firstGridLine(baselineY, top, zoomPxPerMm);
+      y <= top + MAGNIFIER_HEIGHT_PX;
+      y += zoomPxPerMm
+    ) {
       ctx.beginPath();
       ctx.moveTo(left, y);
       ctx.lineTo(left + MAGNIFIER_WIDTH_PX, y);
@@ -182,26 +237,74 @@ function drawMagnifier(
     }
   }
 
-  // La muestra del cursor cae en el centro exacto del recuadro.
+  // El 0 mV, marcado: es la referencia desde la que se lee cualquier
+  // desnivel, y con el encuadre móvil ya no se sabe de memoria dónde cae.
+  ctx.strokeStyle = frame.theme.gridMajor;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(left, baselineY);
+  ctx.lineTo(left + MAGNIFIER_WIDTH_PX, baselineY);
+  ctx.stroke();
+
   ctx.strokeStyle = frame.theme.trace;
   ctx.lineWidth = 1;
   ctx.beginPath();
   for (let i = -halfSamples; i <= halfSamples; i++) {
     const ringPos = wrapIndex(hover.ringPos + i, frame.capacity);
     const x = centerX + i * zoomPxPerSample;
-    const y = centerY - voltageToPx(sweep.at(ringPos), frame.layout.metrics) * MAGNIFIER_FACTOR;
+    const y = toY(voltageToPx(sweep.at(ringPos), metrics) * MAGNIFIER_FACTOR);
     if (i === -halfSamples) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   }
   ctx.stroke();
 
+  // El cursor, ampliado. La vertical cae en la muestra medida y la horizontal
+  // en su voltaje: es el mismo punto que van a registrar las marcas, visto al
+  // aumento al que se está decidiendo.
+  ctx.strokeStyle = frame.theme.cursor;
+  ctx.lineWidth = 1;
+  ctx.setLineDash(CURSOR_DASH);
+  ctx.beginPath();
+  ctx.moveTo(centerX, top);
+  ctx.lineTo(centerX, top + MAGNIFIER_HEIGHT_PX);
+  ctx.moveTo(left, cursorY);
+  ctx.lineTo(left + MAGNIFIER_WIDTH_PX, cursorY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.beginPath();
+  ctx.moveTo(centerX - MAGNIFIER_CROSS_PX, cursorY);
+  ctx.lineTo(centerX + MAGNIFIER_CROSS_PX, cursorY);
+  ctx.moveTo(centerX, cursorY - MAGNIFIER_CROSS_PX);
+  ctx.lineTo(centerX, cursorY + MAGNIFIER_CROSS_PX);
+  ctx.stroke();
+
   ctx.restore();
 
-  ctx.fillStyle = frame.theme.trace;
   ctx.font = `${CURSOR_LABEL_PX}px monospace`;
-  ctx.textAlign = "left";
   ctx.textBaseline = "top";
+  ctx.fillStyle = frame.theme.trace;
+  ctx.textAlign = "left";
   ctx.fillText(`×${MAGNIFIER_FACTOR}`, left + 4, top + 4);
+
+  // La lectura, en la esquina opuesta al rótulo de aumento y con el color del
+  // cursor: dice de qué punto son estos números.
+  ctx.fillStyle = frame.theme.cursor;
+  ctx.textAlign = "right";
+  const readout = [formatSeconds(hover.timestampS), formatMv(hover.voltageV * 1000)];
+  readout.forEach((line, index) => {
+    ctx.fillText(
+      line,
+      left + MAGNIFIER_WIDTH_PX - 4,
+      top + 4 + index * LABEL_LINE_HEIGHT_PX
+    );
+  });
+}
+
+/** Primera línea de rejilla que cae dentro del recuadro, contando desde el
+ * anclaje —el cursor a lo ancho, el 0 mV a lo alto— hacia el canto. */
+function firstGridLine(anchor: number, edge: number, stepPx: number): number {
+  return anchor - Math.ceil((anchor - edge) / stepPx) * stepPx;
 }
 
 /** Vela la parte del anillo que todavía no tiene señal.
