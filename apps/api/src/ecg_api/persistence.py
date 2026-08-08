@@ -49,6 +49,14 @@ async def persist_session(
             pharmacology_semver=pharmacology_engine.__version__,
         )
     )
+    # La fila de la sesión, ANTES que sus administraciones. Sin `relationship()`
+    # entre las dos entidades, SQLAlchemy no conoce la dependencia y ordena los
+    # INSERT del flush como quiere: cuando le toca insertar primero
+    # `drug_administrations`, la FK lo rechaza, el `commit` entero se cae y
+    # `_maybe_persist` se traga el fallo — la sesión con fármacos, que es la que
+    # nunca hay que perder, se pierde en silencio.
+    await session.flush()
+
     # En el mismo `commit` que la sesión: una administración cuya sesión no
     # llegó a escribirse es un registro clínico huérfano, y la FK la
     # rechazaría de todos modos.
