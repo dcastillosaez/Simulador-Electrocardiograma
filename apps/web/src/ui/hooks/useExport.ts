@@ -24,7 +24,7 @@ function downloadBlob(blob: Blob, filename: string): void {
 }
 
 export interface UseExportResult {
-  exportPng: () => void;
+  exportPng: () => void | Promise<void>;
   toggleRecording: () => void;
   isRecording: boolean;
   /** Motivo por el que la última acción no se pudo completar, para mostrarlo
@@ -33,35 +33,53 @@ export interface UseExportResult {
 }
 
 export interface UseExportParams {
-  /** Devuelve el canvas ya compuesto, o `null` si no hay nada que exportar. */
-  composeSnapshot: () => HTMLCanvasElement | null;
+  /** El puesto entero rasterizado —controles, ECG e inspector—, o `null` si
+   * todavía no hay nada que exportar. Asíncrono porque rasterizar el DOM pasa
+   * por cargar una imagen, y eso no ocurre en el mismo tick. */
+  composeSnapshot: () => Promise<HTMLCanvasElement | null>;
+  /** Solo el trazado, por si la captura del puesto no sale. Exportar el ECG
+   * solo es peor que exportarlo todo, pero mucho mejor que no exportar nada
+   * por un fallo de rasterizado. */
+  composeTraceOnly?: () => HTMLCanvasElement | null;
 }
 
 /** Exportar la vista: una imagen fija y un vídeo.
  *
- * El PNG se compone del canvas del ECG. El vídeo NO: usa `getDisplayMedia`,
- * la captura de pantalla del navegador, porque así entra en el vídeo todo el
- * puesto —controles, inspector, medidas— y no solo el trazado, que para
- * enseñar es justo lo que hace falta. El precio es que el navegador pide
- * permiso en cada grabación, y ese diálogo no se puede evitar: es una
- * garantía del navegador, no un descuido.
+ * Los dos guardan el puesto entero —controles, inspector, medidas— y no solo
+ * el trazado, que para enseñar es justo lo que hace falta: doce ondas sin la
+ * ganancia, la velocidad ni el ritmo al lado no se pueden leer después.
+ *
+ * Por caminos distintos, eso sí. El vídeo usa `getDisplayMedia` porque no hay
+ * otra forma de grabar en movimiento, y paga el diálogo de permiso en cada
+ * grabación: es una garantía del navegador, no un descuido. La imagen se
+ * rasteriza desde el propio DOM, así que sigue siendo un clic.
  */
-export function useExport({ composeSnapshot }: UseExportParams): UseExportResult {
+export function useExport({
+  composeSnapshot,
+  composeTraceOnly,
+}: UseExportParams): UseExportResult {
   const [isRecording, setIsRecording] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
 
-  const exportPng = useCallback(() => {
-    const canvas = composeSnapshot();
+  const exportPng = useCallback(async () => {
+    let canvas: HTMLCanvasElement | null = null;
+    let warning: string | null = null;
+    try {
+      canvas = await composeSnapshot();
+    } catch {
+      canvas = composeTraceOnly?.() ?? null;
+      warning = "No se pudo capturar la interfaz: se exportó solo el trazado.";
+    }
     if (!canvas) {
       setExportError("No hay trazado que exportar todavía.");
       return;
     }
-    setExportError(null);
+    setExportError(warning);
     canvas.toBlob((blob) => {
       if (blob) downloadBlob(blob, exportFilename("png"));
     }, "image/png");
-  }, [composeSnapshot]);
+  }, [composeSnapshot, composeTraceOnly]);
 
   const stopRecording = useCallback(() => {
     recorder.current?.stop();

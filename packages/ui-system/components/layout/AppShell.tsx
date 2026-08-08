@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { forwardRef, type ReactNode } from "react";
 import styles from "./AppShell.module.css";
 
 export interface AppShellProps {
@@ -12,10 +12,16 @@ export interface AppShellProps {
 /** Las cinco zonas fijas del puesto de simulación.
  *
  * El panel derecho es contextual y cambiará —inspector ahora, corazón 3D
- * después, farmacología más tarde—. El área de ECG no se mueve nunca. */
-export function AppShell({ header, sidebar, ecg, inspector, status }: AppShellProps) {
+ * después, farmacología más tarde—. El área de ECG no se mueve nunca.
+ *
+ * Expone su elemento por `ref` porque el puesto entero es una unidad
+ * exportable: la captura del PNG es de las cinco zonas, no del ECG suelto. */
+export const AppShell = forwardRef<HTMLDivElement, AppShellProps>(function AppShell(
+  { header, sidebar, ecg, inspector, status },
+  ref
+) {
   return (
-    <div className={styles.shell}>
+    <div className={styles.shell} ref={ref}>
       <div className={styles.header}>{header}</div>
       <div className={styles.sidebar}>{sidebar}</div>
       <main className={styles.ecg}>{ecg}</main>
@@ -23,4 +29,4 @@ export function AppShell({ header, sidebar, ecg, inspector, status }: AppShellPr
       <div className={styles.status}>{status}</div>
     </div>
   );
-}
+});

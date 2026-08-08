@@ -11,6 +11,7 @@ import {
 import { getTheme, setTheme, type ThemeName } from "@ui-system/themes/index";
 import { SessionRuntime } from "../simulation-runtime/session-runtime";
 import { CatalogClient } from "../simulation-runtime/catalog-client";
+import { captureElement } from "../render/dom-snapshot";
 import { useSessionStore } from "../state/session-store";
 import { RhythmSelector } from "./RhythmSelector";
 import { BasicControlPanel } from "./BasicControlPanel";
@@ -143,13 +144,15 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
     });
 
   const measureOverlayRef = useRef<MeasureOverlayHandle>(null);
+  /** El puesto entero, que es la unidad que se exporta como imagen. */
+  const shellRef = useRef<HTMLDivElement>(null);
   const [measureSession, setMeasureSession] = useState<MeasurementSession | null>(null);
 
   const now = useClock();
   const clock = formatClock(now);
 
-  // El sello va DENTRO del PNG, no solo en el nombre del fichero: un fichero
-  // se renombra y la imagen se queda sin fecha.
+  // El sello va DENTRO de la imagen, no solo en el nombre del fichero: un
+  // fichero se renombra y la imagen se queda sin fecha.
   const snapshotWithStamp = useCallback(
     () =>
       composeSnapshot({
@@ -159,8 +162,28 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
       }),
     [composeSnapshot, clock, isFrozen, measureSession]
   );
+
+  // Lo que se exporta es el puesto entero, no el ECG suelto: la ganancia, la
+  // velocidad, el ritmo elegido, los fármacos y las medidas están en los
+  // paneles, y una imagen sin ellos no se puede leer después.
+  //
+  // Las tiras entran solas: cada canvas del DOM se rasteriza por separado, así
+  // que las dos capas de cada derivación —rejilla y trazo— y el overlay de
+  // medición se superponen en la captura igual que en pantalla. El trazado se
+  // compone aquí únicamente para saber si hay algo que exportar; el mismo
+  // canvas es el respaldo si la captura del puesto falla.
+  const captureWorkstation = useCallback(async () => {
+    const shell = shellRef.current;
+    if (!shell || !snapshotWithStamp()) return null;
+    return captureElement(shell, {
+      background: theme.surface.background,
+      scale: window.devicePixelRatio || 1,
+    });
+  }, [snapshotWithStamp, theme]);
+
   const { exportPng, toggleRecording, isRecording, exportError } = useExport({
-    composeSnapshot: snapshotWithStamp,
+    composeSnapshot: captureWorkstation,
+    composeTraceOnly: snapshotWithStamp,
   });
 
   const hasSession =
@@ -255,6 +278,7 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
 
   return (
     <AppShell
+      ref={shellRef}
       header={
         <WorkspaceHeader
           layout={layout}
