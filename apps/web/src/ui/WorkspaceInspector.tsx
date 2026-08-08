@@ -1,4 +1,4 @@
-import { Inspector, Metric, MetricGrid, Panel, SectionTitle } from "@ui-system";
+import { Inspector, Metric, MetricGrid, Panel, Section, SectionTitle } from "@ui-system";
 import { zoneFor, ZONE_LABEL } from "./AxisControl/axis-zones";
 import { MeasurePanel } from "./MeasurePanel";
 import type { MeasurementSession } from "../measure/session";
@@ -116,51 +116,63 @@ export function WorkspaceInspector({
             dice lo que va a ver y como arreglarlo. */}
         {!gainFits && <p role="status">{GAIN_CLIPPING_HINT}</p>}
         {exportError && <p role="alert">{exportError}</p>}
+        {/* Tres apartados y tres orígenes distintos, cada uno en su recuadro:
+            lo que mide el usuario sobre el trazado congelado, lo que el motor
+            de señal publica del ritmo, y lo que sale del estado fisiológico.
+            Apilados al mismo tono se leían como una lista larga de números
+            donde no se ve de dónde viene cada uno. */}
         {measureSession && (
-          <MeasurePanel
-            session={measureSession}
-            onToolChange={onToolChange}
-            onSnapChange={onSnapChange}
-          />
+          <Section title="Medición">
+            <MeasurePanel
+              session={measureSession}
+              onToolChange={onToolChange}
+              onSnapChange={onSnapChange}
+            />
+          </Section>
         )}
-        <MetricGrid>
-          <Metric label="Ritmo" value={rhythmName ?? ""} unavailable={rhythmName === null} />
-          <Metric
-            label="FC"
-            value={bpm === null ? "" : String(bpm)}
-            unit="lpm"
-            unavailable={bpm === null}
-          />
-          <Metric
-            label="Eje"
-            value={
-              axisDeg === null ? "" : `${Math.round(axisDeg)}° ${ZONE_LABEL[zoneFor(Math.round(axisDeg))]}`
-            }
-            unavailable={axisDeg === null}
-          />
-          {/* Los intervalos los mide el servidor sobre la señal realmente
-              generada, no sobre los valores nominales del ritmo: son los
-              del trazado que se está viendo. */}
-          <Metric label="PR" unit="ms" {...measured("pr_ms")} />
-          <Metric label="QRS" unit="ms" {...measured("qrs_ms")} />
-          <Metric label="QT" unit="ms" {...measured("qt_ms")} />
-          {/* QTc por Bazett. Se marca en el rótulo porque hay varias
-              fórmulas y dan números distintos: un QTc sin apellido es un
-              número sin unidades. */}
-          <Metric label="QTc (B)" unit="ms" {...measured("qtc_ms")} />
-          <Metric label="RR" unit="ms" {...measured("rr_ms")} />
-        </MetricGrid>
+        <Section title="Ritmo">
+          <MetricGrid>
+            <Metric label="Ritmo" value={rhythmName ?? ""} unavailable={rhythmName === null} />
+            <Metric
+              label="FC"
+              value={bpm === null ? "" : String(bpm)}
+              unit="lpm"
+              unavailable={bpm === null}
+            />
+            <Metric
+              label="Eje"
+              value={
+                axisDeg === null
+                  ? ""
+                  : `${Math.round(axisDeg)}° ${ZONE_LABEL[zoneFor(Math.round(axisDeg))]}`
+              }
+              unavailable={axisDeg === null}
+            />
+            {/* Los intervalos los mide el servidor sobre la señal realmente
+                generada, no sobre los valores nominales del ritmo: son los
+                del trazado que se está viendo. */}
+            <Metric label="PR" unit="ms" {...measured("pr_ms")} />
+            <Metric label="QRS" unit="ms" {...measured("qrs_ms")} />
+            <Metric label="QT" unit="ms" {...measured("qt_ms")} />
+            {/* QTc por Bazett. Se marca en el rótulo porque hay varias
+                fórmulas y dan números distintos: un QTc sin apellido es un
+                número sin unidades. */}
+            <Metric label="QTc (B)" unit="ms" {...measured("qtc_ms")} />
+            <Metric label="RR" unit="ms" {...measured("rr_ms")} />
+          </MetricGrid>
+        </Section>
         {/* Las constantes hemodinámicas no se miden sobre la señal: no están
             en el ECG. Vienen del estado fisiológico que publica el motor
-            farmacológico, y por eso van en su propia rejilla y no mezcladas
+            farmacológico, y por eso van en su propio apartado y no mezcladas
             con los intervalos. */}
-        <SectionTitle>Constantes</SectionTitle>
-        <MetricGrid>
-          <Metric label="TA" unit="mmHg" {...vital("systolic_bp_mmhg", "diastolic_bp_mmhg")} />
-          <Metric label="FR" unit="rpm" {...physiologic("respiratory_rate_bpm")} />
-          <Metric label="GC" unit="L/min" {...physiologic("cardiac_output_l_min", 1)} />
-          <Metric label="VS" unit="mL" {...physiologic("stroke_volume_ml")} />
-        </MetricGrid>
+        <Section title="Constantes">
+          <MetricGrid>
+            <Metric label="TA" unit="mmHg" {...vital("systolic_bp_mmhg", "diastolic_bp_mmhg")} />
+            <Metric label="FR" unit="rpm" {...physiologic("respiratory_rate_bpm")} />
+            <Metric label="GC" unit="L/min" {...physiologic("cardiac_output_l_min", 1)} />
+            <Metric label="VS" unit="mL" {...physiologic("stroke_volume_ml")} />
+          </MetricGrid>
+        </Section>
       </Panel>
     </Inspector>
   );

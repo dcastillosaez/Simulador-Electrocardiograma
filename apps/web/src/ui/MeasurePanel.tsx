@@ -1,4 +1,4 @@
-import { Metric, MetricGrid, SectionTitle, SegmentedControl } from "@ui-system";
+import { Metric, MetricGrid, SegmentedControl } from "@ui-system";
 import {
   formatBpm,
   formatMs,
@@ -33,13 +33,15 @@ export interface MeasurePanelProps {
  * Existe además del rótulo del canvas y no en su lugar: lo dibujado en canvas
  * no existe para un lector de pantalla, y esta es la única vía por la que el
  * resultado llega a quien no ve la pantalla. Por eso el resultado —y no el
- * cursor, que cambia sesenta veces por segundo— es lo que se publica a React. */
+ * cursor, que cambia sesenta veces por segundo— es lo que se publica a React.
+ *
+ * El rótulo lo pone el apartado que lo envuelve: este componente es contenido,
+ * y quien decide cómo se separa del resto del inspector es el inspector. */
 export function MeasurePanel({ session, onToolChange, onSnapChange }: MeasurePanelProps) {
   const result = session.result;
 
   return (
     <>
-      <SectionTitle>Medición</SectionTitle>
       <SegmentedControl
         label="Herramienta"
         value={session.tool}

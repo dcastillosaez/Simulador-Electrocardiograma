@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ControlGroup, Divider, Panel, SectionTitle } from "./index";
+import { ControlGroup, Divider, Panel, Section, SectionTitle } from "./index";
 
 describe("Panel", () => {
   it("acepta una clase extra sin perder la propia", () => {
@@ -17,6 +17,21 @@ describe("SectionTitle", () => {
   it("es una cabecera real, no un div con estilo", () => {
     render(<SectionTitle>Paciente</SectionTitle>);
     expect(screen.getByRole("heading", { name: "Paciente" })).toBeInTheDocument();
+  });
+});
+
+describe("Section", () => {
+  it("es una region con nombre, no un div con fondo", () => {
+    // Lo que separa a la vista tiene que separar tambien para quien navega por
+    // regiones: si no, el panel sigue siendo una lista larga de numeros para la
+    // mitad de sus usuarios.
+    render(
+      <Section title="Constantes">
+        <p>contenido</p>
+      </Section>
+    );
+    expect(screen.getByRole("region", { name: "Constantes" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Constantes" })).toBeInTheDocument();
   });
 });
 

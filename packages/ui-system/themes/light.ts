@@ -19,6 +19,9 @@ export const lightTheme: Theme = {
     background: palette.paperWhite,
     border: palette.paperGridDim,
     hover: palette.paperGridDim,
+    // Sobre papel el escalón va al revés que en el monitor: un gris muy claro
+    // sobre blanco. La jerarquía es la misma; el sentido del contraste, no.
+    inset: palette.ink100,
   },
   inspector: {
     ok: palette.signalOk,

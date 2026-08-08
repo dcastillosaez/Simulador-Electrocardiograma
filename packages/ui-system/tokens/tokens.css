@@ -37,6 +37,7 @@
   --panel-background: #181B20;
   --panel-border: #2E3440;
   --panel-hover: #2E3440;
+  --panel-inset: #111315;
   --inspector-ok: #32D583;
   --inspector-warning: #FBBF24;
   --inspector-critical: #EF4444;
@@ -59,6 +60,7 @@
   --panel-background: #FFFFFF;
   --panel-border: #F4C6C6;
   --panel-hover: #F4C6C6;
+  --panel-inset: #F4F5F7;
   --inspector-ok: #32D583;
   --inspector-warning: #FBBF24;
   --inspector-critical: #EF4444;

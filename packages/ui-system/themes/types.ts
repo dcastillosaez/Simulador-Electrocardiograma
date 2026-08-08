@@ -16,7 +16,11 @@ export interface EcgTheme {
 export interface Theme {
   name: ThemeName;
   ecg: EcgTheme;
-  panel: { background: string; border: string; hover: string };
+  /** `inset` es el fondo de los bloques que van DENTRO de un panel. Un panel
+   * con cuatro apartados apilados al mismo tono se lee como una lista larga;
+   * hundir cada apartado un escalón dice dónde empieza y dónde acaba cada uno
+   * sin gastar una línea de separación por bloque. */
+  panel: { background: string; border: string; hover: string; inset: string };
   inspector: { ok: string; warning: string; critical: string };
   axis: { normal: string; left: string; right: string; extreme: string };
   text: { primary: string; muted: string };

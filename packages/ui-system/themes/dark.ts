@@ -17,6 +17,9 @@ export const darkTheme: Theme = {
     background: palette.ink850,
     border: palette.ink700,
     hover: palette.ink700,
+    // Un escalón por debajo del panel, el mismo negro del monitor: los
+    // apartados quedan hundidos y el panel los enmarca.
+    inset: palette.ink900,
   },
   inspector: {
     ok: palette.signalOk,
