@@ -1,0 +1,34 @@
+# Carpetas internas de Claude Code
+.claude/
+
+# Dependencias Node.js
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+
+# Ficheros temporales de Office
+~$*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Ficheros temporales de conversión de plantilla
+_tmp_plantilla.docx
+
+# Cache de Vite: artefacto local de desarrollo, se regenera solo.
+# Anclado con ** porque este .gitignore esta en la raiz del monorepo y el
+# proyecto vive en un subdirectorio: una ruta relativa no casaba con
+# Simulador_Electrocardiograma/apps/web/.vite/ y el cache se colaba igual.
+**/.vite/
+
+# Config transpilada que Vite escribe junto a vite.config.ts cuando necesita
+# cargarla. La borra sola al terminar, pero un proceso interrumpido las deja
+# atras y acaban apareciendo como ficheros sin seguimiento.
+vite.config.ts.timestamp-*

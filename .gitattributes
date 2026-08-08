@@ -1,0 +1,10 @@
+# Los ficheros por lotes se ejecutan en cmd.exe, que espera finales de linea
+# de Windows. Se fuerzan aqui en vez de confiar en core.autocrlf: esa opcion
+# es una preferencia local de cada maquina, y un .bat con finales de linea de
+# Unix puede partir una linea larga por donde no toca al interpretarla.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Los scripts de shell, al contrario: un CRLF en la primera linea deja el
+# shebang apuntando a "/bin/sh\r", que no existe.
+*.sh text eol=lf
