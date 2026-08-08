@@ -138,3 +138,77 @@ def test_axis_round_trips_through_engine_params():
 def test_axis_is_optional_and_defaults_to_the_reference_orientation():
     payload = EngineParamsPayload.model_validate({"heart_rate_hz": 1.0})
     assert payload.to_engine_params().axis.orientation_deg == 50.0
+
+
+# --- Limites de lo que se acepta del cliente -------------------------------
+
+
+@pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_numbers_are_rejected(literal):
+    # `json.loads` acepta estos tres literales, Pydantic los admite en un float
+    # por defecto, y el clamp del catalogo los deja pasar enteros: toda
+    # comparacion con NaN es falsa, asi que `min(max(nan, x), y)` devuelve
+    # `nan`. El clamp protege de una frecuencia de mil millones, no de esto.
+    raw = f'{{"type": "start", "rhythm_id": "sinus_normal", "params": {{"heart_rate_hz": {literal}}}}}'
+    with pytest.raises(ClientMessageError):
+        parse_client_message(raw)
+
+
+def test_an_absurd_heart_rate_is_rejected_instead_of_clamped():
+    raw = json.dumps({
+        "type": "start", "rhythm_id": "sinus_normal",
+        "params": {"heart_rate_hz": 1e9},
+    })
+    with pytest.raises(ClientMessageError):
+        parse_client_message(raw)
+
+
+def test_a_heart_rate_of_zero_is_rejected():
+    raw = json.dumps({
+        "type": "start", "rhythm_id": "x", "params": {"heart_rate_hz": 0.0},
+    })
+    with pytest.raises(ClientMessageError):
+        parse_client_message(raw)
+
+
+def test_free_text_has_a_ceiling():
+    # Sin tope, un cliente escribe megabytes en la base de datos --las notas se
+    # persisten con la administracion-- y nadie se lo impide.
+    raw = json.dumps({
+        "type": "administer", "drug_id": "atropine", "dose": 1.0,
+        "notes": "x" * 5000,
+    })
+    with pytest.raises(ClientMessageError):
+        parse_client_message(raw)
+
+
+def test_a_dose_of_zero_or_less_is_rejected():
+    for dose in (0.0, -1.0):
+        raw = json.dumps({
+            "type": "administer", "drug_id": "atropine", "dose": dose,
+        })
+        with pytest.raises(ClientMessageError):
+            parse_client_message(raw)
+
+
+def test_a_seed_outside_the_servers_own_range_is_rejected():
+    # El servidor sortea el suyo en [0, 2**31); uno fuera de ese rango no
+    # reproduce nada, que es lo unico para lo que sirve un seed.
+    raw = json.dumps({"type": "start", "rhythm_id": "x", "seed": 2**40})
+    with pytest.raises(ClientMessageError):
+        parse_client_message(raw)
+
+
+def test_the_usual_parameters_still_pass():
+    # La red no debe cerrarse tanto que estorbe: 70 lpm con ruido de monitor.
+    raw = json.dumps({
+        "type": "start", "rhythm_id": "sinus_normal", "seed": 7,
+        "params": {
+            "heart_rate_hz": 70 / 60,
+            "noise": {"emg_v": 0.00002, "mains_v": 0.00001},
+            "axis": {"orientation_deg": -30.0},
+        },
+    })
+    message = parse_client_message(raw)
+    assert isinstance(message, StartMessage)
+    assert message.params.noise.emg_v == 0.00002

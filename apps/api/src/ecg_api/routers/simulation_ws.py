@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import uuid
 
 import anyio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -60,13 +61,28 @@ async def _sender_loop(websocket: WebSocket, outbox: FrameOutbox) -> None:
         await websocket.send_bytes(frame)
 
 
-def _log_engine_failure(manager: SimulationManager, exc: BaseException) -> None:
+def _log_engine_failure(manager: SimulationManager, exc: BaseException) -> str:
+    """Registra el fallo y devuelve la referencia que se le da al cliente.
+
+    El cliente recibe la referencia y nada más. El texto de la excepción
+    —`str(exc)`, que es lo que se enviaba antes— describe la estructura interna:
+    un error de asyncpg o de SQLAlchemy cuenta el esquema de la base de datos a
+    quien no debería conocerlo. Con la referencia, quien reporta el fallo y
+    quien lee el log siguen hablando del mismo suceso.
+    """
+    reference = uuid.uuid4().hex[:12]
     logger.error(
-        "fallo del motor: session_id=%s seed=%s",
+        "fallo del motor: ref=%s session_id=%s seed=%s",
+        reference,
         manager.session_id,
         manager.seed if manager.session_id else None,
         exc_info=exc,
     )
+    return reference
+
+
+def _engine_failure_detail(reference: str) -> str:
+    return f"fallo interno del simulador (referencia {reference})"
 
 
 async def _close_after_engine_failure(websocket: WebSocket, detail: str) -> None:
@@ -101,14 +117,14 @@ def _on_background_task_done(
     exc = task.exception()
     if exc is None:
         return
-    _log_engine_failure(manager, exc)
+    reference = _log_engine_failure(manager, exc)
     # Se guarda la referencia en `close_tasks` (y se espera en el `finally`
     # del handler): una tarea de `asyncio.create_task` sin referencia fuerte
     # es candidata a recolección de basura a mitad de ejecución, así que el
     # cierre 1011 que exige la especificación podía simplemente no llegar a
     # ocurrir.
     close_task = asyncio.create_task(
-        _close_after_engine_failure(websocket, str(exc))
+        _close_after_engine_failure(websocket, _engine_failure_detail(reference))
     )
     close_tasks.add(close_task)
     close_task.add_done_callback(close_tasks.discard)
@@ -335,8 +351,8 @@ async def simulation_ws(websocket: WebSocket) -> None:
         # códigos de la spec no distingue más granularidad, y cerrar la
         # conexión es lo seguro cuando no se sabe en qué estado quedó la
         # sesión.
-        _log_engine_failure(manager, exc)
-        await _close_after_engine_failure(websocket, str(exc))
+        reference = _log_engine_failure(manager, exc)
+        await _close_after_engine_failure(websocket, _engine_failure_detail(reference))
     finally:
         await _stop_background_tasks(background_tasks)
         await _maybe_persist()

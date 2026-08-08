@@ -39,37 +39,65 @@ import uuid
 from dataclasses import asdict
 from typing import Literal, Union
 
-from pydantic import Field, ValidationError
+from pydantic import ConfigDict, Field, ValidationError
 
 from ecg_engine import AxisParams, EngineParams, NoiseParams, VariabilityParams
 from pharmacology_engine import DrugAdministration
 
 
-class NoiseParamsPayload(BaseModel):
-    emg_v: float = 0.0
-    mains_v: float = 0.0
-    baseline_v: float = 0.0
-    motion_v: float = 0.0
-    clip_v: float | None = None
+class FinitePayload(BaseModel):
+    """Base de todo lo que llega del cliente con números dentro.
+
+    `allow_inf_nan=False` no es celo: `json.loads` acepta los literales `NaN`,
+    `Infinity` y `-Infinity`, Pydantic los admite en un `float` por defecto, y
+    el `clamp` del catálogo los deja pasar enteros —toda comparación con NaN es
+    falsa, así que `min(max(nan, x), y)` devuelve `nan`—. Es decir, el clamp
+    protege de una frecuencia de mil millones pero no de un NaN, que se
+    propagaría a la señal, donde no significa nada.
+    """
+
+    model_config = ConfigDict(allow_inf_nan=False)
 
 
-class VariabilityParamsPayload(BaseModel):
-    respiration_hz: float = 0.25
-    rsa_fraction: float = 0.04
-    amplitude_fraction: float = 0.03
-    rr_jitter_fraction: float = 0.015
+# Techos, no valores clínicos. El rango bueno de cada ritmo lo impone el
+# catálogo del motor, que sigue clampando después; esto solo descarta lo que no
+# es una señal: negativos donde no caben, y magnitudes que ningún ECG produce.
+MAX_HEART_RATE_HZ = 20.0  # 1200 lpm
+MAX_NOISE_V = 0.05  # diez veces la amplitud de una R grande
+MAX_DEG = 360.0
+# Identificadores y texto libre. Sin tope, un cliente escribe megabytes en la
+# base de datos y nadie se lo impide.
+MAX_ID_LEN = 64
+MAX_ROUTE_LEN = 16
+MAX_OPERATOR_LEN = 80
+MAX_NOTES_LEN = 500
 
 
-class AxisParamsPayload(BaseModel):
-    orientation_deg: float = 50.0
-    p_offset_deg: float = 3.4
-    qrs_offset_deg: float = 0.0
-    st_offset_deg: float = 0.0
-    t_offset_deg: float = 0.0
+class NoiseParamsPayload(FinitePayload):
+    emg_v: float = Field(default=0.0, ge=0.0, le=MAX_NOISE_V)
+    mains_v: float = Field(default=0.0, ge=0.0, le=MAX_NOISE_V)
+    baseline_v: float = Field(default=0.0, ge=0.0, le=MAX_NOISE_V)
+    motion_v: float = Field(default=0.0, ge=0.0, le=MAX_NOISE_V)
+    clip_v: float | None = Field(default=None, gt=0.0, le=MAX_NOISE_V)
 
 
-class EngineParamsPayload(BaseModel):
-    heart_rate_hz: float
+class VariabilityParamsPayload(FinitePayload):
+    respiration_hz: float = Field(default=0.25, ge=0.0, le=MAX_HEART_RATE_HZ)
+    rsa_fraction: float = Field(default=0.04, ge=0.0, le=1.0)
+    amplitude_fraction: float = Field(default=0.03, ge=0.0, le=1.0)
+    rr_jitter_fraction: float = Field(default=0.015, ge=0.0, le=1.0)
+
+
+class AxisParamsPayload(FinitePayload):
+    orientation_deg: float = Field(default=50.0, ge=-MAX_DEG, le=MAX_DEG)
+    p_offset_deg: float = Field(default=3.4, ge=-MAX_DEG, le=MAX_DEG)
+    qrs_offset_deg: float = Field(default=0.0, ge=-MAX_DEG, le=MAX_DEG)
+    st_offset_deg: float = Field(default=0.0, ge=-MAX_DEG, le=MAX_DEG)
+    t_offset_deg: float = Field(default=0.0, ge=-MAX_DEG, le=MAX_DEG)
+
+
+class EngineParamsPayload(FinitePayload):
+    heart_rate_hz: float = Field(gt=0.0, le=MAX_HEART_RATE_HZ)
     noise: NoiseParamsPayload = Field(default_factory=NoiseParamsPayload)
     variability: VariabilityParamsPayload = Field(
         default_factory=VariabilityParamsPayload
@@ -100,14 +128,17 @@ def engine_params_to_dict(params: EngineParams) -> dict:
 
 # --- WebSocket: mensajes del cliente ---------------------------------------
 
-class StartMessage(BaseModel):
+class StartMessage(FinitePayload):
     type: Literal["start"]
-    rhythm_id: str
+    rhythm_id: str = Field(max_length=MAX_ID_LEN)
     params: EngineParamsPayload | None = None
-    seed: int | None = None
+    # La misma cota con la que el servidor sortea uno cuando el cliente no lo
+    # manda (`_SEED_UPPER_BOUND` en simulation.py): un seed fuera de rango no
+    # reproduce nada, que es lo único para lo que sirve un seed.
+    seed: int | None = Field(default=None, ge=0, lt=2**31)
 
 
-class UpdateMessage(BaseModel):
+class UpdateMessage(FinitePayload):
     type: Literal["update"]
     params: EngineParamsPayload
 
@@ -124,7 +155,7 @@ class StopMessage(BaseModel):
     type: Literal["stop"]
 
 
-class AdministerMessage(BaseModel):
+class AdministerMessage(FinitePayload):
     """Administración de un fármaco (fase F).
 
     No lleva instante: se administra en el momento del reloj de simulación
@@ -134,11 +165,11 @@ class AdministerMessage(BaseModel):
     """
 
     type: Literal["administer"]
-    drug_id: str
-    dose: float
-    route: str = "IV"
-    operator: str | None = None
-    notes: str | None = None
+    drug_id: str = Field(max_length=MAX_ID_LEN)
+    dose: float = Field(gt=0.0)
+    route: str = Field(default="IV", max_length=MAX_ROUTE_LEN)
+    operator: str | None = Field(default=None, max_length=MAX_OPERATOR_LEN)
+    notes: str | None = Field(default=None, max_length=MAX_NOTES_LEN)
 
 
 class PingMessage(BaseModel):

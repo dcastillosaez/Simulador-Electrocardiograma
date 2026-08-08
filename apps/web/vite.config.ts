@@ -44,6 +44,13 @@ export default defineConfig({
     // excluidos. Para ver los de una maquina concreta:
     //   netsh interface ipv4 show excludedportrange protocol=tcp
     port: 5600,
+    // Sin cabeceras CORS: la pagina se carga desde este mismo origen y no las
+    // necesita. Lo que si las aprovecha es GHSA-67mh-4wv8-2f99 --el servidor de
+    // desarrollo de esbuild responde a cualquier origen, asi que una web
+    // abierta en otra pestana puede pedirle ficheros del proyecto y leer la
+    // respuesta--. La correccion de raiz es subir a Vite 8, que cruza una
+    // version mayor y va aparte; esto cierra el vector mientras tanto.
+    cors: false,
     fs: {
       // Vite solo sirve/transforma ficheros bajo `server.fs.allow`, que por
       // defecto es la raiz del proyecto (`apps/web`). El repo no tiene

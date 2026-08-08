@@ -6,7 +6,11 @@ services:
       POSTGRES_PASSWORD: ecg
       POSTGRES_DB: ecg_simulator
     ports:
-      - "5432:5432"
+      # Solo en la interfaz local. Sin el `127.0.0.1`, Docker publica el puerto
+      # en TODAS las interfaces: un portatil conectado a la wifi del centro
+      # ofrece esta base de datos a la red entera, con la contrasena que esta
+      # escrita tres lineas mas arriba y en el repositorio.
+      - "127.0.0.1:5432:5432"
     volumes:
       - ecg_pgdata:/var/lib/postgresql/data
     healthcheck:

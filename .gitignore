@@ -18,6 +18,15 @@ blob-report/
 __pycache__/
 *.pyc
 *.pyo
+**/.venv/
+
+# Secretos. `.env.example` se versiona a proposito --documenta que variables
+# hacen falta-- y el `.env` de verdad nunca: el dia que alguien escriba ahi las
+# credenciales de una base de datos real, git no debe ofrecerselas para el
+# commit.
+.env
+*.env
+!.env.example
 
 # Ficheros temporales de conversión de plantilla
 _tmp_plantilla.docx
