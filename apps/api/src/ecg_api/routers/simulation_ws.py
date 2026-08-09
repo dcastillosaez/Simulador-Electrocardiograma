@@ -19,6 +19,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from ecg_engine.types import DEFAULT_SAMPLE_RATE_HZ
 
 from ..errors import SimulationError
+from ..limits import client_key
 from ..outbox import FrameOutbox
 from ..persistence import persist_session, should_persist
 from ..schemas import (
@@ -154,10 +155,32 @@ async def _reject_if_no_active_session(
 
 @router.websocket("/ws/simulation")
 async def simulation_ws(websocket: WebSocket) -> None:
-    await websocket.accept()
-
     settings = websocket.app.state.settings
     session_factory = websocket.app.state.session_factory
+    limiter = websocket.app.state.limiter
+
+    client = client_key(
+        websocket.client.host if websocket.client else None,
+        websocket.headers.get("x-forwarded-for"),
+        settings.trust_proxy,
+    )
+    # El aforo se mira ANTES de aceptar. Cerrar sin aceptar rechaza el
+    # handshake, así que la conexión no llega a existir: no hay tareas de
+    # fondo que parar ni motor que arrancar, que es justo lo que se quiere
+    # evitar cuando el servidor está lleno.
+    if not limiter.try_acquire(client):
+        logger.warning("conexión rechazada por aforo: client=%s", client)
+        await websocket.close(code=1013, reason="servidor al completo")
+        return
+
+    try:
+        await _run_session(websocket, settings, session_factory)
+    finally:
+        limiter.release(client)
+
+
+async def _run_session(websocket: WebSocket, settings, session_factory) -> None:
+    await websocket.accept()
 
     manager = SimulationManager()
     outbox = FrameOutbox(maxsize=OUTBOX_MAXSIZE)
@@ -202,6 +225,21 @@ async def simulation_ws(websocket: WebSocket) -> None:
     try:
         while True:
             raw = await websocket.receive_text()
+
+            # El tamaño se mira antes de parsear: un JSON de megabytes cuesta
+            # más en el parser que en la red, y ese es justo el trabajo que un
+            # cliente abusivo quiere que el servidor haga.
+            if len(raw) > settings.max_ws_message_bytes:
+                await websocket.send_json(
+                    error_message(
+                        code="INVALID_PARAMS",
+                        detail=(
+                            "mensaje demasiado largo "
+                            f"(máximo {settings.max_ws_message_bytes} bytes)"
+                        ),
+                    )
+                )
+                continue
 
             try:
                 message = parse_client_message(raw)

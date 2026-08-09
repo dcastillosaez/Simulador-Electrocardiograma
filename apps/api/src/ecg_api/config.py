@@ -18,6 +18,21 @@ class Settings(BaseSettings):
     # arranque el frontend en una maquina donde el 5173 si esta libre.
     cors_origins: str = "http://localhost:5600,http://localhost:5173"
 
+    # --- Aforo del WebSocket -------------------------------------------
+    # Un solo worker sostiene todas las simulaciones (ver main.py), asi que
+    # estos numeros son los que separan "el aula va lenta" de "el aula se
+    # queda sin servicio". Los valores por defecto van holgados para un aula
+    # y apretados para un script: cincuenta puestos, cinco por maquina.
+    max_ws_connections: int = 50
+    max_ws_connections_per_client: int = 5
+    # Un mensaje de control legitimo son unos cientos de bytes. 64 KiB deja
+    # sitio de sobra para cualquier ampliacion del contrato y corta de raiz el
+    # JSON de megabytes que solo sirve para hacer trabajar al parser.
+    max_ws_message_bytes: int = 64 * 1024
+    # Solo `true` si hay un proxy propio delante. Ver `client_key` en
+    # limits.py: creerse la cabecera sin proxy regala plazas infinitas.
+    trust_proxy: bool = False
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [

@@ -1,6 +1,8 @@
 """Requiere Postgres real: `docker compose up -d db` antes de ejecutar."""
 
 import time
+
+import pytest
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -204,3 +206,65 @@ def test_engine_failure_during_streaming_sends_error_and_closes_with_1011():
                 error = receive_json_of_type(ws, "error")
                 assert error["type"] == "error"
                 assert error["code"] == "ENGINE_FAILURE"
+
+
+def test_the_server_refuses_connections_beyond_its_capacity():
+    """El aforo no es endurecimiento opcional: es supervivencia.
+
+    Un solo worker sostiene todas las simulaciones, y cada conexion abre
+    cuatro tareas de fondo generando doce canales a 500 Hz. Sin tope, un
+    script con un bucle deja sin servicio a la clase entera.
+    """
+    with TestClient(app) as client:
+        app.state.limiter.max_total = 2
+        app.state.limiter.max_per_client = 2
+
+        abiertos = []
+        try:
+            for _ in range(2):
+                ws = client.websocket_connect("/ws/simulation")
+                ws.__enter__()
+                abiertos.append(ws)
+
+            # La tercera no llega a establecerse: el rechazo ocurre antes del
+            # `accept`, asi que el handshake falla en vez de abrirse un socket
+            # que luego se cierre.
+            with pytest.raises(Exception):
+                with client.websocket_connect("/ws/simulation"):
+                    pass
+        finally:
+            for ws in abiertos:
+                ws.__exit__(None, None, None)
+
+
+def test_a_seat_is_freed_when_the_client_disconnects():
+    with TestClient(app) as client:
+        app.state.limiter.max_total = 1
+        app.state.limiter.max_per_client = 1
+
+        with client.websocket_connect("/ws/simulation"):
+            pass
+        # Cerrada la primera, la siguiente entra: la plaza se libera aunque el
+        # cliente se vaya sin `stop`.
+        with client.websocket_connect("/ws/simulation") as ws:
+            ws.send_json({"type": "start", "rhythm_id": "sinus_normal", "seed": 1})
+            assert receive_json_of_type(ws, "started")["type"] == "started"
+
+
+def test_an_oversized_message_is_rejected_without_closing_the_socket():
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/simulation") as ws:
+            ws.send_json(
+                {
+                    "type": "start",
+                    "rhythm_id": "sinus_normal",
+                    "notas": "x" * (64 * 1024 + 1),
+                }
+            )
+            error = receive_json_of_type(ws, "error")
+            assert error["code"] == "INVALID_PARAMS"
+            assert "demasiado largo" in error["detail"]
+
+            # El socket sigue vivo: un mensaje normal a continuacion funciona.
+            ws.send_json({"type": "start", "rhythm_id": "sinus_normal", "seed": 1})
+            assert receive_json_of_type(ws, "started")["type"] == "started"

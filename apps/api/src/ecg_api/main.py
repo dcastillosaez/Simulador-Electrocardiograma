@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from .config import get_settings
 from .db.base import get_engine
 from .db.seed import seed_catalog
+from .limits import ConnectionLimiter
 from .routers.drugs import router as drugs_router
 from .routers.health import router as health_router
 from .routers.rhythms import router as rhythms_router
@@ -27,6 +28,13 @@ from .routers.simulation_ws import router as simulation_ws_router
 async def lifespan(app: FastAPI):
     settings = get_settings()
     app.state.settings = settings
+    # El aforo vive en el estado de la app y no en un global del módulo: es
+    # estado por proceso, como los propios sockets que cuenta, y así los tests
+    # arrancan cada `TestClient` con el contador a cero.
+    app.state.limiter = ConnectionLimiter(
+        max_total=settings.max_ws_connections,
+        max_per_client=settings.max_ws_connections_per_client,
+    )
     engine = get_engine(settings.database_url)
     app.state.session_factory = async_sessionmaker(engine, expire_on_commit=False)
     async with app.state.session_factory() as session:
