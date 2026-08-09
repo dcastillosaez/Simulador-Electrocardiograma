@@ -19,6 +19,9 @@ export interface SessionStoreState {
   selectedRhythmId: string | null;
   params: EngineParamsPayload | null;
   lastError: { code: string; detail: string } | null;
+  /** Por qué se fue la conexión la última vez. Sin esto, un servidor lleno y
+   * un servidor apagado se ven igual en pantalla. */
+  lastDisconnect: { code: number; reason: string } | null;
   framesLost: number;
   /** Ultimas medidas publicadas por el servidor. `null` mientras no ha
    * llegado ninguna; dentro, un valor `null` significa «no medible en este
@@ -60,6 +63,7 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
   selectedRhythmId: null,
   params: null,
   lastError: null,
+  lastDisconnect: null,
   framesLost: 0,
   measurements: null,
   activeDrugs: [],
@@ -70,9 +74,15 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
   selectRhythm: (rhythmId) => set({ selectedRhythmId: rhythmId }),
 
   attachRuntime: (runtime) => {
-    const onConnected = () => set({ connectionState: "connected" });
-    const onDisconnected = () =>
-      set({ connectionState: "idle", sessionId: null, seed: null, sampleRateHz: null });
+    const onConnected = () => set({ connectionState: "connected", lastDisconnect: null });
+    const onDisconnected = (event: SessionRuntimeEvents["disconnected"]) =>
+      set({
+        connectionState: "idle",
+        sessionId: null,
+        seed: null,
+        sampleRateHz: null,
+        lastDisconnect: { code: event.code, reason: event.reason },
+      });
     const onStarted = (message: SessionRuntimeEvents["started"]) =>
       set({
         connectionState: "running",

@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     # sitio de sobra para cualquier ampliacion del contrato y corta de raiz el
     # JSON de megabytes que solo sirve para hacer trabajar al parser.
     max_ws_message_bytes: int = 64 * 1024
+    # Cuanto se espera a que una conexion recien abierta pida su primera
+    # simulacion. Es para que una pestana olvidada suelte su plaza, no para
+    # frenar a nadie: el frontend abre el socket al cargar y no manda `start`
+    # hasta que el usuario elige un ritmo, asi que el plazo va holgado.
+    idle_start_timeout_s: float = 300.0
     # Solo `true` si hay un proxy propio delante. Ver `client_key` en
     # limits.py: creerse la cabecera sin proxy regala plazas infinitas.
     trust_proxy: bool = False

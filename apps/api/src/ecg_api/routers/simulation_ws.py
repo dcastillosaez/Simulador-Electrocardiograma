@@ -251,7 +251,25 @@ async def _run_session(websocket: WebSocket, settings, session_factory) -> None:
 
     try:
         while True:
-            raw = await websocket.receive_text()
+            # Mientras no haya simulación, la espera está acotada. Una pestaña
+            # que se abrió y se olvidó retiene su plaza del aforo
+            # indefinidamente, y son cinco por máquina: bastan cinco descuidos
+            # para no poder entrar desde ese equipo. El plazo solo corre antes
+            # del primer `start` —una simulación en marcha puede pasar horas
+            # sin que el cliente diga nada, y eso es uso normal— y va holgado,
+            # porque abrir la aplicación y tardar en elegir ritmo también lo es.
+            if manager.session_id is None:
+                try:
+                    with anyio.fail_after(settings.idle_start_timeout_s):
+                        raw = await websocket.receive_text()
+                except TimeoutError:
+                    logger.info("conexión cerrada por inactividad sin 'start'")
+                    await websocket.close(
+                        code=1000, reason="sin actividad: cierre por inactividad"
+                    )
+                    return
+            else:
+                raw = await websocket.receive_text()
 
             # El tamaño se mira antes de parsear: un JSON de megabytes cuesta
             # más en el parser que en la red, y ese es justo el trabajo que un

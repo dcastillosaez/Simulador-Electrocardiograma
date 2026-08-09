@@ -269,8 +269,11 @@ describe("ECGWorkspace", () => {
       fakeSocket.dispatch("close", { code: 1006, reason: "" });
     });
 
+    // Con el motivo, no a secas: un 1006 es "no hay nadie escuchando ahi", y
+    // eso se arregla arrancando el backend. Un servidor lleno (1013) diria
+    // otra cosa y pediria otra accion.
     await waitFor(() => {
-      expect(screen.getByText("Desconectado")).toBeInTheDocument();
+      expect(screen.getByText(/^Desconectado: .*arrancado/i)).toBeInTheDocument();
     });
   });
 

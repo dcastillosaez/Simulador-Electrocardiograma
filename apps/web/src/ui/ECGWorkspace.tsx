@@ -11,6 +11,7 @@ import {
 import { getTheme, setTheme, type ThemeName } from "@ui-system/themes/index";
 import { SessionRuntime } from "../simulation-runtime/session-runtime";
 import { CatalogClient } from "../simulation-runtime/catalog-client";
+import { describeClose } from "../simulation-runtime/close-reasons";
 import { captureElement } from "../render/dom-snapshot";
 import { useSessionStore } from "../state/session-store";
 import { RhythmSelector } from "./RhythmSelector";
@@ -388,6 +389,7 @@ export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspa
       inspector={
         <WorkspaceInspector
           lastError={store.lastError}
+          disconnectReason={describeClose(store.lastDisconnect)}
           connectionState={store.connectionState}
           hasConnectedOnce={hasConnectedOnce}
           isAwaitingSignal={isAwaitingSignal}

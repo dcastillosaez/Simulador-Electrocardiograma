@@ -12,6 +12,9 @@ const GAIN_CLIPPING_HINT =
 
 export interface WorkspaceInspectorProps {
   lastError: { code: string; detail: string } | null;
+  /** Por qué se fue la conexión, ya traducido a algo legible, o `null` si el
+   * cierre no dice nada útil. */
+  disconnectReason: string | null;
   connectionState: SessionState;
   hasConnectedOnce: boolean;
   isAwaitingSignal: boolean;
@@ -39,6 +42,7 @@ export interface WorkspaceInspectorProps {
  * medidas publicadas por el servidor. */
 export function WorkspaceInspector({
   lastError,
+  disconnectReason,
   connectionState,
   hasConnectedOnce,
   isAwaitingSignal,
@@ -103,7 +107,17 @@ export function WorkspaceInspector({
             {lastError.code}: {lastError.detail}
           </p>
         )}
-        {hasConnectedOnce && connectionState === "idle" && <p role="status">Desconectado</p>}
+        {/* El motivo, cuando el servidor lo da. «Desconectado» a secas hace
+            que un servidor lleno y un servidor apagado se vean igual, y son
+            dos problemas con soluciones distintas: uno se arregla esperando y
+            el otro arrancando el backend. */}
+        {hasConnectedOnce && connectionState === "idle" && (
+          <p role="status">
+            {disconnectReason
+              ? `Desconectado: ${disconnectReason}`
+              : "Desconectado"}
+          </p>
+        )}
         {/* Solo mientras corre: en pausa el buffer se vacía a propósito, y
             anunciar "Esperando señal" ahí convertiría una acción
             deliberada del usuario en lo que parece una avería de red. */}

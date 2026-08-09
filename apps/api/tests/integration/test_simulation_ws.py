@@ -288,3 +288,44 @@ def test_a_websocket_from_the_frontend_is_accepted():
         ) as ws:
             ws.send_json({"type": "start", "rhythm_id": "sinus_normal", "seed": 1})
             assert receive_json_of_type(ws, "started")["type"] == "started"
+
+
+def test_a_connection_that_never_starts_is_closed():
+    """Una pestaña abierta y olvidada acaba soltando su plaza del aforo."""
+    with TestClient(app) as client:
+        app.state.settings.idle_start_timeout_s = 0.2
+        try:
+            with client.websocket_connect("/ws/simulation") as ws:
+                # No se manda nada: el servidor cierra al vencer el plazo. Se
+                # espera el evento de cierre y no una excepción; `receive()`
+                # tras el cierre se queda bloqueado para siempre, así que el
+                # bucle termina EN el cierre, no después.
+                for _ in range(20):
+                    event = ws.receive()
+                    if event.get("type") == "websocket.close":
+                        break
+                else:
+                    raise AssertionError("el servidor no cerró la conexión ociosa")
+        finally:
+            app.state.settings.idle_start_timeout_s = 300.0
+
+
+def test_the_clock_does_not_run_once_a_simulation_is_active():
+    """Una simulación en marcha puede pasar horas sin que el cliente hable.
+
+    El cliente manda `start` y luego solo escucha: si el plazo siguiera
+    corriendo, el servidor cortaría a mitad de clase.
+    """
+    with TestClient(app) as client:
+        app.state.settings.idle_start_timeout_s = 0.2
+        try:
+            with client.websocket_connect("/ws/simulation") as ws:
+                ws.send_json(
+                    {"type": "start", "rhythm_id": "sinus_normal", "seed": 1}
+                )
+                receive_json_of_type(ws, "started")
+                time.sleep(0.5)  # más que el plazo, sin decir nada
+                # El socket sigue vivo y sigue emitiendo.
+                decode_frame(receive_frame_bytes(ws))
+        finally:
+            app.state.settings.idle_start_timeout_s = 300.0
