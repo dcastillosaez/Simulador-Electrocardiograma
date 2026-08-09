@@ -13,6 +13,9 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rand = "0.8"
+# Verificación de la licencia firmada. `ed25519-dalek` sin las features por
+# defecto: aquí solo se verifica, nunca se firma.
+ed25519-dalek = { version = "2", default-features = false }
 
 # Job objects de Windows: lo que garantiza que los hijos mueran con el padre
 # aunque el padre muera de forma anormal (ver `backend.rs`).

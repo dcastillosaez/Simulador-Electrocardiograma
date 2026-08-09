@@ -27,8 +27,12 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "icon": ["icons/icon.ico"],
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ],
     "publisher": "Simulador ECG",
     "copyright": "Uso docente. No es un dispositivo médico.",
     "shortDescription": "Simulador de electrocardiograma para docencia",
@@ -42,8 +46,34 @@
       },
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["Spanish", "English"],
+        "languages": [
+          "Spanish",
+          "English"
+        ],
         "displayLanguageSelector": true
+      },
+      "signCommand": {
+        "cmd": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "args": [
+          "-ExecutionPolicy",
+          "Bypass",
+          "-NoProfile",
+          "-File",
+          "../tools/firmar.ps1",
+          "-Ruta",
+          "%1"
+        ]
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMxMTAwOTQxQkExQTNDRjAKUldUd1BCcTZRUWtRd2ZHSVN6bXM2VFZ3NXZPdGxFZ1ZxeXFEKzc2M2g4c0tqdUZodFkvZnc1UlgK",
+      "endpoints": [
+        "https://ejemplo.invalid/simulador-ecg/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }
