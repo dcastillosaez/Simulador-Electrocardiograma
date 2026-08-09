@@ -371,6 +371,9 @@ por deriva.
 
 ## 14. Plan por sub-fases
 
+Resumen. El detalle de cada una —alcance, tareas, entregables, criterios de
+aceptación, riesgos y estimación— está en [plan-de-fases.md](plan-de-fases.md).
+
 | Fase | Contenido | Se considera hecha cuando |
 |---|---|---|
 | **G1** Shell | Tauri, React compilado, ventana, icono, splash | La ventana abre y muestra la interfaz sin backend, con un error decente |
