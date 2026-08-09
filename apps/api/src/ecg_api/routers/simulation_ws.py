@@ -153,11 +153,38 @@ async def _reject_if_no_active_session(
     return True
 
 
+def _origin_is_allowed(origin: str | None, allowed: list[str]) -> bool:
+    """Si el handshake viene de una página web, de cuál.
+
+    CORS no cubre el WebSocket: Starlette solo lo aplica a peticiones HTTP
+    normales, y el navegador tampoco bloquea por su cuenta una conexión WS
+    entre orígenes distintos. Sin esta comprobación, cualquier web que un
+    alumno tenga abierta puede conectarse al servidor del aula y ocupar plazas
+    —y el día que haya cookie de sesión, hacerlo *con la sesión de quien la
+    visita*, que es el cross-site WebSocket hijacking de manual—.
+
+    Sin cabecera `Origin` se acepta: eso es un cliente que no es un navegador
+    (un test, un script, un simulador de laboratorio), y el ataque que esto
+    previene solo existe dentro de un navegador, que siempre la envía. Cerrar
+    aquí no añadiría seguridad y rompería a todos los clientes legítimos que no
+    son páginas web.
+    """
+    if origin is None:
+        return True
+    return origin in allowed
+
+
 @router.websocket("/ws/simulation")
 async def simulation_ws(websocket: WebSocket) -> None:
     settings = websocket.app.state.settings
     session_factory = websocket.app.state.session_factory
     limiter = websocket.app.state.limiter
+
+    origin = websocket.headers.get("origin")
+    if not _origin_is_allowed(origin, settings.cors_origins_list):
+        logger.warning("handshake rechazado por origen: origin=%s", origin)
+        await websocket.close(code=1008, reason="origen no permitido")
+        return
 
     client = client_key(
         websocket.client.host if websocket.client else None,

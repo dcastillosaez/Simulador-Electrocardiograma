@@ -268,3 +268,23 @@ def test_an_oversized_message_is_rejected_without_closing_the_socket():
             # El socket sigue vivo: un mensaje normal a continuacion funciona.
             ws.send_json({"type": "start", "rhythm_id": "sinus_normal", "seed": 1})
             assert receive_json_of_type(ws, "started")["type"] == "started"
+
+
+def test_a_websocket_from_another_site_is_refused():
+    """Una web cualquiera abierta en otra pestaña no debe poder conectarse."""
+    with TestClient(app) as client:
+        with pytest.raises(Exception):
+            with client.websocket_connect(
+                "/ws/simulation",
+                headers={"Origin": "https://sitio-ajeno.example"},
+            ):
+                pass
+
+
+def test_a_websocket_from_the_frontend_is_accepted():
+    with TestClient(app) as client:
+        with client.websocket_connect(
+            "/ws/simulation", headers={"Origin": "http://localhost:5600"}
+        ) as ws:
+            ws.send_json({"type": "start", "rhythm_id": "sinus_normal", "seed": 1})
+            assert receive_json_of_type(ws, "started")["type"] == "started"

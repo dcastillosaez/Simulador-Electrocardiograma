@@ -20,3 +20,29 @@ def test_cors_rejects_an_unlisted_origin():
         "/api/health", headers={"Origin": "https://otro-origen.example"}
     )
     assert "access-control-allow-origin" not in response.headers
+
+
+# --- El WebSocket comprueba el origen por su cuenta -------------------------
+
+from ecg_api.routers.simulation_ws import _origin_is_allowed
+
+ALLOWED = ["http://localhost:5600", "http://localhost:5173"]
+
+
+def test_ws_accepts_a_listed_origin():
+    assert _origin_is_allowed("http://localhost:5600", ALLOWED) is True
+
+
+def test_ws_rejects_an_unlisted_origin():
+    # CORS no cubre el WebSocket --Starlette solo lo aplica a HTTP normal-- y
+    # el navegador tampoco bloquea un WS entre origenes distintos. Sin esta
+    # comprobacion, cualquier web abierta en otra pestana se conecta al
+    # servidor del aula.
+    assert _origin_is_allowed("https://sitio-ajeno.example", ALLOWED) is False
+
+
+def test_ws_accepts_a_client_that_is_not_a_browser():
+    # Sin cabecera `Origin` no hay navegador, y el ataque que esto previene
+    # solo existe dentro de uno. Cerrar aqui no anadiria seguridad y romperia
+    # los tests, los scripts y cualquier cliente de laboratorio.
+    assert _origin_is_allowed(None, ALLOWED) is True
