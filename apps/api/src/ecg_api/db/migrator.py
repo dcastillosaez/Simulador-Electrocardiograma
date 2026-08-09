@@ -14,6 +14,7 @@ migre en desarrollo, en los tests y dentro del `.exe`.
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 from alembic import command
@@ -28,10 +29,17 @@ logger = logging.getLogger("ecg_api.migrator")
 def migrations_path() -> Path:
     """Dónde están las revisiones.
 
-    En desarrollo, `apps/api/migrations`. Empaquetado, el directorio que el
-    instalador haya dejado junto al ejecutable; por eso se resuelve desde este
-    fichero y no desde el directorio de trabajo.
+    Dos respuestas, porque son dos mundos distintos:
+
+    - **En desarrollo**, `apps/api/migrations`, relativo a este fichero.
+    - **Empaquetado**, dentro del bundle. PyInstaller extrae los datos a un
+      directorio propio que anuncia en `sys._MEIPASS`, y ahí `__file__` apunta
+      a una ruta del archivo comprimido que no existe en disco: resolver por
+      `parents[...]` daba una carpeta inexistente y Alembic abortaba el
+      arranque con «Path doesn't exist».
     """
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent)) / "migrations"
     return Path(__file__).resolve().parents[3] / "migrations"
 
 

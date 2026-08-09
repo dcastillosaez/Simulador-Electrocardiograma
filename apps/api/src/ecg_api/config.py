@@ -38,6 +38,36 @@ class Settings(BaseSettings):
     # limits.py: creerse la cabecera sin proxy regala plazas infinitas.
     trust_proxy: bool = False
 
+    # --- Modo escritorio (fase G) ---------------------------------------
+    # Secreto que el shell de escritorio genera en cada arranque y comparte
+    # con la interfaz. Cuando esta puesto, la API exige presentarlo.
+    #
+    # No es autenticacion de usuario: es lo que impide que CUALQUIER proceso
+    # del mismo equipo hable con el simulador. En un escritorio el backend
+    # escucha en 127.0.0.1, y eso lo alcanza cualquier programa del usuario.
+    # Vacio en servidor, donde la puerta la pone otra cosa.
+    desktop_token: str = ""
+    # El origen desde el que Tauri sirve la interfaz. Se anade a la lista de
+    # origenes permitidos solo cuando hay token, es decir, solo en escritorio.
+    desktop_origin: str = "http://tauri.localhost"
+
+    @property
+    def is_desktop(self) -> bool:
+        return bool(self.desktop_token)
+
+    @property
+    def allowed_origins(self) -> list[str]:
+        """Los origenes que valen para CORS y para el handshake del WebSocket.
+
+        En escritorio hay que anadir el de Tauri --que no es `localhost` sino
+        un esquema propio-- pero solo ahi: aflojar la lista en servidor por
+        comodidad del escritorio seria abrir una puerta donde no hace falta.
+        """
+        origins = self.cors_origins_list
+        if self.is_desktop and self.desktop_origin not in origins:
+            return [*origins, self.desktop_origin]
+        return origins
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [

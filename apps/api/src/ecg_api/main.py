@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from .config import get_settings
 from .db.base import get_engine
 from .db.seed import seed_catalog
+from .desktop_auth import DesktopTokenMiddleware
 from .limits import ConnectionLimiter
 from .routers.drugs import router as drugs_router
 from .routers.health import router as health_router
@@ -77,10 +78,14 @@ app = FastAPI(title="Simulador de ECG — API", lifespan=lifespan)
 # cubre las rutas REST: catálogo, sesiones, salud.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=get_settings().cors_origins_list,
+    allow_origins=get_settings().allowed_origins,
     allow_methods=["GET"],
     allow_headers=["*"],
 )
+
+# Solo hace algo cuando hay `DESKTOP_TOKEN`: en servidor se queda mirando pasar
+# las peticiones. Ver `desktop_auth.py`.
+app.add_middleware(DesktopTokenMiddleware)
 
 # El WebSocket sí comprueba el origen, pero lo hace en su propio handler
 # (`simulation_ws`): el handshake no pasa por los middlewares de HTTP.

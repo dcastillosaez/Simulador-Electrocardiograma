@@ -1,0 +1,14 @@
+{
+  "name": "ecg-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Shell de escritorio del Simulador de ECG (Tauri)",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "icon": "tauri icon tools/icono-base.png"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.0"
+  }
+}

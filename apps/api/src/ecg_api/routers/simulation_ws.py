@@ -18,6 +18,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ecg_engine.types import DEFAULT_SAMPLE_RATE_HZ
 
+from ..desktop_auth import token_matches
 from ..errors import SimulationError
 from ..limits import client_key
 from ..outbox import FrameOutbox
@@ -47,6 +48,12 @@ router = APIRouter()
 logger = logging.getLogger("ecg_api.simulation_ws")
 
 OUTBOX_MAXSIZE = 20
+
+# El token del escritorio viaja con este prefijo en el subprotocolo del
+# handshake. Un prefijo y no el token pelado porque `Sec-WebSocket-Protocol`
+# es una lista de nombres de protocolo: hay que poder distinguir el nuestro
+# de cualquier otro que se anada en el futuro.
+TOKEN_SUBPROTOCOL_PREFIX = "ecg-token."
 
 # La frecuencia de muestreo no es una opción de configuración: es
 # `DEFAULT_SAMPLE_RATE_HZ` del motor, la misma constante que `EcgEngine` usa
@@ -181,10 +188,27 @@ async def simulation_ws(websocket: WebSocket) -> None:
     limiter = websocket.app.state.limiter
 
     origin = websocket.headers.get("origin")
-    if not _origin_is_allowed(origin, settings.cors_origins_list):
+    if not _origin_is_allowed(origin, settings.allowed_origins):
         logger.warning("handshake rechazado por origen: origin=%s", origin)
         await websocket.close(code=1008, reason="origen no permitido")
         return
+
+    # El token del modo escritorio viaja como subprotocolo: el navegador no
+    # deja poner cabeceras en `new WebSocket(url)`, y en la query string
+    # acabaría en los logs. En servidor no hay token y esto no hace nada.
+    if settings.desktop_token:
+        presentado = next(
+            (
+                p.removeprefix(TOKEN_SUBPROTOCOL_PREFIX)
+                for p in websocket.scope.get("subprotocols", [])
+                if p.startswith(TOKEN_SUBPROTOCOL_PREFIX)
+            ),
+            None,
+        )
+        if not token_matches(settings.desktop_token, presentado):
+            logger.warning("handshake rechazado: token ausente o incorrecto")
+            await websocket.close(code=1008, reason="token no válido")
+            return
 
     client = client_key(
         websocket.client.host if websocket.client else None,

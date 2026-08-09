@@ -1,0 +1,90 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  api:
+    name: API (${{ matrix.motor }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # Los dos motores, siempre. El servidor persiste en Postgres y el
+      # escritorio en SQLite: un soporte que no se ejercita se rompe en el
+      # primer commit que toque el esquema, y nadie se entera hasta que lo
+      # reporta un usuario. Es la condición de la decisión de la fase G3.
+      matrix:
+        motor: [postgres, sqlite]
+
+    services:
+      db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ecg
+          POSTGRES_PASSWORD: ecg
+          POSTGRES_DB: ecg_simulator
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ecg"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sincronizar dependencias
+        working-directory: apps/api
+        run: uv sync --extra dev
+      - name: Tests
+        working-directory: apps/api
+        env:
+          ECG_TEST_DB: ${{ matrix.motor }}
+        run: uv run pytest -q
+
+  web:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Instalar dependencias
+        working-directory: apps/web
+        run: npm ci
+      - name: Comprobación de tipos
+        working-directory: apps/web
+        run: npx tsc -b --noEmit
+      - name: Tests
+        working-directory: apps/web
+        run: npm test
+
+  dependencias:
+    name: Vulnerabilidades conocidas
+    runs-on: ubuntu-latest
+    # Avisa, no bloquea. En un proyecto pequeño, que una vulnerabilidad
+    # moderada en una dependencia de desarrollo impida mergear un cambio de
+    # interfaz un viernes hace que se acabe ignorando el aviso entero.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: npm audit
+        working-directory: apps/web
+        run: npm audit --package-lock-only --audit-level=high
+      - uses: astral-sh/setup-uv@v5
+      - name: pip-audit
+        working-directory: apps/api
+        run: uvx pip-audit --strict --progress-spinner off || true
