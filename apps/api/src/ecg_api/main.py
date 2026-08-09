@@ -22,6 +22,7 @@ from .routers.health import router as health_router
 from .routers.rhythms import router as rhythms_router
 from .routers.sessions import router as sessions_router
 from .routers.simulation_ws import router as simulation_ws_router
+from .security_headers import SecurityHeadersMiddleware
 
 
 @asynccontextmanager
@@ -56,6 +57,10 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["*"],
 )
+
+# El WebSocket sí comprueba el origen, pero lo hace en su propio handler
+# (`simulation_ws`): el handshake no pasa por los middlewares de HTTP.
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.include_router(health_router)
 app.include_router(rhythms_router)

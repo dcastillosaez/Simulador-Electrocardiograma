@@ -163,17 +163,26 @@ entero.
 
 ### Etapa 1 — Salir a la red del aula (E2, días)
 
-1. **Terminación TLS en un proxy** (Caddy o nginx delante de uvicorn). No tocar
-   la aplicación: el proxy resuelve TLS, `Origin` y rate limiting de una vez, y
-   es reversible.
-2. **Comprobar `Origin` en el handler del WebSocket** contra la misma lista que
-   ya usa CORS. Son cinco líneas en `simulation_ws` y cierra H3.
-3. **Límites de recursos**: conexiones simultáneas por IP, sesiones por
-   conexión, tamaño máximo de mensaje y tiempo máximo de sesión. La parte por IP
-   va en el proxy; la de sesión, en el handler.
-4. **Autenticación mínima**: una clave compartida del aula, verificada en el
-   primer mensaje del WebSocket y en un middleware para las rutas REST. No es
-   identidad, es una puerta. Suficiente para E2 y honesta sobre lo que es.
+1. **Límites de recursos** — hecho. `limits.py` impone aforo total y por
+   cliente, y el handler rechaza los mensajes desmedidos antes de parsearlos.
+   Va primero y no tercero porque es el único de esta lista que protege incluso
+   sin salir del portátil: con un solo worker, el aforo no es endurecimiento,
+   es supervivencia. La IP real se lee de `X-Forwarded-For` solo si el
+   despliegue declara un proxy de confianza (`TRUST_PROXY`).
+2. **Terminación TLS en un proxy** — hecho como configuración, en
+   `deploy/Caddyfile`. La aplicación no habla TLS y no debería. Queda por
+   desplegarlo el día que haga falta.
+3. **Comprobar `Origin` en el handler del WebSocket** — hecho, contra la misma
+   lista que ya usa CORS. Cierra H3. Sin cabecera `Origin` se acepta: eso es un
+   cliente que no es un navegador, y el ataque solo existe dentro de uno.
+4. **Cabeceras de seguridad** — hecho para las respuestas de la API
+   (`security_headers.py`). HSTS vive en el proxy, que es quien sabe si hay
+   TLS; la CSP del frontend, en quien sirva el HTML.
+5. **Autenticación mínima** — pendiente. Una clave compartida del aula,
+   verificada en el primer mensaje del WebSocket y en un middleware para las
+   rutas REST. No es identidad, es una puerta. Suficiente para E2 y honesta
+   sobre lo que es. Va después de TLS a propósito: un login sobre HTTP en claro
+   entrega la contraseña a la red, así que es peor que no tenerlo.
 
 El punto 3 merece un matiz de viabilidad: con un solo worker, el límite de
 conexiones **no es una medida de seguridad opcional sino de supervivencia**. Es
