@@ -33,7 +33,7 @@ Fuera de alcance, explícitamente:
 | Backend | El FastAPI actual, como proceso hijo | Sin cambios de contrato |
 | Frontend | `vite build` servido por Tauri | Ni Node ni Vite en la máquina del usuario |
 | Puerto | Efímero, elegido en arranque | Nunca 8000 fijo |
-| Base de datos | Ver §5 — **decisión abierta, con recomendación** | Es el punto caro |
+| Base de datos | SQLite en escritorio, PostgreSQL en servidor | Revisado y medido: ver §5 y g3-base-de-datos.md |
 | Instalador | NSIS (`.exe`) generado por Tauri | MSI queda como alternativa |
 | Firma | Certificado de firma de código + timestamping | Nunca en el repositorio |
 | Actualizaciones | Updater de Tauri, con manifiesto firmado | Infraestructura desde G1, uso desde G6 |
@@ -153,20 +153,23 @@ problemas del servicio (permisos, arranque automático, desinstalación sucia).
   ejecutar la suite de integración contra los dos motores para que el soporte
   sea real y no teórico.
 
-### Recomendación
+### Recomendación — revisada
 
-**Empezar por A** —tal como propone el plan de partida— y no porque sea la
-mejor a largo plazo, sino porque separa los riesgos: la fase G ya tiene bastante
-con empaquetar, firmar y actualizar como para además migrar de motor de base de
-datos. Cambiar las dos cosas a la vez hace imposible saber qué rompió qué.
+La recomendación provisional era **empezar por A** por separación de riesgos.
+Tras medirlo, **la decisión es B**: SQLite en escritorio, PostgreSQL en
+servidor. El motivo corto es que el riesgo que justificaba A —tocar el esquema y
+romper el servidor— resulta ser evitable: con `with_variant`, PostgreSQL recibe
+exactamente el mismo `JSONB` y el mismo `UUID` que hoy.
 
-Ahora bien, hay una tercera vía que conviene tener presente antes de gastar
-semanas en empaquetar PostgreSQL: **si la base de datos solo guarda historial y
-el simulador funciona sin ella, quizá el escritorio no necesite un motor de base
-de datos en absoluto en su versión 1**. Un fichero de sesiones por usuario
-resolvería el caso de uso completo. Se descarta si el objetivo comercial incluye
-exportar historiales, informes o evaluación —que es la fase 2— pero merece una
-conversación de media hora antes de asumir los 200 MB.
+El análisis completo, con las mediciones y la prueba de concepto, está en
+[g3-base-de-datos.md](g3-base-de-datos.md). Los tres datos que inclinaron la
+balanza: el acoplamiento a PostgreSQL son cuatro líneas en dos ficheros; 35
+sesiones reales ocupan 72 KB; y hoy, sin base de datos, la aplicación **no
+arranca en absoluto**.
+
+La decisión viene con una condición que no es opcional: **la suite de
+integración tiene que correr contra los dos motores**, o el soporte de SQLite se
+romperá sin que nadie se entere.
 
 ## 6. Migraciones
 
@@ -372,7 +375,7 @@ por deriva.
 |---|---|---|
 | **G1** Shell | Tauri, React compilado, ventana, icono, splash | La ventana abre y muestra la interfaz sin backend, con un error decente |
 | **G2** Runtime Python | Empaquetado de FastAPI y los dos motores, arranque, health check, apagado limpio | Se abre y se cierra cien veces sin dejar procesos huérfanos |
-| **G3** Base de datos | Motor local, migraciones programáticas, primer arranque, **modo degradado** | Arranca con la base de datos rota y lo dice |
+| **G3** Base de datos | Esquema portable, SQLite en escritorio, migraciones programáticas, **modo degradado** (ver [g3-base-de-datos.md](g3-base-de-datos.md)) | Arranca, simula y mide con la base de datos borrada, y lo dice |
 | **G4** Instalador | NSIS, accesos directos, desinstalador, WebView2, datos separados | Instala y desinstala limpio en una máquina virgen |
 | **G5** Firma | Certificado, binarios, instalador, timestamping, CI | Una descarga desde otra máquina no muestra "editor desconocido" |
 | **G6** Actualizaciones | Manifiesto, descarga, verificación, instalación, rollback | Una versión rota vuelve sola a la anterior |
