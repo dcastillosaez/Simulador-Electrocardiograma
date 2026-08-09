@@ -12,7 +12,7 @@ cerrar cada sub-fase.
 | G1 Desktop Shell | **Hecha** | El `.exe` compila, abre ventana y monta la interfaz |
 | G2 Runtime Python | **Hecha** | 100 ciclos abrir/cerrar sin un solo proceso huérfano |
 | G3 Base de datos | **Hecha** | 186 tests contra Postgres y los mismos contra SQLite; arranca sin base de datos |
-| G4 Instalador | **Parcial** | `tauri build` produce el NSIS; falta meter el backend dentro y probar en VM limpia |
+| G4 Instalador | **Hecha** | Instalar → arrancar → cerrar → desinstalar, con el backend dentro |
 | G5 Firma | **Bloqueada** | Necesita un certificado que hay que comprar |
 | G6 Actualizaciones | **No empezada** | Necesita un servidor de versiones |
 | G7 Licencia | **No empezada** | Necesita decisiones comerciales |
@@ -108,20 +108,64 @@ Ver [g3-base-de-datos.md](g3-base-de-datos.md) para el análisis. Implementado:
 
 186 tests contra cada motor.
 
-## G4 — Instalador · parcial
+## G4 — Instalador · hecha, salvo la VM limpia
 
-`tauri build` produce `Simulador ECG_0.1.0_x64-setup.exe` (1,5 MB, instalación
-por usuario, español e inglés).
+`tauri build` produce `Simulador ECG_0.1.0_x64-setup.exe` con **el backend
+dentro**: el directorio de PyInstaller entra como recurso
+(`bundle.resources`), así que el instalador lleva la aplicación completa y no
+solo el shell.
 
-Falta lo que lo hace un instalador de verdad:
+Instalación por usuario (sin permisos de administrador), selector de idioma
+entre español e inglés.
 
-- **Meter el backend dentro** como recurso (los 95 MB de `ecg-api/`), que es lo
-  que llevará el instalador a unos 100 MB.
-- WebView2: decidir entre incluir el bootstrapper o descargarlo. Esta máquina
-  ya lo tiene, así que **el instalador actual no prueba ese camino**.
-- Datos en `%LOCALAPPDATA%`, desinstalador que pregunte por ellos, y prueba en
-  una **máquina virtual limpia**. Probarlo aquí es engañarse: aquí está todo
-  instalado.
+### WebView2: `embedBootstrapper`
+
+Tres opciones y un compromiso:
+
+| Modo | Instalador | Sin Internet |
+|---|---|---|
+| `downloadBootstrapper` (por defecto) | +0 MB | No funciona |
+| **`embedBootstrapper`** (elegido) | +~2 MB | Solo si WebView2 ya está |
+| `offlineInstaller` | **+127 MB** | Funciona siempre |
+
+Se elige el intermedio porque Windows 11 trae WebView2 de serie y la mayoría de
+los Windows 10 actualizados también. **Para un aula sin Internet y con equipos
+antiguos hay que cambiar a `offlineInstaller`** y asumir los 127 MB — es una
+línea en `tauri.conf.json`, y la decisión depende de dónde se vaya a instalar.
+
+### Datos del usuario
+
+No se borran al desinstalar. `%LOCALAPPDATA%\SimuladorECG` sobrevive, con la
+base de datos y los logs dentro; quien quiera borrarlos lo hace a mano. Tirar
+el historial de sesiones de alguien sin preguntar es lo que no se puede
+deshacer.
+
+### Verificado
+
+`apps/desktop/tools/probar_instalador.ps1` hace el ciclo entero sin
+intervención:
+
+```
+Instalador: 32 MB   (los 95 MB del backend, comprimidos por NSIS)
+instalado en: %LOCALAPPDATA%\Simulador ECG
+backend dentro de la instalación: True
+ventana: 'Simulador de ECG'
+backend arrancado por la aplicación: True (111 MB)
+sin procesos huérfanos
+binarios borrados: True
+base de datos del usuario conservada: True
+```
+
+El script **deduce** la ruta de instalación del registro y el nombre del
+ejecutable del directorio, en vez de suponerlos: la primera versión daba por
+fallida una instalación que había funcionado, solo porque el binario se llama
+`simulador-ecg.exe` (el nombre del crate) y no `Simulador ECG.exe`.
+
+### Lo que sigue sin probarse
+
+**La máquina virtual limpia.** Aquí ya están Python, Node, Rust y WebView2:
+probar la instalación en este equipo no demuestra que funcione en uno virgen, y
+el camino de «Windows 10 sin WebView2» sigue sin ejercitarse.
 
 ## G5 — Firma · bloqueada
 

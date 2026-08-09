@@ -33,10 +33,17 @@
     "copyright": "Uso docente. No es un dispositivo médico.",
     "shortDescription": "Simulador de electrocardiograma para docencia",
     "longDescription": "Puesto de simulación clínica de ECG: doce derivaciones, ritmos normales y patológicos, medición sobre el trazado y farmacología. Herramienta docente; no está destinada al diagnóstico ni al tratamiento de pacientes.",
+    "resources": {
+      "../../api/packaging/dist/ecg-api": "ecg-api"
+    },
     "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["Spanish", "English"]
+        "languages": ["Spanish", "English"],
+        "displayLanguageSelector": true
       }
     }
   }

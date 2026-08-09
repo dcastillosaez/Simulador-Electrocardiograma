@@ -88,8 +88,9 @@ del repositorio. En escritorio hay que separarlo, porque los binarios van a
         web\            (React compilado)
         migrations\     (revisiones de Alembic)
 
-%LOCALAPPDATA%\SimuladorECG\         datos del usuario, escribible
-    db\                 (cluster o fichero de base de datos)
+%LOCALAPPDATA%\edu.simuladorecg.desktop\   datos del usuario, escribible
+    simulador.sqlite    (la base de datos)
+    EBWebView\          (perfil de WebView2, lo gestiona el sistema)
     logs\
         launcher.log
         api.log
