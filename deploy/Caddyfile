@@ -1,0 +1,61 @@
+# TLS delante del simulador.
+#
+# La aplicación no habla TLS y no debería: terminarlo en un proxy la deja
+# igual de simple en desarrollo, y hace reversible la decisión. Caddy y no
+# nginx porque obtiene y renueva el certificado solo; con nginx habría que
+# montar certbot al lado y esta pieza pasaría de un fichero a un servicio.
+#
+# Sustituye el nombre de abajo por el del servidor. Para una máquina de aula
+# sin nombre público, cambia `ecg.ejemplo.edu` por `:443` y añade
+# `tls internal`: Caddy emite un certificado de su CA local, que hay que
+# instalar en los equipos del aula. Sin nombre no hay certificado válido, y un
+# certificado que el navegador rechaza enseña a los alumnos a saltarse avisos
+# de seguridad, que es peor que no tener TLS.
+
+ecg.ejemplo.edu {
+	encode gzip
+
+	# El WebSocket va por el mismo host y puerto que el REST: comparten
+	# origen, así que la cookie de sesión del día que haya login viaja sola
+	# en el handshake y no hay que inventar un segundo mecanismo.
+	reverse_proxy localhost:8000 {
+		# Sin esto, la API ve todas las conexiones como si vinieran del
+		# proxy y su límite por cliente se convierte en un segundo límite
+		# global (ver `client_key` en limits.py). Al activarlo hay que
+		# arrancar la API con TRUST_PROXY=true, y NO exponer su puerto
+		# 8000 fuera de la máquina: quien lo alcance directamente puede
+		# escribir la cabecera que quiera.
+		header_up X-Forwarded-For {remote_host}
+	}
+
+	header {
+		# HSTS: solo tiene sentido detrás de TLS, y por eso vive aquí y no
+		# en la aplicación, que en desarrollo corre en claro.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		# El simulador no se empotra en ningún sitio. `frame-ancestors`
+		# sustituye a X-Frame-Options y lo cubre mejor.
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+		-Server
+	}
+}
+
+# Notas de despliegue
+#
+#   docker run -d --name ecg-proxy --network host \
+#     -v $PWD/deploy/Caddyfile:/etc/caddy/Caddyfile \
+#     -v caddy_data:/data caddy:2
+#
+# Y la API detrás, escuchando solo en local:
+#
+#   TRUST_PROXY=true uv run uvicorn ecg_api.main:app --host 127.0.0.1 --port 8000
+#
+# `--host 127.0.0.1` no es un detalle: si la API escucha en 0.0.0.0 con
+# TRUST_PROXY activo, cualquiera de la red puede saltarse el proxy y mandar el
+# `X-Forwarded-For` que quiera, que es exactamente el agujero que la opción
+# abre cuando no hay nadie delante.
+#
+# `connect-src 'self'` da por hecho que el frontend se sirve desde este mismo
+# origen. Si la API vive en otro dominio, hay que añadirlo ahí junto con su
+# `wss://`, o el navegador cortará el WebSocket.
