@@ -81,15 +81,26 @@ const COMPRESSION_HINT =
 export interface ECGWorkspaceProps {
   wsUrl: string;
   apiBaseUrl: string;
-  webSocketFactory?: (url: string) => WebSocket;
+  /** Token del modo escritorio. Vacío en navegador: ahí el backend no lo
+   * exige, porque no está al alcance de cualquier proceso de la máquina. */
+  backendToken?: string;
+  webSocketFactory?: (url: string, protocols?: string[]) => WebSocket;
 }
 
-export function ECGWorkspace({ wsUrl, apiBaseUrl, webSocketFactory }: ECGWorkspaceProps) {
+export function ECGWorkspace({
+  wsUrl,
+  apiBaseUrl,
+  backendToken = "",
+  webSocketFactory,
+}: ECGWorkspaceProps) {
   const runtime = useMemo(
-    () => new SessionRuntime(wsUrl, webSocketFactory),
-    [wsUrl, webSocketFactory]
+    () => new SessionRuntime(wsUrl, webSocketFactory, backendToken),
+    [wsUrl, webSocketFactory, backendToken]
   );
-  const catalogClient = useMemo(() => new CatalogClient({ baseUrl: apiBaseUrl }), [apiBaseUrl]);
+  const catalogClient = useMemo(
+    () => new CatalogClient({ baseUrl: apiBaseUrl, token: backendToken }),
+    [apiBaseUrl, backendToken]
+  );
   const store = useSessionStore();
 
   const [selectedRhythm, setSelectedRhythm] = useState<RhythmDetail | null>(null);

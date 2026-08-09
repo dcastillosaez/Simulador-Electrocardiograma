@@ -1,6 +1,16 @@
+/** Prefijo del subprotocolo con el que viaja el token del modo escritorio.
+ *
+ * Por subprotocolo y no por cabecera porque `new WebSocket(url)` no admite
+ * cabeceras, ni por query string porque ahi acabaria en los logs del servidor
+ * y en el historial. Tiene que coincidir con `TOKEN_SUBPROTOCOL_PREFIX` del
+ * backend. */
+export const TOKEN_SUBPROTOCOL_PREFIX = "ecg-token.";
+
 export interface WebSocketClientOptions {
   url: string;
-  webSocketFactory?: (url: string) => WebSocket;
+  /** Solo en escritorio. En navegador no hay token y no se envia nada. */
+  token?: string;
+  webSocketFactory?: (url: string, protocols?: string[]) => WebSocket;
 }
 
 export type BinaryMessageHandler = (data: ArrayBuffer) => void;
@@ -16,7 +26,8 @@ export class WebSocketClient {
 
   private socket: WebSocket | null = null;
   private readonly url: string;
-  private readonly factory: (url: string) => WebSocket;
+  private readonly token: string;
+  private readonly factory: (url: string, protocols?: string[]) => WebSocket;
 
   // Referencias estables: `close()` las necesita para poder retirarlas con
   // `removeEventListener`. Sin esto, el socket que se está cerrando sigue
@@ -45,11 +56,17 @@ export class WebSocketClient {
 
   constructor(options: WebSocketClientOptions) {
     this.url = options.url;
-    this.factory = options.webSocketFactory ?? ((url) => new WebSocket(url));
+    this.token = options.token ?? "";
+    this.factory =
+      options.webSocketFactory ??
+      ((url, protocols) => new WebSocket(url, protocols));
   }
 
   connect(): void {
-    const socket = this.factory(this.url);
+    const protocolos = this.token
+      ? [`${TOKEN_SUBPROTOCOL_PREFIX}${this.token}`]
+      : undefined;
+    const socket = this.factory(this.url, protocolos);
     socket.binaryType = "arraybuffer";
     socket.addEventListener("open", this.handleOpen);
     socket.addEventListener("message", this.handleMessage);

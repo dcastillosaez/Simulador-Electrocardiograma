@@ -13,6 +13,9 @@ export type RuntimeMode = "browser" | "desktop";
 export interface BackendUrls {
   apiBaseUrl: string;
   wsUrl: string;
+  /** Secreto de esta sesión de escritorio. Vacío en navegador, donde el
+   * backend no lo exige porque la puerta la pone otra cosa. */
+  token: string;
 }
 
 /** El puente que Tauri inyecta en la ventana antes de cargar la página. */
@@ -53,6 +56,7 @@ export function browserBackendUrls(search: string): BackendUrls {
       override("ws") ??
       import.meta.env.VITE_WS_URL ??
       "ws://localhost:8000/ws/simulation",
+    token: "",
   };
 }
 
@@ -82,5 +86,6 @@ export async function resolveBackendUrls(
   if (!tauri) return browserBackendUrls(search);
 
   const apiBaseUrl = (await tauri.invoke("get_backend_url")) as string;
-  return { apiBaseUrl, wsUrl: wsUrlFrom(apiBaseUrl) };
+  const token = (await tauri.invoke("get_backend_token")) as string;
+  return { apiBaseUrl, wsUrl: wsUrlFrom(apiBaseUrl), token };
 }

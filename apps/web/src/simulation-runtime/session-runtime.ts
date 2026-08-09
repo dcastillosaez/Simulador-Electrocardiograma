@@ -48,9 +48,14 @@ export class SessionRuntime extends TypedEventEmitter<SessionRuntimeEvents> {
   private lastSequenceNumber: number | null = null;
   private lastSessionId: string | null = null;
 
-  constructor(wsUrl: string, webSocketFactory?: (url: string) => WebSocket) {
+  constructor(
+    wsUrl: string,
+    webSocketFactory?: (url: string, protocols?: string[]) => WebSocket,
+    /** Token del modo escritorio. Vacío en navegador. */
+    token = ""
+  ) {
     super();
-    this.ws = new WebSocketClient({ url: wsUrl, webSocketFactory });
+    this.ws = new WebSocketClient({ url: wsUrl, token, webSocketFactory });
     this.ws.onOpen = () => {
       this.state = "connected";
       this.emit("connected", {});

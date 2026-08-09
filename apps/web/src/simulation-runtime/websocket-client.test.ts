@@ -48,7 +48,8 @@ describe("WebSocketClient", () => {
 
     client.connect();
 
-    expect(factory).toHaveBeenCalledWith("ws://test");
+    // Sin token, sin subprotocolos: en navegador no hay nada que presentar.
+    expect(factory).toHaveBeenCalledWith("ws://test", undefined);
     expect(fake.binaryType).toBe("arraybuffer");
   });
 
@@ -151,5 +152,25 @@ describe("WebSocketClient", () => {
     fake.dispatch("close", { code: 1000, reason: "cierre normal" });
 
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("WebSocketClient en modo escritorio", () => {
+  it("presenta el token como subprotocolo del handshake", () => {
+    // Por subprotocolo y no por cabecera porque `new WebSocket(url)` no admite
+    // cabeceras, ni por query string porque ahi acabaria en los logs.
+    const fake = new FakeWebSocket();
+    const factory = vi.fn().mockReturnValue(fake);
+    const client = new WebSocketClient({
+      url: "ws://127.0.0.1:52341/ws/simulation",
+      token: "secreto-de-arranque",
+      webSocketFactory: factory,
+    });
+
+    client.connect();
+
+    expect(factory).toHaveBeenCalledWith("ws://127.0.0.1:52341/ws/simulation", [
+      "ecg-token.secreto-de-arranque",
+    ]);
   });
 });

@@ -44,5 +44,11 @@ export function App() {
     );
   }
 
-  return <ECGWorkspace wsUrl={urls.wsUrl} apiBaseUrl={urls.apiBaseUrl} />;
+  return (
+    <ECGWorkspace
+      wsUrl={urls.wsUrl}
+      apiBaseUrl={urls.apiBaseUrl}
+      backendToken={urls.token}
+    />
+  );
 }
