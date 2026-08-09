@@ -4,13 +4,15 @@ from fastapi.testclient import TestClient
 
 from ecg_api.main import app
 
+from .conftest import receive_frame_bytes, receive_json_of_type
+
 
 def _start_and_stop_a_session(client, rhythm_id="sinus_normal", seed=1):
     with client.websocket_connect("/ws/simulation") as ws:
         ws.send_json({"type": "start", "rhythm_id": rhythm_id, "seed": seed})
-        started = ws.receive_json()
+        started = receive_json_of_type(ws, "started")
         for _ in range(60):  # 60 * 100 ms = 6 s simulados, por encima del umbral de 5
-            ws.receive_bytes()
+            receive_frame_bytes(ws)
         ws.send_json({"type": "stop"})
     return started["session_id"]
 

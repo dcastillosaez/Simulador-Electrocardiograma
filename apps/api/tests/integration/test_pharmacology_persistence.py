@@ -112,11 +112,21 @@ async def test_a_short_session_with_a_drug_is_persisted_anyway(db_session):
 
 
 async def test_the_session_detail_replays_from_the_registry(db_session):
-    """El contrato del replay: la lista guardada reconstruye el estado."""
+    """El contrato del replay: la lista guardada reconstruye el estado.
+
+    Las dos administraciones van SEPARADAS en el tiempo simulado. Antes se
+    hacían en el mismo instante, y entonces la lista se ordena por un `t_s`
+    empatado: Postgres devuelve las filas en el orden que quiere y el test
+    pasaba o fallaba según la ejecución. El orden de dos fármacos dados en el
+    mismo instante no está en los datos, así que no es algo que este test
+    pueda comprobar — ni el replay reproducir.
+    """
     manager, settings = await _seeded_manager(db_session)
     for _ in range(50):
         manager.next_chunk()
     manager.administer("verapamil", 5.0, "IV")
+    for _ in range(10):
+        manager.next_chunk()
     manager.administer("metoprolol", 5.0, "IV")
     manager.stop()
     await persist_session(db_session, manager, settings)

@@ -84,13 +84,19 @@ async def get_session(session_id: str, request: Request) -> SessionDetail:
         if row is None:
             raise HTTPException(status_code=404, detail="sesión no encontrada")
         # Ordenadas por `t_s`: es el orden en que ocurrieron y el orden en
-        # que un replay debe reinyectarlas.
+        # que un replay debe reinyectarlas. El `id` desempata —dos fármacos
+        # administrados en el mismo instante simulado empatan, y sin segundo
+        # criterio Postgres devuelve el orden que quiera, distinto entre dos
+        # llamadas a este mismo endpoint—. No reconstruye cuál fue primero,
+        # porque ese dato no está en la tabla; garantiza que la respuesta sea
+        # siempre la misma, que es lo que un replay necesita para ser
+        # verificable.
         administrations = list(
             (
                 await db.execute(
                     select(DrugAdministrationRow)
                     .where(DrugAdministrationRow.session_id == parsed_id)
-                    .order_by(DrugAdministrationRow.t_s)
+                    .order_by(DrugAdministrationRow.t_s, DrugAdministrationRow.id)
                 )
             )
             .scalars()
