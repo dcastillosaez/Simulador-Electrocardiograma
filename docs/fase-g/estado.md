@@ -10,7 +10,7 @@ cerrar cada sub-fase.
 | Fase | Estado | Verificado ejecutándolo |
 |---|---|---|
 | G1 Desktop Shell | **Hecha** | El `.exe` compila, abre ventana y monta la interfaz |
-| G2 Runtime Python | **Casi** | El backend empaquetado arranca, migra y responde; falta que lo lance el shell |
+| G2 Runtime Python | **Hecha** | 100 ciclos abrir/cerrar sin un solo proceso huérfano |
 | G3 Base de datos | **Hecha** | 186 tests contra Postgres y los mismos contra SQLite; arranca sin base de datos |
 | G4 Instalador | **Parcial** | `tauri build` produce el NSIS; falta meter el backend dentro y probar en VM limpia |
 | G5 Firma | **Bloqueada** | Necesita un certificado que hay que comprar |
@@ -39,7 +39,7 @@ simulador-ecg.exe   5,6 MB   ventana «Simulador de ECG»   29 MB de memoria
   seguridad y las `VITE_*` se hornean al compilar, cuando todavía no se sabe el
   puerto.
 
-## G2 — Runtime Python · casi
+## G2 — Runtime Python · hecha
 
 El backend empaquetado funciona de extremo a extremo, probado con el ejecutable:
 
@@ -68,15 +68,31 @@ en REST, por subprotocolo en el WebSocket. No es autenticación de usuario, es l
 que impide que cualquier proceso del mismo equipo hable con el simulador — en
 `127.0.0.1` lo alcanza cualquiera.
 
-### Lo que falta de G2
+### El shell arranca y mata el backend
 
-- Que el shell **lance** el sidecar: `spawn`, leer el `{"event":"listening"}`,
-  llamar a `set_ready()` y esperar a `/api/health`. La costura ya está puesta
-  (`BackendHandle` en `src-tauri/src/backend.rs`).
-- **Job object de Windows** para que los hijos mueran con el padre aunque el
-  padre muera de forma anormal.
-- El criterio de aceptación: **cien ciclos de abrir y cerrar sin procesos
-  huérfanos**.
+`BackendHandle::spawn` lanza `ecg-api.exe`, lee su anuncio de puerto y entrega
+a la interfaz la URL y el token. El apagado tiene **dos capas**, y las dos hacen
+falta:
+
+- `shutdown()` al cerrar la ventana: el caso normal, y libera puerto y memoria
+  de inmediato.
+- **Job object** con `KILL_ON_JOB_CLOSE` (`src-tauri/src/job.rs`): cubre el caso
+  que de verdad ensucia la máquina de alguien — que el shell muera sin ejecutar
+  su código de cierre. Windows mata todo el job cuando se cierra el último
+  handle, y los handles de un proceso se cierran cuando el proceso muere, pase
+  lo que pase.
+
+Verificado ejecutándolo:
+
+```
+Stop-Process -Force sobre el shell  ->  el backend murió con él
+100 ciclos de abrir y cerrar        ->  0 huérfanos, 0 arranques fallidos
+                                        0 procesos vivos al terminar
+```
+
+El token llega hasta el final: cabecera `X-ECG-Token` en REST y subprotocolo
+`ecg-token.<token>` en el WebSocket. En navegador es cadena vacía y no se manda
+nada, así que el camino de siempre no cambia.
 
 ## G3 — Base de datos · hecha
 
