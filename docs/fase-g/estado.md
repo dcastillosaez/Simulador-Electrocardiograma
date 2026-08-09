@@ -3,7 +3,7 @@
 Qué está hecho, qué falta y qué no puede hacerse desde aquí. Se actualiza al
 cerrar cada sub-fase.
 
-Última revisión: 9 de agosto de 2026 · rama `feat/ecg-desktop-fase-g`
+Última revisión: 10 de agosto de 2026 · rama `feat/ecg-desktop-fase-g`
 
 ## Resumen
 
@@ -13,10 +13,13 @@ cerrar cada sub-fase.
 | G2 Runtime Python | **Hecha** | 100 ciclos abrir/cerrar sin un solo proceso huérfano |
 | G3 Base de datos | **Hecha** | 186 tests contra Postgres y los mismos contra SQLite; arranca sin base de datos |
 | G4 Instalador | **Hecha** | Instalar → arrancar → cerrar → desinstalar, con el backend dentro |
-| G5 Firma | **Bloqueada** | Necesita un certificado que hay que comprar |
-| G6 Actualizaciones | **No empezada** | Necesita un servidor de versiones |
-| G7 Licencia | **No empezada** | Necesita decisiones comerciales |
-| G8 Release | **Parcial** | CI de tests con los dos motores; falta la pipeline de release |
+| G5 Firma | **Hecha, con certificado de prueba** | Instalador firmado en sha256RSA y sellado por DigiCert |
+| G6 Actualizaciones | **Hecha, sin servidor** | Updater configurado; contador de arranques fallidos probado |
+| G7 Licencia | **Hecha, sin emisor** | Verificación Ed25519 en Rust, con sus tests |
+| G8 Release | **Hecha, sin ejecutar** | Workflow completo; no se ha disparado un tag |
+
+Lo que queda pendiente **no es programación**: un certificado que hay que
+comprar, un servidor donde publicar, y decidir qué se vende. Detallado al final.
 
 ## G1 — Desktop Shell · hecha
 
@@ -167,47 +170,102 @@ fallida una instalación que había funcionado, solo porque el binario se llama
 probar la instalación en este equipo no demuestra que funcione en uno virgen, y
 el camino de «Windows 10 sin WebView2» sigue sin ejercitarse.
 
-## G5 — Firma · bloqueada
+## G5 — Firma
 
-No es una cuestión de tiempo: **hace falta un certificado de firma de código**,
-que cuesta dinero, exige validación de identidad y tarda días o semanas en
-emitirse. No se puede obtener desde aquí.
+`tools/firmar.ps1`, invocado por Tauri para cada binario y para el instalador.
+El certificado sale del **almacén de Windows por su huella**
+(`ECG_SIGN_THUMBPRINT`): la clave privada nunca sale de ahí, y lo que viaja por
+el workflow es un identificador que no es secreto. No lee ningún `.pfx` del
+repositorio ni contraseñas del entorno, a propósito.
 
-Lo que sí está listo para cuando exista: `tauri.conf.json` acepta la
-configuración de firma, y el workflow de release puede firmar como un paso más.
+El **sello de tiempo no es opcional**: sin él, la firma deja de validar cuando
+el certificado caduca, y una versión antigua perfectamente buena se convierte
+en una alerta de seguridad para quien la tenga instalada.
 
-Recordatorio del plan: **iniciar el trámite ya**, no cuando toque G5. Y contar
-con que un certificado nuevo no elimina los avisos de SmartScreen — la
-reputación se construye con descargas.
+Verificado con `ECG_SIGN_SELFSIGNED=1`:
 
-## G6 — Actualizaciones · no empezada
+```
+instalador:  Simulador ECG_0.1.0_x64-setup.exe (35 MB)
+firmado por: CN=Simulador ECG (PRUEBA - NO DISTRIBUIR)
+algoritmo:   sha256RSA
+sello:       DigiCert SHA256 RSA4096 Timestamp Responder 2025
+estado:      UnknownError
+```
 
-Necesita un **servidor de versiones** donde publicar el manifiesto y los
-paquetes, y un par de claves para el updater. Ninguna de las dos cosas existe
-todavía, y ambas son decisiones de infraestructura, no de programación.
+`UnknownError` es lo esperado de un autofirmado sin CA de confianza detrás. Con
+un certificado real el estado sería `Valid` y **nada más cambia**: el mecanismo
+está probado de extremo a extremo, sello de tiempo incluido.
 
-Sí conviene recordar lo que dice el plan: **la primera versión distribuida sin
-updater no sabrá actualizarse nunca**. Si va a haber distribución, esto tiene
-que entrar antes de la primera entrega real.
+Y una expectativa que conviene tener escrita: un certificado nuevo, incluso EV,
+**no elimina los avisos de SmartScreen**. La reputación se construye con
+descargas a lo largo del tiempo, así que los primeros usuarios verán el aviso.
 
-## G7 — Licencia · no empezada
+## G6 — Actualizaciones
 
-Depende de decisiones que no son técnicas: qué ediciones hay, qué incluye cada
-una, cuánto dura el periodo de gracia sin conexión, y qué hace exactamente la
-aplicación sin licencia. Programarlo sin esas respuestas sería inventarlas.
+El plugin updater está configurado con su clave pública. La descarga y la
+verificación de firma las hace Tauri —un updater que ejecuta lo que le llega es
+un mecanismo de instalación remota de malware con nuestro nombre encima— y
+`updates.rs` aporta las dos decisiones que no toma solo:
 
-## G8 — Release · parcial
+- **Cuándo**: al arrancar, nunca durante el uso. Nadie quiere una actualización
+  a mitad de clase.
+- **Qué pasa si la nueva no arranca**: contador de arranques fallidos en disco.
+  Dos seguidos y deja de actualizar hasta que alguien mire, porque seguir
+  trayendo versiones sobre una instalación que no arranca convierte un fallo en
+  un ciclo. El contador no se hereda entre versiones —que la 1.0.0 fallara no
+  dice nada de la 1.1.0— y un fichero de estado corrupto no bloquea nada: se
+  falla hacia el lado que deja el producto usable.
 
-`.github/workflows/tests.yml` corre en cada push y PR:
+La clave del updater que hay configurada es **de prueba**, generada fuera del
+árbol de fuentes. Hay que sustituirla por la definitiva antes de la primera
+distribución, y esa privada no puede perderse: sin ella no se pueden firmar
+actualizaciones nunca más.
 
-- API contra **Postgres y SQLite** (matriz), que era la condición de G3.
-- Frontend: tipos y tests.
-- `npm audit` y `pip-audit`, que **avisan sin bloquear** — en un proyecto
-  pequeño, un aviso que impide mergear un viernes es un aviso que se acaba
-  ignorando.
+## G7 — Licencia
 
-Falta la pipeline de release: tag → build → paquete → firma → smoke test →
-publicación. Depende de G4 y G5.
+`license.rs` verifica una licencia firmada con Ed25519, **en Rust y no en
+Python**: un `.pyc` se sustituye con un editor de texto y un intérprete
+embebido carga lo que le pongas delante. No es inviolable —un programa que
+corre en la máquina del usuario se puede copiar— y no lo pretende: lo que frena
+es la copia casual.
+
+**Sin fichero de licencia, todo está habilitado.** Es deliberado: mientras no
+haya modelo comercial decidido —qué ediciones existen y qué incluye cada una—
+capar funciones sería inventarse el producto. El día que se decida, se cambia
+`allows()` y nada más.
+
+Los cuatro estados están separados a propósito: `Absent` (evaluación, funciona),
+`Valid`, `Expired` (se arregla renovando) e `Invalid` (el fichero está
+manipulado). Son cuatro conversaciones distintas con el usuario.
+
+## G8 — Release
+
+Dos workflows:
+
+- **`tests.yml`** en cada push y PR: API contra los dos motores, frontend, y
+  `npm audit`/`pip-audit` que **avisan sin bloquear** — en un proyecto pequeño,
+  un aviso que impide mergear un viernes es un aviso que se acaba ignorando.
+- **`release.yml`** con un tag: tests → frontend → backend empaquetado →
+  comprobación de que el backend existe → instalador firmado → **smoke test que
+  instala, arranca y desinstala en el runner** → comprobación de firma →
+  publicación como borrador.
+
+Dos detalles que no son adorno: la comprobación de que el backend se empaquetó
+antes de bundlear, porque sin ella el instalador sale sin él **y sin fallar**;
+y el smoke test, porque un instalador que no se ha ejecutado nunca no es un
+release.
+
+No se ha disparado todavía: requiere hacer push de un tag.
+
+## Lo que queda, y no es programación
+
+| Qué | Por qué no está | Qué hace falta |
+|---|---|---|
+| Certificado real | Cuesta dinero y tarda semanas en emitirse | Comprarlo y poner su huella en `ECG_SIGN_THUMBPRINT` |
+| Servidor de actualizaciones | No existe | Un sitio donde publicar el manifiesto, y sustituir la clave de prueba |
+| Modelo de licencia | Decisión comercial | Qué ediciones hay, qué incluye cada una, y qué hace la aplicación sin licencia |
+| Prueba en VM limpia | Aquí ya están Python, Node, Rust y WebView2 | Una máquina virgen, sobre todo para el camino «Windows 10 sin WebView2» |
+| `release.yml` ejecutado | Requiere hacer push de un tag | Empujar `v0.1.0` cuando se quiera la primera release |
 
 ## Cómo se prueba lo que hay
 
@@ -219,13 +277,16 @@ cd apps/api && ECG_TEST_DB=sqlite uv run pytest -q
 # Frontend
 cd apps/web && npm test
 
-# Ventana de escritorio (necesita Rust + Build Tools de MSVC)
-cd apps/desktop && npx tauri dev
+# Shell de escritorio
+cd apps/desktop/src-tauri && cargo test
 
 # Backend empaquetado
 cd apps/api && uv run --with pyinstaller pyinstaller packaging/ecg-api.spec \
     --distpath packaging/dist --workpath packaging/build --noconfirm
 
-# Instalador
-cd apps/desktop && npx tauri build
+# Instalador, firmado con certificado de prueba
+cd apps/desktop && ECG_SIGN_SELFSIGNED=1 npx tauri build
+
+# Ciclo completo de instalación
+powershell -ExecutionPolicy Bypass -File apps/desktop/tools/probar_instalador.ps1
 ```
