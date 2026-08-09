@@ -35,9 +35,25 @@ def _rhythm_spec(definition: RhythmDefinition) -> dict:
     }
 
 
+def _insert_for(session: AsyncSession):
+    """El `insert` del motor que hay debajo.
+
+    `on_conflict_do_update` existe en Postgres y en SQLite y hace lo mismo,
+    pero cada dialecto tiene su propia construcción y no son intercambiables:
+    la de Postgres compilada contra SQLite falla. Se elige aquí, en un sitio,
+    en vez de repartir condicionales por el cuerpo del upsert.
+    """
+    if session.bind is not None and session.bind.dialect.name == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        return sqlite_insert
+    return insert
+
+
 async def seed_catalog(session: AsyncSession, settings: Settings) -> None:
+    insert_stmt = _insert_for(session)
     for definition in ecg_engine.list_rhythms():
-        stmt = insert(RhythmRow).values(
+        stmt = insert_stmt(RhythmRow).values(
             id=definition.rhythm_id,
             name=definition.display_name,
             category=definition.category.value,

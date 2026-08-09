@@ -7,7 +7,13 @@ Create Date: 2026-08-06
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects.postgresql import JSONB
+
+# Los mismos tipos portables que `db/models.py`. Contra Postgres emiten `JSONB`
+# y `UUID` --exactamente el DDL que estas revisiones ya creaban, asi que una
+# base migrada no nota el cambio-- y contra SQLite, `JSON` y `CHAR(32)`.
+PORTABLE_JSON = sa.JSON().with_variant(JSONB(), "postgresql")
+PORTABLE_UUID = sa.Uuid(as_uuid=True)
 
 revision = "0002"
 down_revision = "0001"
@@ -25,10 +31,10 @@ def upgrade() -> None:
     )
     op.create_table(
         "drug_administrations",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", PORTABLE_UUID, primary_key=True),
         sa.Column(
             "session_id",
-            postgresql.UUID(as_uuid=True),
+            PORTABLE_UUID,
             sa.ForeignKey("sessions.id", ondelete="CASCADE"),
             nullable=False,
         ),

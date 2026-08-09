@@ -55,9 +55,28 @@ def _to_detail(
     )
 
 
+def _require_persistence(request: Request):
+    """La fábrica de sesiones, o un 503 que explica por qué no la hay.
+
+    Sin base de datos el simulador sigue funcionando —el catálogo sale del
+    motor— pero el historial no existe. Un 503 con motivo es lo que permite a
+    la interfaz decir «no disponible» en vez de «error» a secas.
+    """
+    session_factory = request.app.state.session_factory
+    if session_factory is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "El historial no está disponible: la aplicación arrancó sin "
+                "base de datos."
+            ),
+        )
+    return session_factory
+
+
 @router.get("", response_model=list[SessionSummary])
 async def list_sessions(request: Request) -> list[SessionSummary]:
-    session_factory = request.app.state.session_factory
+    session_factory = _require_persistence(request)
     async with session_factory() as db:
         rows = (
             await db.execute(
@@ -78,7 +97,7 @@ async def get_session(session_id: str, request: Request) -> SessionDetail:
             status_code=404, detail="id de sesión inválido"
         ) from exc
 
-    session_factory = request.app.state.session_factory
+    session_factory = _require_persistence(request)
     async with session_factory() as db:
         row = await db.get(SessionRow, parsed_id)
         if row is None:

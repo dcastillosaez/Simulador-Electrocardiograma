@@ -7,6 +7,7 @@ binding. Es una restricción de despliegue documentada, no un accidente.
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -24,6 +25,8 @@ from .routers.sessions import router as sessions_router
 from .routers.simulation_ws import router as simulation_ws_router
 from .security_headers import SecurityHeadersMiddleware
 
+logger = logging.getLogger("ecg_api.main")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,10 +39,31 @@ async def lifespan(app: FastAPI):
         max_total=settings.max_ws_connections,
         max_per_client=settings.max_ws_connections_per_client,
     )
+    # La base de datos NO es un requisito para simular.
+    #
+    # El catálogo de ritmos sale del motor (`routers/rhythms.py` importa
+    # `list_rhythms` de `ecg_engine`), y la tabla `rhythms` solo ancla la clave
+    # foránea de `sessions`. Es decir: la persistencia guarda historial y nada
+    # más. Simular, medir, administrar fármacos y exportar no la tocan.
+    #
+    # Antes, un fallo aquí tumbaba el arranque entero: sin base de datos no
+    # había simulador. En un servidor eso casi da igual —alguien mira el log y
+    # levanta Postgres—, pero en el escritorio de alguien que va a dar clase en
+    # cinco minutos, la diferencia entre «no se guardará el historial» y «no
+    # arranca» es toda la diferencia que hay.
     engine = get_engine(settings.database_url)
     app.state.session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with app.state.session_factory() as session:
-        await seed_catalog(session, settings)
+    app.state.persistence_error = None
+    try:
+        async with app.state.session_factory() as session:
+            await seed_catalog(session, settings)
+    except Exception as exc:  # noqa: BLE001 — cualquier fallo de la base
+        app.state.persistence_error = str(exc)
+        app.state.session_factory = None
+        logger.error(
+            "sin persistencia: el historial de sesiones no estará disponible",
+            exc_info=True,
+        )
     yield
     await engine.dispose()
 

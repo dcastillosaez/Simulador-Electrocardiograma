@@ -7,7 +7,13 @@ Create Date: 2026-07-26
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects.postgresql import JSONB
+
+# Los mismos tipos portables que `db/models.py`. Contra Postgres emiten `JSONB`
+# y `UUID` --exactamente el DDL que estas revisiones ya creaban, asi que una
+# base migrada no nota el cambio-- y contra SQLite, `JSON` y `CHAR(32)`.
+PORTABLE_JSON = sa.JSON().with_variant(JSONB(), "postgresql")
+PORTABLE_UUID = sa.Uuid(as_uuid=True)
 
 revision = "0001"
 down_revision = None
@@ -21,7 +27,7 @@ def upgrade() -> None:
         sa.Column("id", sa.String(), primary_key=True),
         sa.Column("name", sa.String(), nullable=False),
         sa.Column("category", sa.String(), nullable=False),
-        sa.Column("spec", postgresql.JSONB(), nullable=False),
+        sa.Column("spec", PORTABLE_JSON, nullable=False),
         sa.Column("engine_semver", sa.String(), nullable=False),
         sa.Column("engine_commit", sa.String(), nullable=False),
         sa.Column(
@@ -33,14 +39,14 @@ def upgrade() -> None:
     )
     op.create_table(
         "sessions",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", PORTABLE_UUID, primary_key=True),
         sa.Column(
             "rhythm_id",
             sa.String(),
             sa.ForeignKey("rhythms.id"),
             nullable=False,
         ),
-        sa.Column("params", postgresql.JSONB(), nullable=False),
+        sa.Column("params", PORTABLE_JSON, nullable=False),
         sa.Column("seed", sa.BigInteger(), nullable=False),
         sa.Column("engine_semver", sa.String(), nullable=False),
         sa.Column("engine_commit", sa.String(), nullable=False),

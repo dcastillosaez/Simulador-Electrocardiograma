@@ -18,11 +18,35 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Numeric, String, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Numeric,
+    String,
+    Uuid,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
+
+# JSON portable que NO renuncia a nada en Postgres.
+#
+# El escritorio persiste en SQLite (fase G) y el servidor en Postgres, así que
+# el esquema tiene que hablar los dos idiomas. La variante es lo que evita
+# pagarlo con el servidor: compilado contra Postgres sigue emitiendo `JSONB`
+# —con sus operadores y sus índices— y contra SQLite emite `JSON`. Un `JSON`
+# genérico a secas habría degradado Postgres a `json` sin que se notara hasta
+# la primera consulta que lo indexara.
+_PORTABLE_JSON = JSON().with_variant(JSONB(), "postgresql")
+
+# `Uuid` genérico ya emite el tipo nativo de Postgres, así que aquí no hace
+# falta variante: `UUID` en Postgres, `CHAR(32)` en SQLite, y en Python sigue
+# siendo `uuid.UUID` a los dos lados.
+_PORTABLE_UUID = Uuid(as_uuid=True)
 
 # `Mapped[dt.datetime]` sin más, en SQLAlchemy 2.0, infiere `DateTime()` SIN
 # zona horaria. Como la migración crea las columnas `timestamptz`, dejar el
@@ -40,7 +64,7 @@ class RhythmRow(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     category: Mapped[str] = mapped_column(String, nullable=False)
-    spec: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    spec: Mapped[dict] = mapped_column(_PORTABLE_JSON, nullable=False)
     engine_semver: Mapped[str] = mapped_column(String, nullable=False)
     engine_commit: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
@@ -51,11 +75,11 @@ class RhythmRow(Base):
 class SessionRow(Base):
     __tablename__ = "sessions"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    id: Mapped[uuid.UUID] = mapped_column(_PORTABLE_UUID, primary_key=True)
     rhythm_id: Mapped[str] = mapped_column(
         ForeignKey("rhythms.id"), nullable=False
     )
-    params: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    params: Mapped[dict] = mapped_column(_PORTABLE_JSON, nullable=False)
     seed: Mapped[int] = mapped_column(BigInteger, nullable=False)
     engine_semver: Mapped[str] = mapped_column(String, nullable=False)
     engine_commit: Mapped[str] = mapped_column(String, nullable=False)
@@ -77,7 +101,7 @@ class DrugAdministrationRow(Base):
 
     __tablename__ = "drug_administrations"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    id: Mapped[uuid.UUID] = mapped_column(_PORTABLE_UUID, primary_key=True)
     session_id: Mapped[uuid.UUID] = mapped_column(
         # `ondelete="CASCADE"`: una administración sin sesión no significa
         # nada, ni clínicamente ni para el replay.

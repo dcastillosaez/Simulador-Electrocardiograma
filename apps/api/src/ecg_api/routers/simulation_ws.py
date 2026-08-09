@@ -219,6 +219,12 @@ async def _run_session(websocket: WebSocket, settings, session_factory) -> None:
         nonlocal persisted
         if persisted or not should_persist(manager):
             return
+        # Sin base de datos no hay nada que intentar. La simulación ha ocurrido
+        # igual y el usuario ya fue avisado al arrancar; insistir aquí solo
+        # llenaría el log de trazas por algo que se sabe desde el principio.
+        if session_factory is None:
+            persisted = True
+            return
         # `shield=True`: si el cliente cierra el socket justo tras enviar
         # `stop` sin esperar el `stopped` de vuelta (como hacen los tests de
         # REST que solo comprueban la sesión ya persistida), Starlette

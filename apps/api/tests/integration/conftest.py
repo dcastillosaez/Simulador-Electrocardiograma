@@ -1,24 +1,51 @@
 """Fixtures compartidas de los tests de integración.
 
-Requieren Postgres real (`docker compose up -d db`). La base de test se crea
-una sola vez por sesión de pytest y se migra a la última revisión; cada test
-aísla sus cambios con una transacción propia que siempre se revierte, así
-que no hace falta volver a migrar ni truncar tablas entre tests.
+Se ejecutan contra **los dos motores**, elegidos con `ECG_TEST_DB`:
+
+    ECG_TEST_DB=postgres   (por defecto; requiere `docker compose up -d db`)
+    ECG_TEST_DB=sqlite     (un fichero temporal, sin nada que levantar)
+
+Correr contra los dos no es una comodidad: es la condición de la decisión de la
+fase G3. El servidor persiste en Postgres y el escritorio en SQLite, y un
+soporte de SQLite que no se ejercita se rompe en el primer commit que toque el
+esquema sin que nadie se entere hasta que lo reporte un usuario.
+
+La base se crea una sola vez por sesión de pytest y se migra a la última
+revisión; cada test aísla sus cambios con una transacción propia que siempre se
+revierte, así que no hace falta volver a migrar ni truncar entre tests.
 """
 
 from __future__ import annotations
 
 import os
+import tempfile
+
+# Qué motor se ejercita en esta ejecución. Se lee antes que nada porque la URL
+# que se fija abajo depende de ello.
+ENGINE = os.environ.get("ECG_TEST_DB", "postgres").lower()
+if ENGINE not in ("postgres", "sqlite"):
+    raise RuntimeError(f"ECG_TEST_DB debe ser 'postgres' o 'sqlite', no {ENGINE!r}")
+
+_SQLITE_PATH = os.path.join(tempfile.gettempdir(), "ecg_simulator_test.sqlite")
+
+if ENGINE == "sqlite":
+    TEST_DATABASE_URL = f"sqlite+aiosqlite:///{_SQLITE_PATH}"
+    TEST_DATABASE_URL_SYNC = f"sqlite:///{_SQLITE_PATH}"
+else:
+    TEST_DATABASE_URL = (
+        "postgresql+asyncpg://ecg:ecg@localhost:5432/ecg_simulator_test"
+    )
+    TEST_DATABASE_URL_SYNC = (
+        "postgresql+psycopg2://ecg:ecg@localhost:5432/ecg_simulator_test"
+    )
 
 # `get_settings()` está cacheada con `lru_cache`: la primera llamada en todo
 # el proceso de pytest fija los valores para el resto de la sesión. Fijar
 # aquí la URL de la base de test, antes de que ningún módulo de la app
 # importe `ecg_api.config`, es lo que garantiza que el WebSocket y los
 # routers REST —que la leen a través del ciclo de vida de la app— apunten
-# siempre a `ecg_simulator_test`, sin importar qué test se ejecute primero.
-os.environ.setdefault(
-    "DATABASE_URL", "postgresql+asyncpg://ecg:ecg@localhost:5432/ecg_simulator_test"
-)
+# siempre a la base de test, sin importar qué test se ejecute primero.
+os.environ.setdefault("DATABASE_URL", TEST_DATABASE_URL)
 os.environ.setdefault("ENGINE_COMMIT", "test")
 
 import json
@@ -28,23 +55,27 @@ import psycopg2
 import pytest
 import pytest_asyncio
 from alembic import command
-from alembic.config import Config
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+
+from ecg_api.db.migrator import alembic_config
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 
-TEST_DATABASE_URL = (
-    "postgresql+asyncpg://ecg:ecg@localhost:5432/ecg_simulator_test"
-)
-TEST_DATABASE_URL_SYNC = (
-    "postgresql+psycopg2://ecg:ecg@localhost:5432/ecg_simulator_test"
-)
-
-
 def _ensure_test_database_exists() -> None:
+    """Que la base exista antes de migrarla.
+
+    En SQLite es borrar el fichero de la ejecución anterior: el motor lo crea
+    solo al conectarse, y arrastrar el de ayer daría por buenas migraciones que
+    no se han vuelto a aplicar.
+    """
+    if ENGINE == "sqlite":
+        if os.path.exists(_SQLITE_PATH):
+            os.remove(_SQLITE_PATH)
+        return
+
     try:
         conn = psycopg2.connect("postgresql://ecg:ecg@localhost:5432/postgres")
     except psycopg2.OperationalError as exc:
@@ -67,8 +98,7 @@ def _ensure_test_database_exists() -> None:
 @pytest.fixture(scope="session")
 def migrated_database() -> AsyncIterator[str]:
     _ensure_test_database_exists()
-    cfg = Config("alembic.ini")
-    cfg.set_main_option("sqlalchemy.url", TEST_DATABASE_URL_SYNC)
+    cfg = alembic_config(TEST_DATABASE_URL_SYNC)
     command.upgrade(cfg, "head")
     yield TEST_DATABASE_URL
     command.downgrade(cfg, "base")
