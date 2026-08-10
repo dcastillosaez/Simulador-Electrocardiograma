@@ -42,7 +42,12 @@ from ..schemas import (
     updated_message,
 )
 from ..simulation import SimulationManager
-from ..streaming import stream_chunks, stream_measurements, stream_pharmacology
+from ..streaming import (
+    stream_cardiac,
+    stream_chunks,
+    stream_measurements,
+    stream_pharmacology,
+)
 
 router = APIRouter()
 logger = logging.getLogger("ecg_api.simulation_ws")
@@ -378,11 +383,17 @@ async def _run_session(websocket: WebSocket, settings, session_factory) -> None:
                 pharmacology_task = asyncio.create_task(
                     stream_pharmacology(manager, websocket.send_json)
                 )
+                # La mecánica cardíaca, en su propio bucle: cuatro veces por
+                # segundo, entre la cadencia de los frames y la de las medidas.
+                cardiac_task = asyncio.create_task(
+                    stream_cardiac(manager, websocket.send_json)
+                )
                 for task in (
                     producer_task,
                     sender_task,
                     measurements_task,
                     pharmacology_task,
+                    cardiac_task,
                 ):
                     task.add_done_callback(
                         functools.partial(
@@ -397,6 +408,7 @@ async def _run_session(websocket: WebSocket, settings, session_factory) -> None:
                     sender_task,
                     measurements_task,
                     pharmacology_task,
+                    cardiac_task,
                 ]
 
             elif isinstance(message, UpdateMessage):

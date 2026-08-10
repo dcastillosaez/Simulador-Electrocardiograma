@@ -17,6 +17,7 @@ from typing import Awaitable, Callable
 from .frames import encode_frame
 from .measuring import MEASUREMENT_INTERVAL_S
 from .outbox import FrameOutbox
+from .cardiac import CARDIAC_INTERVAL_S
 from .simulation import SimulationManager, SimulationState
 
 CHUNK_INTERVAL_S = 0.1  # ~10 mensajes/s, la cadencia del diseño
@@ -100,5 +101,36 @@ async def stream_pharmacology(
             payload = manager.pharmacology_payload()
             if payload is not None:
                 await publish(payload)
+        next_tick += interval_s
+        await asyncio.sleep(max(0.0, next_tick - asyncio.get_running_loop().time()))
+
+
+async def stream_cardiac(
+    manager: SimulationManager,
+    publish: Callable[[dict], Awaitable[None]],
+    *,
+    interval_s: float = CARDIAC_INTERVAL_S,
+) -> None:
+    """Publica contracciones y estado mecánico a cadencia media.
+
+    Su propio bucle, por el mismo motivo que las medidas tienen el suyo: son
+    tres ritmos distintos —frames diez veces por segundo, contracciones
+    cuatro, medidas una— y colgarlos del mismo temporizador obligaría al más
+    lento a correr a la cadencia del más rápido.
+
+    En pausa no publica. El reloj de simulación está detenido: no hay
+    contracciones nuevas que anunciar, y el corazón del cliente se congela
+    solo, porque su reloj es la cabeza de reproducción del buffer y esa
+    tampoco avanza.
+    """
+    next_tick = asyncio.get_running_loop().time()
+    while True:
+        if manager.state is SimulationState.RUNNING:
+            events = manager.cardiac_events()
+            if events is not None and events["events"]:
+                await publish(events)
+            state = manager.heart_state()
+            if state is not None:
+                await publish(state)
         next_tick += interval_s
         await asyncio.sleep(max(0.0, next_tick - asyncio.get_running_loop().time()))
