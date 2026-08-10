@@ -136,6 +136,51 @@ export interface PharmacologyMessage {
   physiology: Record<string, number>;
 }
 
+/** Espejo de `MechanicalEvent.as_payload()` en `heart-engine`.
+ *
+ * Se mantiene a mano, igual que la cabecera binaria de 40 bytes es espejo de
+ * `frames.py`: es el patrón que este repositorio ya usa para los contratos
+ * entre Python y TypeScript. Un cambio en el lado Python que no se refleje
+ * aquí lo caza el test de contrato del runtime. */
+export interface MechanicalEventPayload {
+  chamber: "atria" | "ventricles";
+  t_start_s: number;
+  t_peak_s: number;
+  t_end_s: number;
+  amplitude: number;
+  index: number;
+}
+
+export interface CardiacEventsMessage {
+  type: "cardiac_events";
+  t_start_s: number;
+  t_end_s: number;
+  events: MechanicalEventPayload[];
+}
+
+export type ContractionModeName =
+  | "synchronous"
+  | "fluttering"
+  | "fibrillating"
+  | "absent";
+
+/** `values` es un mapa de campos conocidos y no `Record<string, unknown>`:
+ * al contrario que `measurements`, aquí el cliente necesita cada campo con su
+ * tipo para animar. Los campos hemodinámicos que llegarán después (volumen
+ * sistólico, contractilidad) se añaden como opcionales cuando existan. */
+export interface HeartStateMessage {
+  type: "heart_state";
+  values: {
+    rhythm_id: string;
+    heart_rate_bpm: number | null;
+    atrial_mode: ContractionModeName;
+    ventricular_mode: ContractionModeName;
+    atrial_amplitude: number;
+    ventricular_amplitude: number;
+    flutter_hz: number;
+  };
+}
+
 export type ServerMessage =
   | StartedMessage
   | UpdatedMessage
@@ -145,4 +190,6 @@ export type ServerMessage =
   | MeasurementsMessage
   | AdministeredMessage
   | PharmacologyMessage
+  | CardiacEventsMessage
+  | HeartStateMessage
   | ErrorMessage;

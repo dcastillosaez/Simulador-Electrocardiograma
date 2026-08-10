@@ -209,4 +209,86 @@ describe("SessionRuntime", () => {
     expect(runtime.buffer.isUnderrun).toBe(true);
     expect(onDisconnected).toHaveBeenCalled();
   });
+
+  describe("mensajes de mecánica cardíaca", () => {
+    it("emite cardiacEvents al recibir el mensaje", () => {
+      const fake = new FakeWebSocket();
+      const runtime = new SessionRuntime("ws://test", () => fake as unknown as WebSocket);
+      const onEvents = vi.fn();
+      runtime.on("cardiacEvents", onEvents);
+      runtime.connect();
+
+      fake.dispatch("message", {
+        data: JSON.stringify({
+          type: "cardiac_events",
+          t_start_s: 1,
+          t_end_s: 1.25,
+          events: [
+            {
+              chamber: "ventricles",
+              t_start_s: 1.05,
+              t_peak_s: 1.19,
+              t_end_s: 1.38,
+              amplitude: 1,
+              index: 3,
+            },
+          ],
+        }),
+      });
+
+      expect(onEvents).toHaveBeenCalledTimes(1);
+      expect(onEvents.mock.calls[0][0].events[0].chamber).toBe("ventricles");
+    });
+
+    it("emite heartState al recibir el mensaje", () => {
+      const fake = new FakeWebSocket();
+      const runtime = new SessionRuntime("ws://test", () => fake as unknown as WebSocket);
+      const onState = vi.fn();
+      runtime.on("heartState", onState);
+      runtime.connect();
+
+      fake.dispatch("message", {
+        data: JSON.stringify({
+          type: "heart_state",
+          values: {
+            rhythm_id: "atrial_fibrillation",
+            heart_rate_bpm: 88,
+            atrial_mode: "fibrillating",
+            ventricular_mode: "synchronous",
+            atrial_amplitude: 0.06,
+            ventricular_amplitude: 1,
+            flutter_hz: 7,
+          },
+        }),
+      });
+
+      expect(onState.mock.calls[0][0].values.atrial_mode).toBe("fibrillating");
+    });
+
+    it("no altera el estado de la sesión", () => {
+      const fake = new FakeWebSocket();
+      const runtime = new SessionRuntime("ws://test", () => fake as unknown as WebSocket);
+      runtime.connect();
+      fake.dispatch("message", {
+        data: JSON.stringify({
+          type: "started",
+          session_id: "s",
+          seed: 1,
+          sample_rate_hz: 500,
+          channels: 12,
+        }),
+      });
+
+      fake.dispatch("message", {
+        data: JSON.stringify({
+          type: "cardiac_events",
+          t_start_s: 0,
+          t_end_s: 1,
+          events: [],
+        }),
+      });
+
+      expect(runtime.state).toBe("running");
+    });
+  });
 });
