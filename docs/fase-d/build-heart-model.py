@@ -364,6 +364,20 @@ def main() -> int:
         print("\nValidación en verde. No se escribe nada (--validate-only).")
         return 0
 
+    # BodyParts3D usa el sistema del cuerpo en pie: X hacia la izquierda del
+    # paciente, Y creciendo hacia atrás y Z hacia la cabeza. glTF es Y arriba,
+    # y las vistas anatómicas de la cámara dan por hecho además que Z apunta
+    # al frente del paciente. Sin esta rotación el corazón saldría tumbado y
+    # los seis presets de cámara mirarían a donde no es.
+    #
+    # El sentido de Y se dedujo de la propia anatomía y no de la
+    # documentación: el ventrículo derecho está por delante de la aurícula
+    # izquierda, y sus centros son y=-143,5 y y=-110,7, así que hacia delante
+    # es Y decreciente.
+    to_gltf = trimesh.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0])
+    for mesh in meshes.values():
+        mesh.apply_transform(to_gltf)
+
     # Normalización común: un solo factor y un solo desplazamiento para las
     # nueve. Escalar cada malla por separado las descolocaría entre sí.
     everything = trimesh.util.concatenate(list(meshes.values()))
