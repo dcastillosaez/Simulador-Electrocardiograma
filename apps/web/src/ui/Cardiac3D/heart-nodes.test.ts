@@ -14,7 +14,7 @@ function fullHeart() {
 }
 
 describe("bindHeartNodes", () => {
-  it("encuentra las diez estructuras", () => {
+  it("encuentra todas las estructuras del contrato", () => {
     const nodes = bindHeartNodes(fullHeart() as never);
 
     for (const name of HEART_NODE_NAMES) {
@@ -35,10 +35,12 @@ describe("bindHeartNodes", () => {
   it("falla con un mensaje que nombra lo que falta", () => {
     const incompleto = node(
       "Heart",
-      HEART_NODE_NAMES.filter((name) => name !== "Septum").map((name) => node(name))
+      HEART_NODE_NAMES.filter((name) => name !== "LeftVentricle").map((name) =>
+        node(name)
+      )
     );
 
-    expect(() => bindHeartNodes(incompleto as never)).toThrow(/Septum/);
+    expect(() => bindHeartNodes(incompleto as never)).toThrow(/LeftVentricle/);
   });
 
   it("enumera todo lo que falta, no solo lo primero", () => {

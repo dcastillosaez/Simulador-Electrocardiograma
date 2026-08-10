@@ -21,7 +21,6 @@ const DEFORMATION: Record<
 > = {
   LeftVentricle: { driver: "ventricles", longitudinal: -0.04, radial: 0.04 },
   RightVentricle: { driver: "ventricles", longitudinal: -0.04, radial: 0.04 },
-  Septum: { driver: "ventricles", longitudinal: -0.03, radial: 0.02 },
   LeftAtrium: { driver: "atria", longitudinal: -0.02, radial: 0.02 },
   RightAtrium: { driver: "atria", longitudinal: -0.02, radial: 0.02 },
   Aorta: { driver: "ventricles", longitudinal: 0.004, radial: 0.008 },

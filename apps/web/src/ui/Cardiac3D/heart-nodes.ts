@@ -1,15 +1,20 @@
-/** Estructuras del modelo, por nombre. El contrato con Blender.
+/** Estructuras del modelo, por nombre. El contrato con el modelo anatómico.
  *
  * Nunca por índice: el orden de los nodos de un GLB cambia al reexportar, y
  * el fallo sería silencioso —el ventrículo latiendo y la aorta encogiéndose—
  * en vez de un error. Aquí, si falta un nombre, la carga falla con un
- * mensaje que dice cuál. */
+ * mensaje que dice cuál.
+ *
+ * Son nueve y no diez: el brief listaba también `Septum`, pero BodyParts3D
+ * no trae malla del tabique interventricular y no hay de dónde sacarla sin
+ * inventarla. No se pierde nada en esta entrega —el tabique no se ve desde
+ * fuera en un modelo sólido— y donde hará falta es en el corte anatómico de
+ * la Entrega 3. Ver `docs/fase-d/anatomy-source.md`. */
 export const HEART_NODE_NAMES = [
   "LeftAtrium",
   "RightAtrium",
   "LeftVentricle",
   "RightVentricle",
-  "Septum",
   "Aorta",
   "PulmonaryArtery",
   "PulmonaryVeins",

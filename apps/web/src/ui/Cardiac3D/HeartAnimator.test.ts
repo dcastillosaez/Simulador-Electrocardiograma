@@ -65,14 +65,6 @@ describe("applyExcursion", () => {
     expect(Math.abs(1 - heart.Aorta.scale.y)).toBeLessThan(0.02);
   });
 
-  it("el septo sigue a los ventrículos", () => {
-    const heart = nodes();
-
-    applyExcursion(heart, { atria: 0, ventricles: 1 });
-
-    expect(heart.Septum.scale.y).toBeLessThan(1);
-  });
-
   it("es idempotente: aplicar dos veces el mismo valor no acumula", () => {
     const heart = nodes();
 
