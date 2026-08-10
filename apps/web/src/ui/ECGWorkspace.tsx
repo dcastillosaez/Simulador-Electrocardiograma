@@ -12,6 +12,7 @@ import { getTheme, setTheme, type ThemeName } from "@ui-system/themes/index";
 import { SessionRuntime } from "../simulation-runtime/session-runtime";
 import { CatalogClient } from "../simulation-runtime/catalog-client";
 import { describeClose } from "../simulation-runtime/close-reasons";
+import { INTENDED_USE_FULL, INTENDED_USE_SHORT } from "./intended-use";
 import { captureElement } from "../render/dom-snapshot";
 import { useSessionStore } from "../state/session-store";
 import { RhythmSelector } from "./RhythmSelector";
@@ -440,6 +441,13 @@ export function ECGWorkspace({
             <Badge tone={COMPRESSION_TONE[metrics.compression]}>
               {COMPRESSION_LABEL[metrics.compression]}
             </Badge>
+          </Tooltip>
+          {/* El uso previsto, en pantalla mientras se usa. Quien abre la
+              ventana no lee el README ni los metadatos del instalador, y desde
+              que esto se distribuye como un `.exe` alguien puede tenerlo
+              abierto en un hospital. */}
+          <Tooltip content={INTENDED_USE_FULL}>
+            <Badge tone="warning">{INTENDED_USE_SHORT}</Badge>
           </Tooltip>
           {/* Empujado al extremo derecho. La hora de un registro clínico no es
               decoración: una tira sin sello temporal no se puede situar
