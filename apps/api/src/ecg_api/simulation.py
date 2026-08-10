@@ -18,8 +18,11 @@ import numpy as np
 
 from ecg_engine import EcgEngine, EngineParams
 from ecg_engine.catalog import get_rhythm
+from ecg_engine.mechanics import MechanicalProfile
+from heart_engine import HeartState
 from pharmacology_engine import DrugAdministration, PharmacologyError, Route
 
+from .cardiac import cardiac_events_payload
 from .errors import InvalidParamsError, RhythmNotFoundError
 from .measuring import MeasurementWindow, measurements_payload
 from .pharmacology import PharmacologySession
@@ -49,6 +52,9 @@ class SimulationManager:
         self._engine: EcgEngine | None = None
         self._sequence_number: int = 0
         self._window: MeasurementWindow | None = None
+        # Hasta dónde se han publicado ya contracciones. Es una marca de
+        # agua, no un reloj: lo que ya salió no vuelve a salir.
+        self._cardiac_published_until_s: float = 0.0
         # Los parámetros **de mando**: lo que el usuario pidió, no lo que el
         # motor está generando. Los dos coinciden mientras no haya fármacos
         # a bordo y divergen en cuanto los hay, y separarlos es lo que
@@ -81,6 +87,9 @@ class SimulationManager:
         # nuevo, y medir a caballo entre dos ritmos promediaria dos
         # fisiologias distintas.
         self._window = MeasurementWindow(self._engine.sample_rate_hz)
+        # Marca de agua nueva: un ritmo nuevo arranca en t=0, y conservar la
+        # del ritmo anterior se comería sus primeros latidos.
+        self._cardiac_published_until_s = 0.0
         # El motor ya recortó los parámetros a los rangos del ritmo, así que
         # el mando se toma de él y no del mensaje: arrancar un bloqueo AV a
         # 300 lpm dejaría un basal farmacológico que el motor de señal nunca
@@ -236,3 +245,53 @@ class SimulationManager:
             t_end_s=self._engine.t_s,
             pr_is_measurable=get_rhythm(self.rhythm_id).pr_is_measurable,
         )
+
+    def _profile(self) -> MechanicalProfile:
+        return get_rhythm(self.rhythm_id).mechanical_profile
+
+    def cardiac_events(self) -> dict | None:
+        """Contracciones de la señal generada desde la última publicación.
+
+        Nunca mira al futuro: solo traduce eventos de señal que el motor ya
+        rindió. Llegan a tiempo al cliente porque su reproducción va por
+        detrás de la generación lo que dure el pre-roll del buffer de jitter.
+        """
+        if self._engine is None:
+            return None
+
+        t_start_s = self._cardiac_published_until_s
+        t_end_s = self._engine.t_s
+        source = self._engine.source
+        # Una FV no implementa `events`: no tiene latidos discretos que
+        # enumerar. Sale una lista vacía, que es la respuesta correcta.
+        events = (
+            source.events(t_start_s, t_end_s) if hasattr(source, "events") else []
+        )
+        self._cardiac_published_until_s = t_end_s
+
+        # Hay ritmos SIN frecuencia, y no por accidente: el catálogo declara
+        # 0 lpm para la fibrilación ventricular porque una FV no tiene
+        # frecuencia cardíaca. Ahí no hay RR que calcular, y tampoco hace
+        # falta: ninguna de sus dos cámaras contrae de forma organizada, así
+        # que `derive_mechanical_events` no llega a usar este valor. Dividir
+        # sin mirar reventaba con ZeroDivisionError justo en el ritmo más
+        # crítico del catálogo.
+        heart_rate_hz = self._engine.params.heart_rate_hz
+        rr_s = 1.0 / heart_rate_hz if heart_rate_hz > 0 else 0.0
+
+        return cardiac_events_payload(
+            events=events,
+            profile=self._profile(),
+            rr_s=rr_s,
+            t_start_s=t_start_s,
+            t_end_s=t_end_s,
+        )
+
+    def heart_state(self) -> dict | None:
+        if self._engine is None:
+            return None
+        return HeartState.from_profile(
+            self._profile(),
+            self.rhythm_id,
+            self._engine.params.heart_rate_hz * 60.0,
+        ).as_payload()

@@ -12,6 +12,7 @@ import { drawSweepSegment, type LeadCanvasOptions } from "../../render/lead-canv
 import { SampleIndexRing } from "../../render/sample-index";
 import { advanceClock } from "../../render/sweep-clock";
 import { SweepRebuilder } from "../../render/sweep-rebuilder";
+import { INTENDED_USE_FULL } from "../intended-use";
 import { SweepBuffer, sweepCapacitySamples } from "../../render/sweep-buffer";
 import { leadIndex, type LeadName } from "../../render/layout";
 import type { SessionRuntime } from "../../simulation-runtime/session-runtime";
@@ -344,6 +345,19 @@ export function useSweepRenderer({
           );
         });
       }
+
+      // El uso previsto, dentro de la imagen. Un PNG se reenvía y acaba lejos
+      // de la ventana donde se generó: sin esto, un trazado sintético puede
+      // circular por un hospital sin nada que diga que lo es.
+      ctx.fillStyle = theme.text.muted;
+      ctx.font = `${SNAPSHOT_LABEL_PX}px monospace`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "bottom";
+      ctx.fillText(
+        INTENDED_USE_FULL,
+        SNAPSHOT_PADDING_PX,
+        out.height - SNAPSHOT_PADDING_PX / 2
+      );
 
       return out;
     },

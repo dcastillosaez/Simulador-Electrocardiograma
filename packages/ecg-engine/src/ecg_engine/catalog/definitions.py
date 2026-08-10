@@ -17,6 +17,7 @@ from typing import Callable, Mapping
 
 import numpy as np
 
+from ..mechanics import NORMAL_PROFILE, ContractionMode, MechanicalProfile
 from ..conduction import (
     CompleteBlock,
     FixedPR,
@@ -99,6 +100,9 @@ class RhythmDefinition:
     clinical_description: str
     references: tuple[str, ...]
     allowed_overlays: tuple[str, ...] = field(default=())
+    # Los ocho ritmos con mecánica normal no lo declaran: solo los cuatro
+    # que se apartan escriben algo.
+    mechanical_profile: MechanicalProfile = field(default=NORMAL_PROFILE)
 
 
 def _bpm(value: float) -> float:
@@ -336,6 +340,14 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         references=(
             "Hindricks G, et al. 2020 ESC Guidelines for atrial fibrillation",
         ),
+        # La aurícula no bombea; el ventrículo sí, aunque irregular.
+        mechanical_profile=MechanicalProfile(
+            atrial_mode=ContractionMode.FIBRILLATING,
+            ventricular_mode=ContractionMode.SYNCHRONOUS,
+            atrial_amplitude=0.06,
+            ventricular_amplitude=1.0,
+            flutter_hz=7.0,
+        ),
     ),
     RhythmDefinition(
         rhythm_id="atrial_flutter",
@@ -354,6 +366,14 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         references=(
             "Brugada J, et al. 2019 ESC Guidelines for supraventricular "
             "tachycardia",
+        ),
+        # Aurícula vibrando a unas 300/min, conducción parcial.
+        mechanical_profile=MechanicalProfile(
+            atrial_mode=ContractionMode.FLUTTERING,
+            ventricular_mode=ContractionMode.SYNCHRONOUS,
+            atrial_amplitude=0.18,
+            ventricular_amplitude=1.0,
+            flutter_hz=5.0,
         ),
     ),
     RhythmDefinition(
@@ -393,6 +413,16 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
             "Zeppenfeld K, et al. 2022 ESC Guidelines for ventricular "
             "arrhythmias",
         ),
+        # Ambas cámaras siguen contrayéndose --en una TV las aurículas
+        # no dejan de hacerlo-- pero con mal llenado: lo que cae es la
+        # eficacia, y eso se expresa bajando la amplitud, no cambiando
+        # el modo.
+        mechanical_profile=MechanicalProfile(
+            atrial_mode=ContractionMode.SYNCHRONOUS,
+            ventricular_mode=ContractionMode.SYNCHRONOUS,
+            atrial_amplitude=0.5,
+            ventricular_amplitude=0.55,
+        ),
     ),
     RhythmDefinition(
         rhythm_id="ventricular_fibrillation",
@@ -410,6 +440,15 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         references=(
             "Zeppenfeld K, et al. 2022 ESC Guidelines for ventricular "
             "arrhythmias",
+        ),
+        # No hay sístole: solo temblor. Es la diferencia entre un
+        # corazón que bombea y uno que no.
+        mechanical_profile=MechanicalProfile(
+            atrial_mode=ContractionMode.FIBRILLATING,
+            ventricular_mode=ContractionMode.FIBRILLATING,
+            atrial_amplitude=0.05,
+            ventricular_amplitude=0.10,
+            flutter_hz=6.0,
         ),
     ),
     RhythmDefinition(
