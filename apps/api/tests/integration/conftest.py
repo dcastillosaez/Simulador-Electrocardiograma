@@ -122,9 +122,12 @@ def _schema_exists(migrated_database: str) -> str:
 
 # Lo que el servidor publica por su cuenta, sin que el cliente lo pida. Van por
 # el mismo socket que las respuestas a los comandos —el contrato es
-# multiplexado— y a 1 Hz cada uno, publicando ya en el primer tic. Un test que
-# lea "el siguiente mensaje" y espere que sea su respuesta se cruza con ellos.
-BACKGROUND_MESSAGE_TYPES = frozenset({"measurements", "pharmacology"})
+# multiplexado— y cada canal a su cadencia (medidas y farmacología a 1 Hz,
+# mecánica cardíaca a 4 Hz), publicando ya en el primer tic. Un test que lea
+# "el siguiente mensaje" y espere que sea su respuesta se cruza con ellos.
+BACKGROUND_MESSAGE_TYPES = frozenset(
+    {"measurements", "pharmacology", "cardiac_events", "heart_state"}
+)
 
 # Tope de mensajes a descartar antes de rendirse. Existe para que un contrato
 # roto falle con un error legible en vez de colgar el test para siempre.
