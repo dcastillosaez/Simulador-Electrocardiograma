@@ -63,6 +63,13 @@ class TestModoEscritorioEnSettings:
     def test_el_origen_de_tauri_solo_se_admite_en_escritorio(self):
         # Aflojar la lista en servidor por comodidad del escritorio seria
         # abrir una puerta donde no hace falta.
+        #
+        # `allowed_origins` es `list[str]`: el `in` de aqui abajo es
+        # pertenencia exacta a la lista, comparando elemento a elemento, no
+        # una busqueda de subcadena dentro de una URL. CodeQL
+        # (py/incomplete-url-substring-sanitization) no distingue por tipos
+        # en Python y marca cualquier `"url" in variable` por si acaso; la
+        # alerta esta descartada como falso positivo.
         servidor = Settings()
         escritorio = Settings(desktop_token="abc")
         assert "http://tauri.localhost" not in servidor.allowed_origins
