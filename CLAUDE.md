@@ -27,7 +27,7 @@ arrancar.bat
 Levanta Postgres en Docker (abriendo Docker Desktop si hace falta), aplica migraciones, arranca API y frontend en ventanas separadas y abre el navegador. `parar.bat` detiene el contenedor de Postgres, que es lo único que queda en segundo plano al cerrar las ventanas.
 
 - Frontend: `http://localhost:5600` — el 5173 por defecto de Vite cae en un rango que Windows reserva para sí en la máquina de desarrollo, así que `vite.config.ts` fija otro puerto.
-- API: `http://localhost:8000`
+- API: `http://localhost:8200` — el 8000 tampoco sirve, y por el mismo motivo que el 5173: Windows reserva rangos enteros de puertos (Hyper-V y Docker los piden al arrancar) y el 7990-8089 cae dentro de uno. El síntoma no es "puerto ocupado" sino un error de permisos, `WinError 10013`. `arrancar.bat` comprueba que el puerto se pueda escuchar antes de levantar nada, y admite `set PUERTO_API=...` para cambiarlo. Los rangos reservados se ven con `netsh interface ipv4 show excludedportrange protocol=tcp`.
 
 Para ver lo que produce el motor sin montar nada más:
 

@@ -1,0 +1,55 @@
+.split {
+  display: flex;
+  flex-direction: column;
+  /* Sin `min-height: 0`, un hijo con contenido empuja el contenedor mas alla
+     del alto que le da el grid y reaparece el scroll que el spec descarta.
+     Es el mismo fallo clasico de Flexbox que ya documenta AppShell. */
+  min-height: 0;
+  height: 100%;
+}
+
+.pane {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.divider {
+  /* Alto visual pequeno, zona de agarre mayor: 4px es imposible de acertar
+     con el raton y 12px de banda separaria demasiado las dos zonas. */
+  flex: 0 0 auto;
+  height: var(--space-3);
+  position: relative;
+  cursor: row-resize;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.divider::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  border-radius: 1px;
+  background: var(--panel-border);
+  transition: background var(--motion-fast) ease;
+}
+
+.divider:hover::after,
+.divider:focus-visible::after {
+  background: var(--text-muted);
+}
+
+.divider:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: -2px;
+}
+
+/* Mientras se arrastra, el puntero puede salirse del divisor: sin esto, el
+   texto de las dos zonas se selecciona y el arrastre se siente roto. */
+.dragging {
+  user-select: none;
+}

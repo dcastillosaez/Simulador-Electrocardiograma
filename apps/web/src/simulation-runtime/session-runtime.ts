@@ -4,8 +4,10 @@ import { decodeFrame } from "./frame-decoder";
 import { FrameBuffer } from "./frame-buffer";
 import type {
   AdministeredMessage,
+  CardiacEventsMessage,
   ClientMessage,
   ErrorMessage,
+  HeartStateMessage,
   MeasurementsMessage,
   PharmacologyMessage,
   PausedMessage,
@@ -36,6 +38,8 @@ export interface SessionRuntimeEvents {
   measurements: MeasurementsMessage;
   administered: AdministeredMessage;
   pharmacology: PharmacologyMessage;
+  cardiacEvents: CardiacEventsMessage;
+  heartState: HeartStateMessage;
   error: ErrorMessage;
   frameMeta: { sequenceNumber: number; lost: boolean; sessionId: string };
 }
@@ -174,6 +178,14 @@ export class SessionRuntime extends TypedEventEmitter<SessionRuntimeEvents> {
         // Tampoco toca `state`, por lo mismo: administrar un farmaco no
         // arranca ni para una sesion.
         this.emit("pharmacology", message);
+        break;
+      case "cardiac_events":
+        // No toca `state`, igual que las medidas: describen la mecanica, no
+        // el ciclo de vida de la sesion.
+        this.emit("cardiacEvents", message);
+        break;
+      case "heart_state":
+        this.emit("heartState", message);
         break;
       case "error":
         this.emit("error", message);

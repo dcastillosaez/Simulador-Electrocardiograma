@@ -359,4 +359,77 @@ describe("FrameBuffer", () => {
     const buffer = new FrameBuffer();
     expect(buffer.consumedSampleIndices().length).toBe(0);
   });
+
+  describe("playbackTimeS", () => {
+    it("es null antes del primer frame", () => {
+      const buffer = new FrameBuffer();
+
+      expect(buffer.playbackTimeS).toBeNull();
+    });
+
+    it("es el inicio del primer trozo mientras no se haya reproducido nada", () => {
+      const buffer = new FrameBuffer();
+      buffer.push(makeFrame({ tStartS: 4.2 }));
+
+      expect(buffer.playbackTimeS).toBe(4.2);
+    });
+
+    it("no avanza antes del pre-roll", () => {
+      const buffer = new FrameBuffer();
+      buffer.push(makeFrame({ tStartS: 0 }));
+
+      buffer.advance(0.05);
+
+      expect(buffer.playbackTimeS).toBe(0);
+    });
+
+    it("avanza dentro del trozo de cabeza una vez hecho el pre-roll", () => {
+      const buffer = new FrameBuffer();
+      for (let i = 0; i < 6; i += 1) buffer.push(makeFrame({ tStartS: i * 0.1 }));
+
+      buffer.advance(0.04);
+
+      expect(buffer.playbackTimeS).toBeCloseTo(0.04, 5);
+    });
+
+    it("cruza la frontera entre trozos sin saltos", () => {
+      const buffer = new FrameBuffer();
+      for (let i = 0; i < 6; i += 1) buffer.push(makeFrame({ tStartS: i * 0.1 }));
+
+      buffer.advance(0.25);
+
+      expect(buffer.playbackTimeS).toBeCloseTo(0.25, 5);
+    });
+
+    it("se queda en el final de lo último reproducido durante un underrun", () => {
+      const buffer = new FrameBuffer();
+      for (let i = 0; i < 6; i += 1) buffer.push(makeFrame({ tStartS: i * 0.1 }));
+
+      buffer.advance(10);
+
+      expect(buffer.playbackTimeS).toBeCloseTo(0.6, 5);
+    });
+
+    it("es monótono creciente a lo largo de una reproducción normal", () => {
+      const buffer = new FrameBuffer();
+      for (let i = 0; i < 6; i += 1) buffer.push(makeFrame({ tStartS: i * 0.1 }));
+
+      let previous = buffer.playbackTimeS!;
+      for (let tick = 0; tick < 20; tick += 1) {
+        buffer.advance(1 / 60);
+        const current = buffer.playbackTimeS!;
+        expect(current).toBeGreaterThanOrEqual(previous);
+        previous = current;
+      }
+    });
+
+    it("vuelve a null tras clear()", () => {
+      const buffer = new FrameBuffer();
+      buffer.push(makeFrame({ tStartS: 1 }));
+
+      buffer.clear();
+
+      expect(buffer.playbackTimeS).toBeNull();
+    });
+  });
 });

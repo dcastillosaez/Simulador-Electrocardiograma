@@ -51,11 +51,11 @@ export function browserBackendUrls(search: string): BackendUrls {
     import.meta.env.DEV ? params.get(name) : null;
   return {
     apiBaseUrl:
-      override("api") ?? import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000",
+      override("api") ?? import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8200",
     wsUrl:
       override("ws") ??
       import.meta.env.VITE_WS_URL ??
-      "ws://localhost:8000/ws/simulation",
+      "ws://localhost:8200/ws/simulation",
     token: "",
   };
 }

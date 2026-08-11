@@ -53,3 +53,7 @@ apps/api/packaging/build/
 *.key
 *.pfx
 *.p12
+
+# Descarga de BodyParts3D para reconstruir heart.glb: 136 MB de fuente que
+# no se versionan. Ver docs/fase-d/anatomy-source.md.
+docs/fase-d/.bodyparts3d-cache/

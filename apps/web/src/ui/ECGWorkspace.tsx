@@ -5,6 +5,7 @@ import {
   Panel,
   SectionTitle,
   Sidebar,
+  SplitPane,
   StatusBar,
   Tooltip,
 } from "@ui-system";
@@ -21,6 +22,7 @@ import { AdvancedControlPanel } from "./AdvancedControlPanel";
 import { AxisControl } from "./AxisControl";
 import { PharmacologyPanel } from "./PharmacologyPanel";
 import { EcgDisplay } from "./EcgDisplay";
+import { HeartScene } from "./Cardiac3D/HeartScene";
 import { MeasureOverlay, type MeasureOverlayHandle } from "./MeasureOverlay";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import { WorkspaceInspector } from "./WorkspaceInspector";
@@ -374,28 +376,42 @@ export function ECGWorkspace({
         </Sidebar>
       }
       ecg={
-        <EcgDisplay
-          containerRef={containerRef}
-          leadColumns={leadColumns}
-          metrics={metrics}
-          registerTrace={registerTrace}
-          registerGrid={registerGrid}
-          overlay={
-            <MeasureOverlay
-              ref={measureOverlayRef}
-              active={isFrozen}
-              layout={{ leadColumns, metrics }}
-              sampleRateHz={sampleRateHz}
-              paperSpeedMmS={paperSpeedMmS}
-              theme={theme.ecg}
-              view={measureView}
-              magnifier={magnifier}
-              getSource={getMeasureSource}
-              onResultChange={setMeasureSession}
-              onPan={handlePan}
-              onZoom={handleZoom}
+        // El corazón va dentro del área `ecg` del grid, no en una zona nueva:
+        // así el `AppShell` no se toca y el divisor solo reparte un alto que
+        // ya está acotado. `useLayoutMetrics` mide el contenedor real, de modo
+        // que las tiras se recalculan solas al arrastrarlo, sin cablear nada
+        // entre los dos componentes.
+        <SplitPane
+          label="Reparto entre ECG y corazón"
+          defaultTopFraction={0.65}
+          minTopFraction={0.3}
+          maxTopFraction={0.85}
+          top={
+            <EcgDisplay
+              containerRef={containerRef}
+              leadColumns={leadColumns}
+              metrics={metrics}
+              registerTrace={registerTrace}
+              registerGrid={registerGrid}
+              overlay={
+                <MeasureOverlay
+                  ref={measureOverlayRef}
+                  active={isFrozen}
+                  layout={{ leadColumns, metrics }}
+                  sampleRateHz={sampleRateHz}
+                  paperSpeedMmS={paperSpeedMmS}
+                  theme={theme.ecg}
+                  view={measureView}
+                  magnifier={magnifier}
+                  getSource={getMeasureSource}
+                  onResultChange={setMeasureSession}
+                  onPan={handlePan}
+                  onZoom={handleZoom}
+                />
+              }
             />
           }
+          bottom={<HeartScene runtime={runtime} />}
         />
       }
       inspector={

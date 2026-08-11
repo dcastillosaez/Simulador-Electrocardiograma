@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import { AppShell, Header, Inspector, Sidebar, StatusBar } from "./index";
+import { AppShell, Header, Inspector, Sidebar, SplitPane, StatusBar } from "./index";
 
 describe("AppShell", () => {
   it("coloca las cinco zonas y las anuncia con landmarks distintos", () => {
@@ -45,5 +46,100 @@ describe("Header", () => {
     </Header>);
     expect(screen.getByText("Simulador ECG")).toBeInTheDocument();
     expect(screen.getByText("extra")).toBeInTheDocument();
+  });
+});
+
+describe("SplitPane", () => {
+  it("pinta las dos zonas", () => {
+    render(<SplitPane top={<p>arriba</p>} bottom={<p>abajo</p>} label="ECG y corazón" />);
+
+    expect(screen.getByText("arriba")).toBeInTheDocument();
+    expect(screen.getByText("abajo")).toBeInTheDocument();
+  });
+
+  it("el divisor se anuncia como separador con nombre", () => {
+    render(<SplitPane top={<p>a</p>} bottom={<p>b</p>} label="ECG y corazón" />);
+
+    const separator = screen.getByRole("separator", { name: "ECG y corazón" });
+    expect(separator).toHaveAttribute("aria-orientation", "horizontal");
+  });
+
+  it("el divisor es alcanzable con el teclado", () => {
+    render(<SplitPane top={<p>a</p>} bottom={<p>b</p>} label="ECG y corazón" />);
+
+    expect(screen.getByRole("separator")).toHaveAttribute("tabindex", "0");
+  });
+
+  it("la flecha abajo da más espacio al ECG", async () => {
+    const user = userEvent.setup();
+    render(<SplitPane top={<p>a</p>} bottom={<p>b</p>} label="ECG y corazón" />);
+    const separator = screen.getByRole("separator");
+    const antes = Number(separator.getAttribute("aria-valuenow"));
+
+    separator.focus();
+    await user.keyboard("{ArrowDown}");
+
+    expect(Number(separator.getAttribute("aria-valuenow"))).toBeGreaterThan(antes);
+  });
+
+  it("la flecha arriba da más espacio al corazón", async () => {
+    const user = userEvent.setup();
+    render(<SplitPane top={<p>a</p>} bottom={<p>b</p>} label="ECG y corazón" />);
+    const separator = screen.getByRole("separator");
+    const antes = Number(separator.getAttribute("aria-valuenow"));
+
+    separator.focus();
+    await user.keyboard("{ArrowUp}");
+
+    expect(Number(separator.getAttribute("aria-valuenow"))).toBeLessThan(antes);
+  });
+
+  it("no baja del mínimo por mucho que se insista", async () => {
+    const user = userEvent.setup();
+    render(
+      <SplitPane
+        top={<p>a</p>}
+        bottom={<p>b</p>}
+        label="ECG y corazón"
+        minTopFraction={0.3}
+      />
+    );
+    const separator = screen.getByRole("separator");
+
+    separator.focus();
+    await user.keyboard("{ArrowUp>20/}");
+
+    expect(Number(separator.getAttribute("aria-valuenow"))).toBeGreaterThanOrEqual(30);
+  });
+
+  it("no sube del máximo", async () => {
+    const user = userEvent.setup();
+    render(
+      <SplitPane
+        top={<p>a</p>}
+        bottom={<p>b</p>}
+        label="ECG y corazón"
+        maxTopFraction={0.85}
+      />
+    );
+    const separator = screen.getByRole("separator");
+
+    separator.focus();
+    await user.keyboard("{ArrowDown>20/}");
+
+    expect(Number(separator.getAttribute("aria-valuenow"))).toBeLessThanOrEqual(85);
+  });
+
+  it("arranca en la fracción pedida", () => {
+    render(
+      <SplitPane
+        top={<p>a</p>}
+        bottom={<p>b</p>}
+        label="ECG y corazón"
+        defaultTopFraction={0.7}
+      />
+    );
+
+    expect(screen.getByRole("separator")).toHaveAttribute("aria-valuenow", "70");
   });
 });

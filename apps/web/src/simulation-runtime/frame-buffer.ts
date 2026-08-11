@@ -43,6 +43,10 @@ export class FrameBuffer {
   /** Trozos desalojados por la ÚLTIMA llamada a `advance()`. Se sobrescribe
    * en cada llamada: representa lo nuevo de este tick, no un histórico. */
   private justConsumed: BufferEntry[] = [];
+  /** Final del último trozo consumido por completo. Es lo que mantiene la
+   * cabeza de reproducción con un valor sensato durante un underrun, cuando
+   * no queda ningún trozo del que leer `tStartS`. */
+  private lastConsumedEndS: number | null = null;
 
   constructor(options: FrameBufferOptions = {}) {
     this.targetS = options.targetS ?? 0.5;
@@ -56,6 +60,23 @@ export class FrameBuffer {
 
   get bufferedDurationS(): number {
     return this.entries.reduce((sum, entry) => sum + this.frameDurationS(entry.frame), 0);
+  }
+
+  /** Cabeza de reproducción, en tiempo de simulación. `null` mientras no
+   * haya llegado ningún frame.
+   *
+   * Es el reloj que comparten el trazado y el corazón 3D, y por eso no puede
+   * ser `performance.now()`: este avanza solo cuando avanza la reproducción.
+   * En pausa, en pre-roll y en underrun se queda quieto, y lo que dependa de
+   * él se congela con el trazo en vez de seguir corriendo en el vacío.
+   *
+   * Con trozos en el buffer es el inicio del de cabeza más lo ya reproducido
+   * de él (`pendingS`); sin trozos, el final del último consumido. */
+  get playbackTimeS(): number | null {
+    if (this.entries.length > 0) {
+      return this.entries[0].frame.tStartS + this.pendingS;
+    }
+    return this.lastConsumedEndS;
   }
 
   get isUnderrun(): boolean {
@@ -126,7 +147,9 @@ export class FrameBuffer {
       if (duration > remaining) {
         break;
       }
-      this.justConsumed.push(this.entries.shift()!);
+      const consumed = this.entries.shift()!;
+      this.lastConsumedEndS = consumed.frame.tStartS + duration;
+      this.justConsumed.push(consumed);
       remaining -= duration;
     }
     // Si el buffer se vació durante el drenaje, no se acumula deuda: una
@@ -213,5 +236,6 @@ export class FrameBuffer {
     this.pendingS = 0;
     this.preRolled = false;
     this.justConsumed = [];
+    this.lastConsumedEndS = null;
   }
 }

@@ -11,8 +11,11 @@
     "tokens": "vite-node ../../packages/ui-system/tokens/build.ts"
   },
   "dependencies": {
+    "@react-three/drei": "^9.122.0",
+    "@react-three/fiber": "^8.18.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "three": "^0.171.0",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
@@ -22,6 +25,7 @@
     "@testing-library/user-event": "^14.6.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/three": "^0.171.0",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^25.0.1",

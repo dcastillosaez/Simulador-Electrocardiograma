@@ -49,8 +49,8 @@ describe("wsUrlFrom", () => {
 describe("browserBackendUrls", () => {
   it("cae al valor por defecto sin configuracion", () => {
     const urls = browserBackendUrls("");
-    expect(urls.apiBaseUrl).toBe("http://localhost:8000");
-    expect(urls.wsUrl).toBe("ws://localhost:8000/ws/simulation");
+    expect(urls.apiBaseUrl).toBe("http://localhost:8200");
+    expect(urls.wsUrl).toBe("ws://localhost:8200/ws/simulation");
   });
 
   it("no atiende `?api=` fuera de desarrollo", () => {
@@ -60,7 +60,7 @@ describe("browserBackendUrls", () => {
     // prohibido lo garantiza la propia condicion.
     const urls = browserBackendUrls("?api=http://otro:9000");
     expect(urls.apiBaseUrl).toBe(
-      import.meta.env.DEV ? "http://otro:9000" : "http://localhost:8000"
+      import.meta.env.DEV ? "http://otro:9000" : "http://localhost:8200"
     );
   });
 });
@@ -81,6 +81,6 @@ describe("resolveBackendUrls", () => {
 
   it("en navegador no invoca nada", async () => {
     const urls = await resolveBackendUrls("");
-    expect(urls.apiBaseUrl).toBe("http://localhost:8000");
+    expect(urls.apiBaseUrl).toBe("http://localhost:8200");
   });
 });

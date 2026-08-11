@@ -83,7 +83,13 @@ jobs:
           node-version: "20"
       - name: npm audit
         working-directory: apps/web
-        run: npm audit --package-lock-only --audit-level=high
+        # El `|| true` es lo que hace real el "avisa, no bloquea" de arriba:
+        # `continue-on-error` salva al workflow, pero el paso seguía marcando
+        # el check en rojo en el pull request y, con el shell en `-e`, cortaba
+        # el job antes de llegar a `pip-audit`. Un aviso que impide ver el
+        # siguiente aviso no informa de nada. El informe sigue completo en el
+        # log del job, que es donde se lee.
+        run: npm audit --package-lock-only --audit-level=high || true
       - uses: astral-sh/setup-uv@v5
       - name: pip-audit
         working-directory: apps/api
