@@ -15,7 +15,14 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "types": ["vite/client"],
+    // "node" va explicito y `@types/node` es dependencia declarada. Hasta
+    // vite 5 ninguna de las dos cosas hacia falta: sus tipos arrastraban los
+    // de Node por una referencia interna, y el paquete entraba en el arbol
+    // como dependencia transitiva. Vite 8 dejo de hacer ambas cosas, y
+    // `tokens/build.ts` --que importa "node:fs" y usa `process`-- dejo de
+    // compilar. Depender de lo que otro paquete arrastre es como se rompe una
+    // build en una actualizacion menor sin haber tocado una linea.
+    "types": ["vite/client", "node"],
     "baseUrl": ".",
     "paths": {
       "@ui-system": ["../../packages/ui-system/index.ts"],
