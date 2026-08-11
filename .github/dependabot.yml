@@ -1,0 +1,17 @@
+# Solo el ecosistema "github-actions". Las acciones de los workflows se
+# fijan por SHA de commit (Scorecard, check "Pinned-Dependencies"), y un pin
+# sin nada que lo actualice se queda atras para siempre -- no se entera nadie
+# si sale una version con un fix de seguridad. Esto abre un PR cuando toca.
+#
+# No cubre npm ni pip: esas dependencias ya reciben Dependabot security
+# updates automaticos (sin fichero de configuracion, activados desde
+# Settings > Security del repositorio) para vulnerabilidades conocidas, que
+# es lo que hace falta ahora mismo. Anadir aqui "version updates" para ellas
+# es una decision de politica aparte -- cuanto ruido de PRs semanales se
+# quiere aceptar -- y no la implica este cambio.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
