@@ -1,0 +1,92 @@
+# Estas 17 alertas de OSV-Scanner (via el check "Vulnerabilities" de
+# Scorecard) son avisos "unmaintained" de RustSec: el propio texto de cada
+# uno dice que no hay version corregida, porque el repositorio de origen esta
+# archivado. No se resuelven con un `cargo update` -- no hay a que subir -- y
+# no vienen de una dependencia que este proyecto elija: las trae Tauri.
+#
+# De donde salen, dos grupos:
+#
+# 1. El backend de WebView de Tauri en Linux (`wry`/`tao`) usa las bindings
+#    GTK3 de gtk-rs (atk, gdk, gtk, glib-macros y el resto de esta lista).
+#    Ese repositorio lo archivaron sus mantenedores en 2024 remitiendo a
+#    gtk4-rs como sucesor. Ninguna de estas crates llega a compilarse en lo
+#    que este proyecto distribuye: `release.yml` construye el instalador
+#    solo en `windows-latest`, y ahi el backend de WebView es WebView2, no
+#    GTK. Estan en Cargo.lock porque el lockfile resuelve el grafo de
+#    dependencias de Tauri para todas las plataformas que soporta, no solo
+#    la que se compila aqui.
+# 2. `urlpattern`, dependencia directa de Tauri (esta si, multiplataforma),
+#    usa las crates Unicode `unic-*`, del repositorio archivado
+#    open-i18n/rust-unic.
+#
+# El dia que Tauri migre su backend de Linux a gtk4-rs, o que `urlpattern`
+# deje de depender de `unic-*`, un `cargo update` limpia estas entradas de
+# Cargo.lock y estas lineas se pueden borrar sin mas.
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0413"
+reason = "atk (gtk-rs GTK3, via wry/tao en Linux): repo archivado, sin version corregida. No compila en el instalador de Windows que se distribuye."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0416"
+reason = "atk-sys (gtk-rs GTK3, via wry/tao en Linux): mismo repo archivado que atk."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0412"
+reason = "gdk (gtk-rs GTK3, via wry/tao en Linux): mismo repo archivado."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0418"
+reason = "gdk-sys (gtk-rs GTK3, via wry/tao en Linux): mismo repo archivado."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0411"
+reason = "gdk-wayland-sys (gtk-rs GTK3, via wry/tao en Linux): mismo repo archivado."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0417"
+reason = "gdkx11 (gtk-rs GTK3, via wry/tao en Linux): mismo repo archivado."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0414"
+reason = "gdkx11-sys (gtk-rs GTK3, via wry/tao en Linux): mismo repo archivado."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0415"
+reason = "gtk (gtk-rs GTK3, via wry/tao en Linux): mismo repo archivado."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0420"
+reason = "gtk-sys (gtk-rs GTK3, via wry/tao en Linux): mismo repo archivado."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0419"
+reason = "gtk3-macros (gtk-rs GTK3, via wry/tao en Linux): mismo repo archivado."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0429"
+reason = "glib 0.18.x: unsoundness real, corregida en 0.20, pero gtk 0.18.x (gtk-rs GTK3, sin version posterior) exige glib ^0.18 -- no se puede subir glib sola sin romper esa dependencia, que tampoco es nuestra."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0370"
+reason = "proc-macro-error, dependencia de build de glib-macros (gtk-rs GTK3): repo sin mantener, sin version corregida."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0081"
+reason = "unic-char-property, via urlpattern (dependencia directa de Tauri): repositorio open-i18n/rust-unic archivado, sin version corregida."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0075"
+reason = "unic-char-range, via urlpattern: mismo repo archivado."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0080"
+reason = "unic-common, via urlpattern: mismo repo archivado."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0100"
+reason = "unic-ucd-ident, via urlpattern: mismo repo archivado."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0098"
+reason = "unic-ucd-version, via urlpattern: mismo repo archivado."
