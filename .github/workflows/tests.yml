@@ -36,8 +36,8 @@ jobs:
           --health-retries 15
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
       - name: Sincronizar dependencias
@@ -53,8 +53,8 @@ jobs:
     name: Frontend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
           cache: npm
@@ -77,8 +77,8 @@ jobs:
     # interfaz un viernes hace que se acabe ignorando el aviso entero.
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
       - name: npm audit
@@ -90,7 +90,7 @@ jobs:
         # siguiente aviso no informa de nada. El informe sigue completo en el
         # log del job, que es donde se lee.
         run: npm audit --package-lock-only --audit-level=high || true
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - name: pip-audit
         working-directory: apps/api
         run: uvx pip-audit --strict --progress-spinner off || true
