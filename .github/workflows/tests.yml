@@ -37,7 +37,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
       - name: Sincronizar dependencias
@@ -90,7 +90,7 @@ jobs:
         # siguiente aviso no informa de nada. El informe sigue completo en el
         # log del job, que es donde se lee.
         run: npm audit --package-lock-only --audit-level=high || true
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: pip-audit
         working-directory: apps/api
         run: uvx pip-audit --strict --progress-spinner off || true
