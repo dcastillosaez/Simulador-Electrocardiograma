@@ -68,7 +68,19 @@ export function useLayoutMetrics({
       // se acepta: dejaría el ECG con canvas de altura cero hasta el siguiente
       // redimensionado.
       if (rect.width <= 0 || rect.height <= 0) return;
-      setSize({ widthPx: rect.width, heightPx: rect.height });
+      // Histeresis de medio pixel. El navegador cuantiza el layout a 1/16 de
+      // pixel, asi que una medida puede volver como 599,9375 donde antes
+      // valia 600. Sin este filtro, cualquier lazo de realimentacion que
+      // quede entre medida y contenido convierte esa migaja en una deriva
+      // visible: la cuadricula encoge sola, escalon a escalon, sin que nadie
+      // haya tocado la ventana. Medio pixel no cambia ninguna decision
+      // clinica; una deriva, si.
+      setSize((previous) =>
+        Math.abs(previous.widthPx - rect.width) < 0.5 &&
+        Math.abs(previous.heightPx - rect.height) < 0.5
+          ? previous
+          : { widthPx: rect.width, heightPx: rect.height }
+      );
     });
     observer.current.observe(element);
   }, []);
