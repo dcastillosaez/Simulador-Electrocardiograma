@@ -42,6 +42,8 @@ const RHYTHM_DETAIL = {
   clinical_description: "...",
   references: [],
   allowed_overlays: [],
+  rhythm_parameters: {},
+  patient_parameters: null,
 };
 
 const DRUG_SUMMARY = {

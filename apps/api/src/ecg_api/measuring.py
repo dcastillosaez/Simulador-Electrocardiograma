@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 
-from ecg_engine import measure, qtc_bazett_s
+from ecg_engine import AtrialActivity, av_relationship, measure, qtc_bazett_s
 from ecg_engine.types import SignalSource
 
 MEASUREMENT_WINDOW_S: float = 10.0
@@ -46,6 +46,13 @@ def _ms(seconds: float) -> float | None:
     if seconds is None or math.isnan(seconds):
         return None
     return round(seconds * 1000.0, 1)
+
+
+def _bpm(rate_hz: float) -> float | None:
+    """Hercios a latidos por minuto, con el mismo hueco explícito que `_ms`."""
+    if rate_hz is None or math.isnan(rate_hz):
+        return None
+    return round(rate_hz * 60.0, 1)
 
 
 class MeasurementWindow:
@@ -99,8 +106,21 @@ def measurements_payload(
     window: MeasurementWindow,
     t_end_s: float,
     pr_is_measurable: bool,
+    atrial_activity: AtrialActivity,
 ) -> dict[str, Any] | None:
-    """Compone el mensaje de medidas, o `None` si aún no hay señal que medir."""
+    """Compone el mensaje de medidas, o `None` si aún no hay señal que medir.
+
+    Publica dos frecuencias, no una. En un ritmo sinusal dicen lo mismo; en
+    un bloqueo completo la aurícula va a 75 y el ventrículo a 40, y «la»
+    frecuencia cardíaca no existe como número único. La lectura que las une
+    —el ratio de conducción, o la disociación— viaja al lado, porque es lo
+    que convierte dos cifras en un diagnóstico.
+
+    `atrial_activity` acompaña siempre a la frecuencia auricular y no solo
+    cuando falta: un hueco sin explicación se lee como un fallo del
+    simulador, y aquí el hueco es el hallazgo —en una fibrilación no hay
+    frecuencia auricular que medir, y decirlo es parte de la enseñanza.
+    """
     signal_v = window.signal()
     if signal_v is None:
         return None
@@ -118,6 +138,7 @@ def measurements_payload(
         signal_v,
         window.sample_rate_hz,
         pr_is_measurable=pr_is_measurable,
+        atrial_rate_is_measurable=atrial_activity is AtrialActivity.ORGANIZED,
     )
     qtc_s = qtc_bazett_s(result.qt_s, result.rr_mean_s)
 
@@ -125,12 +146,13 @@ def measurements_payload(
         "type": "measurements",
         "t_s": round(t_end_s, 3),
         "window_s": round(duration_s, 3),
+        "atrial_activity": atrial_activity.value,
+        "av_relationship": av_relationship(
+            events, result.atrial_rate_hz, result.ventricular_rate_hz
+        ),
         "values": {
-            "heart_rate_bpm": (
-                None
-                if math.isnan(result.heart_rate_hz)
-                else round(result.heart_rate_hz * 60.0, 1)
-            ),
+            "atrial_rate_bpm": _bpm(result.atrial_rate_hz),
+            "ventricular_rate_bpm": _bpm(result.ventricular_rate_hz),
             "rr_ms": _ms(result.rr_mean_s),
             "pr_ms": _ms(result.pr_mean_s),
             "qrs_ms": _ms(result.qrs_duration_s),

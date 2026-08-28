@@ -355,6 +355,14 @@ async def _run_session(websocket: WebSocket, settings, session_factory) -> None:
                         if message.params
                         else None,
                         message.seed,
+                        # Las constantes van aparte de `EngineParams` porque
+                        # no son del motor de señal: una tensión arterial no
+                        # se dibuja en un ECG. Ver `PatientVitals`.
+                        vitals=(
+                            message.params.patient.to_vitals()
+                            if message.params and message.params.patient
+                            else None
+                        ),
                     )
                 except SimulationError as exc:
                     await websocket.send_json(
@@ -367,6 +375,7 @@ async def _run_session(websocket: WebSocket, settings, session_factory) -> None:
                         seed=manager.seed,
                         sample_rate_hz=DEFAULT_SAMPLE_RATE_HZ,
                         channels=12,
+                        params=manager.params,
                     )
                 )
                 producer_task = asyncio.create_task(
@@ -414,7 +423,14 @@ async def _run_session(websocket: WebSocket, settings, session_factory) -> None:
             elif isinstance(message, UpdateMessage):
                 if await _reject_if_no_active_session(websocket, manager):
                     continue
-                applied = manager.update(message.params.to_engine_params())
+                applied = manager.update(
+                    message.params.to_engine_params(),
+                    vitals=(
+                        message.params.patient.to_vitals()
+                        if message.params.patient
+                        else None
+                    ),
+                )
                 await websocket.send_json(updated_message(params=applied))
 
             elif isinstance(message, AdministerMessage):

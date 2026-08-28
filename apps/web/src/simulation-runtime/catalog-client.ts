@@ -1,5 +1,10 @@
 import type { RhythmDetail, RhythmSummary } from "../types/rhythms";
 import type { DrugDetail, DrugSummary } from "../types/drugs";
+import type {
+  CustomPatientDetail,
+  CustomPatientSummary,
+  PatientPayload,
+} from "../types/patients";
 
 export interface CatalogClientOptions {
   baseUrl: string;
@@ -55,6 +60,81 @@ export class CatalogClient {
       throw new Error(`GET /api/drugs devolvió ${response.status}`);
     }
     return (await response.json()) as DrugSummary[];
+  }
+
+  // --- pacientes personalizados --------------------------------------------
+  //
+  // A diferencia de ritmos y farmacos, esto SI sale de la base de datos: no
+  // es catalogo versionado con el motor sino material que escribe el usuario.
+  // Vive en el mismo cliente porque comparte base, token y manejo de errores;
+  // separarlo habria duplicado las tres cosas.
+
+  async listPatients(): Promise<CustomPatientSummary[]> {
+    return this.json<CustomPatientSummary[]>("/api/patients");
+  }
+
+  async getPatient(patientId: string): Promise<CustomPatientDetail> {
+    return this.json<CustomPatientDetail>(
+      `/api/patients/${encodeURIComponent(patientId)}`
+    );
+  }
+
+  async createPatient(
+    name: string,
+    patient: PatientPayload
+  ): Promise<CustomPatientDetail> {
+    return this.json<CustomPatientDetail>("/api/patients", {
+      method: "POST",
+      body: JSON.stringify({ name, patient }),
+    });
+  }
+
+  async updatePatient(
+    patientId: string,
+    name: string,
+    patient: PatientPayload
+  ): Promise<CustomPatientDetail> {
+    return this.json<CustomPatientDetail>(
+      `/api/patients/${encodeURIComponent(patientId)}`,
+      { method: "PUT", body: JSON.stringify({ name, patient }) }
+    );
+  }
+
+  async deletePatient(patientId: string): Promise<void> {
+    await this.json<void>(`/api/patients/${encodeURIComponent(patientId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  /** Una peticion con el manejo de errores en un solo sitio.
+   *
+   * El mensaje del servidor viaja hasta la interfaz: cuando dice «ya existe
+   * un paciente llamado X», eso es lo que el usuario necesita leer, no un
+   * «error 409» que le obligue a adivinar. */
+  private async json<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      ...init,
+      headers: {
+        ...this.headers,
+        ...(init.body ? { "Content-Type": "application/json" } : {}),
+      },
+    });
+    if (!response.ok) {
+      throw new Error(await this.describe(response, path));
+    }
+    if (response.status === 204) return undefined as T;
+    return (await response.json()) as T;
+  }
+
+  private async describe(response: Response, path: string): Promise<string> {
+    try {
+      const body = await response.json();
+      const detail = (body as { detail?: unknown }).detail;
+      if (typeof detail === "string") return detail;
+    } catch {
+      // Cuerpo vacio o no JSON: queda el codigo, que ya dice algo.
+    }
+    return `${path} devolvió ${response.status}`;
   }
 
   async getDrug(drugId: string): Promise<DrugDetail> {

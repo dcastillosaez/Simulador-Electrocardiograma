@@ -9,6 +9,7 @@ exactamente lo que hace la suite unitaria.
 from __future__ import annotations
 
 from ecg_engine import EngineParams
+from ecg_engine.mechanics import MechanicalProfile, NORMAL_PROFILE
 from pharmacology_engine import (
     DrugAdministration,
     PharmacologyEngine,
@@ -17,19 +18,34 @@ from pharmacology_engine import (
     qtc_ms,
 )
 
-from .projection import baseline_from_params, project
+from .projection import (
+    PatientVitals,
+    baseline_from_params,
+    circulation_adjusted,
+    project,
+)
 
 
 class PharmacologySession:
     """Estado farmacológico de una sesión de simulación."""
 
-    def __init__(self, params: EngineParams) -> None:
-        self._engine = PharmacologyEngine(baseline_from_params(params))
+    def __init__(
+        self,
+        params: EngineParams,
+        profile: MechanicalProfile = NORMAL_PROFILE,
+        vitals: PatientVitals | None = None,
+    ) -> None:
+        self._vitals = vitals
+        self._engine = PharmacologyEngine(baseline_from_params(params, vitals))
         self._params = params
+        # El perfil mecánico del ritmo, que la farmacología no conoce ni debe
+        # conocer: gobierna lo que se publica, no lo que se calcula. Ver
+        # `circulation_adjusted`.
+        self._profile = profile
 
     # --- ciclo de vida ------------------------------------------------------
 
-    def rebase(self, params: EngineParams) -> None:
+    def rebase(self, params: EngineParams, vitals: PatientVitals | None = None) -> None:
         """Reencuadra el basal cuando el usuario mueve los mandos.
 
         Los fármacos a bordo no se tocan: su efecto se recalcula sobre el
@@ -37,7 +53,9 @@ class PharmacologySession:
         retira la amiodarona.
         """
         self._params = params
-        self._engine.set_baseline(baseline_from_params(params))
+        if vitals is not None:
+            self._vitals = vitals
+        self._engine.set_baseline(baseline_from_params(params, self._vitals))
 
     @property
     def baseline(self) -> PatientBaseline:
@@ -94,7 +112,7 @@ class PharmacologySession:
         Un mapa abierto, como el de medidas: añadir un eje fisiológico nuevo
         no rompe a un cliente anterior, que ignora las claves que no conoce.
         """
-        state = self._engine.physiology_at(t_s)
+        state = circulation_adjusted(self._engine.physiology_at(t_s), self._profile)
         _effect, fired = self._engine.effect_with_interactions(t_s)
         physiology = state.as_dict()
         physiology["qtc_ms"] = round(qtc_ms(state), 1)

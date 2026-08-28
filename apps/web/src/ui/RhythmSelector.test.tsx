@@ -17,6 +17,8 @@ const detail: RhythmDetail = {
   clinical_description: "...",
   references: [],
   allowed_overlays: [],
+  rhythm_parameters: {},
+  patient_parameters: null,
 };
 
 function makeCatalogClient(overrides: Partial<CatalogClient> = {}): CatalogClient {

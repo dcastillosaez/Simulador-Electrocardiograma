@@ -21,6 +21,7 @@ import { BasicControlPanel } from "./BasicControlPanel";
 import { AdvancedControlPanel } from "./AdvancedControlPanel";
 import { AxisControl } from "./AxisControl";
 import { PharmacologyPanel } from "./PharmacologyPanel";
+import { PatientEditor } from "./PatientEditor";
 import { EcgDisplay } from "./EcgDisplay";
 import { HeartScene } from "./Cardiac3D/HeartScene";
 import { MeasureOverlay, type MeasureOverlayHandle } from "./MeasureOverlay";
@@ -46,7 +47,8 @@ import {
   type GainSetting,
 } from "../render/layout-engine";
 import { clampStart, nextPaperSpeed } from "../measure/zoom";
-import type { RhythmDetail } from "../types/rhythms";
+import { CUSTOM_PATIENT_ID, type RhythmDetail } from "../types/rhythms";
+import { DEFAULT_PATIENT, type PatientPayload } from "../types/patients";
 import styles from "./ECGWorkspace.module.css";
 
 const DEFAULT_VARIABILITY = {
@@ -64,6 +66,20 @@ const DEFAULT_AXIS = {
   t_offset_deg: 0,
 };
 const DEFAULT_SAMPLE_RATE_HZ = 500;
+
+/** Los valores de partida de los mandos de un ritmo, tal y como los declara
+ * el catálogo. */
+function defaultRhythmValues(rhythm: RhythmDetail): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(rhythm.rhythm_parameters ?? {}).map(([name, range]) => [
+      name,
+      range.default,
+    ])
+  );
+}
+/** Cuánto se espera antes de mandar al servidor un cambio del editor de
+ * paciente. Ver el efecto que lo usa. */
+const PATIENT_APPLY_DELAY_MS = 200;
 
 /** El indicador es clínico, no técnico: en pantalla no aparece nunca un
  * "46 px/tira", porque ni el médico ni el alumno saben qué hacer con ese
@@ -122,6 +138,11 @@ export function ECGWorkspace({
   const [paperSpeedMmS, setPaperSpeedMmS] = useState<number>(REFERENCE_PAPER_SPEED_MM_S);
   const [viewStartRingPos, setViewStartRingPos] = useState(0);
   const [magnifier, setMagnifier] = useState(false);
+  // El paciente inventado vive aquí y no dentro del editor: es un parámetro
+  // de la simulación como la frecuencia o el ruido, y al cambiar de ritmo y
+  // volver tiene que seguir siendo el mismo paciente.
+  const [patient, setPatient] = useState<PatientPayload>(DEFAULT_PATIENT);
+  const isCustomPatient = store.selectedRhythmId === CUSTOM_PATIENT_ID;
 
   const leadColumns = useMemo(() => leadColumnsForLayout(layout), [layout]);
   const sampleRateHz = store.sampleRateHz ?? DEFAULT_SAMPLE_RATE_HZ;
@@ -265,6 +286,14 @@ export function ECGWorkspace({
       noise: SILENT_NOISE,
       variability: DEFAULT_VARIABILITY,
       axis: DEFAULT_AXIS,
+      // Los mandos propios arrancan en su valor de catálogo. Sin esto, el
+      // primer movimiento de uno tendría que adivinar dónde estaban los
+      // demás.
+      rhythm: defaultRhythmValues(detail),
+      // Al elegir el paciente personalizado arranca el que haya configurado,
+      // no uno en blanco: volver a él después de mirar un flutter no debería
+      // borrar el caso que se estaba montando.
+      ...(rhythmId === CUSTOM_PATIENT_ID ? { patient } : {}),
     });
   };
 
@@ -279,7 +308,31 @@ export function ECGWorkspace({
         }
       : null);
 
-  const bpm = currentParams ? Math.round(currentParams.heart_rate_hz * 60) : null;
+  // Un cambio en el editor viaja al servidor con un respiro de por medio.
+  //
+  // Cada `update` reconstruye la fuente del paciente en el motor —un PR
+  // distinto es otro paciente, no un ajuste de un tren en marcha— y mandar
+  // uno por cada pulsación de un deslizador dejaría el trazado dando saltos.
+  // Doscientos milisegundos es lo que tarda en soltarse un control sin que la
+  // respuesta se sienta lenta.
+  const handlePatientChange = useCallback(
+    (next: PatientPayload) => setPatient(next),
+    []
+  );
+
+  useEffect(() => {
+    if (!isCustomPatient || !currentParams) return;
+    const timer = window.setTimeout(
+      () => runtime.update({ ...currentParams, patient }),
+      PATIENT_APPLY_DELAY_MS
+    );
+    return () => window.clearTimeout(timer);
+    // `currentParams` cambia con cada respuesta del servidor, incluida la que
+    // provoca este mismo efecto: depender de él reenviaría el paciente en
+    // bucle. Lo que dispara el envío es el paciente, que es lo que el usuario
+    // ha tocado.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patient, isCustomPatient, runtime]);
 
   // El panel de medición vive en el inspector y la sesión vive dentro del
   // overlay: sin este puente, cambiar de herramienta desde el panel no tendría
@@ -324,7 +377,15 @@ export function ECGWorkspace({
               selectedRhythmId={store.selectedRhythmId}
               onSelect={handleRhythmSelect}
             />
-            {selectedRhythm && currentParams && (
+            {selectedRhythm && currentParams && isCustomPatient && (
+              <PatientEditor
+                patient={patient}
+                ranges={selectedRhythm.patient_parameters}
+                onChange={handlePatientChange}
+                catalogClient={catalogClient}
+              />
+            )}
+            {selectedRhythm && currentParams && !isCustomPatient && (
               advancedMode ? (
                 <AdvancedControlPanel
                   noise={currentParams.noise}
@@ -335,6 +396,18 @@ export function ECGWorkspace({
                 <BasicControlPanel
                   heartRateHz={currentParams.heart_rate_hz}
                   heartRateRange={selectedRhythm.editable_parameters.heart_rate_hz}
+                  rhythmParameters={selectedRhythm.rhythm_parameters ?? {}}
+                  rhythmValues={currentParams.rhythm ?? {}}
+                  onRhythmParameterChange={(name, value) =>
+                    runtime.update({
+                      ...currentParams,
+                      // Los mandos vigentes se completan con los que el
+                      // catálogo declara: al arrancar, `rhythm` viene vacío y
+                      // mandar solo el que se acaba de mover dejaría al motor
+                      // rellenando los demás con sus valores por defecto.
+                      rhythm: { ...defaultRhythmValues(selectedRhythm), ...currentParams.rhythm, [name]: value },
+                    })
+                  }
                   noise={currentParams.noise}
                   onHeartRateChange={(hz) => runtime.update({ ...currentParams, heart_rate_hz: hz })}
                   onNoiseChange={(noise) => runtime.update({ ...currentParams, noise })}
@@ -425,7 +498,8 @@ export function ECGWorkspace({
           gainFits={metrics.gainFits}
           exportError={exportError}
           rhythmName={selectedRhythm?.display_name ?? null}
-          bpm={bpm}
+          atrialActivity={store.atrialActivity}
+          avRelationship={store.avRelationship}
           axisDeg={currentParams?.axis.orientation_deg ?? null}
           measurements={store.measurements}
           physiology={store.physiology}

@@ -22,6 +22,25 @@ def test_cors_rejects_an_unlisted_origin():
     assert "access-control-allow-origin" not in response.headers
 
 
+def test_cors_allows_the_methods_the_patient_library_needs():
+    """Guardar un caso es un POST con `Content-Type: application/json`, y eso
+    dispara un preflight. Con la lista de métodos en solo `GET`, el navegador
+    lo rechazaba antes de que la petición llegara a salir: el botón de
+    guardar no hacía nada y la consola hablaba de CORS, no de pacientes."""
+    client = TestClient(app)
+    response = client.options(
+        "/api/patients",
+        headers={
+            "Origin": "http://localhost:5600",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert response.status_code == 200
+    allowed = response.headers["access-control-allow-methods"]
+    assert {"POST", "PUT", "DELETE"} <= {m.strip() for m in allowed.split(",")}
+
+
 # --- El WebSocket comprueba el origen por su cuenta -------------------------
 
 from ecg_api.routers.simulation_ws import _origin_is_allowed

@@ -21,6 +21,7 @@ from .desktop_auth import DesktopTokenMiddleware
 from .limits import ConnectionLimiter
 from .routers.drugs import router as drugs_router
 from .routers.health import router as health_router
+from .routers.patients import router as patients_router
 from .routers.rhythms import router as rhythms_router
 from .routers.sessions import router as sessions_router
 from .routers.simulation_ws import router as simulation_ws_router
@@ -79,7 +80,12 @@ app = FastAPI(title="Simulador de ECG — API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().allowed_origins,
-    allow_methods=["GET"],
+    # La lista es explícita y no `*`. Hasta la biblioteca de pacientes, la API
+    # REST era de solo lectura y bastaba `GET`; los tres métodos nuevos son
+    # exactamente los que necesita `/api/patients` —crear, editar y borrar
+    # casos— y ninguno más. Un comodín aquí abriría también los que no
+    # existen todavía.
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -95,4 +101,5 @@ app.include_router(health_router)
 app.include_router(rhythms_router)
 app.include_router(drugs_router)
 app.include_router(sessions_router)
+app.include_router(patients_router)
 app.include_router(simulation_ws_router)

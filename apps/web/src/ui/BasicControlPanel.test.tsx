@@ -10,6 +10,9 @@ describe("BasicControlPanel", () => {
       <BasicControlPanel
         heartRateHz={70 / 60}
         heartRateRange={{ minimum: 1.0, maximum: 1.6667 }}
+        rhythmParameters={{}}
+        rhythmValues={{}}
+        onRhythmParameterChange={vi.fn()}
         noise={NOISE_PRESETS.buena}
         onHeartRateChange={vi.fn()}
         onNoiseChange={vi.fn()}
@@ -26,6 +29,9 @@ describe("BasicControlPanel", () => {
       <BasicControlPanel
         heartRateHz={70 / 60}
         heartRateRange={{ minimum: 1.0, maximum: 1.6667 }}
+        rhythmParameters={{}}
+        rhythmValues={{}}
+        onRhythmParameterChange={vi.fn()}
         noise={NOISE_PRESETS.perfecta}
         onHeartRateChange={vi.fn()}
         onNoiseChange={onNoiseChange}
@@ -45,6 +51,9 @@ describe("BasicControlPanel", () => {
       <BasicControlPanel
         heartRateHz={70 / 60}
         heartRateRange={{ minimum: 1.0, maximum: 1.6667 }}
+        rhythmParameters={{}}
+        rhythmValues={{}}
+        onRhythmParameterChange={vi.fn()}
         noise={NOISE_PRESETS.perfecta}
         onHeartRateChange={vi.fn()}
         onNoiseChange={onNoiseChange}

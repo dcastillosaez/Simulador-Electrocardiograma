@@ -329,3 +329,54 @@ def test_the_clock_does_not_run_once_a_simulation_is_active():
                 decode_frame(receive_frame_bytes(ws))
         finally:
             app.state.settings.idle_start_timeout_s = 300.0
+
+
+def test_a_flutter_can_be_conducted_four_to_one_over_the_socket():
+    """El recorrido entero de lo que antes era «150 lpm (fija)».
+
+    El cliente manda aurícula y grado de bloqueo; el servidor devuelve el
+    pulso ya resuelto en el acuse, sin esperar a la primera medida.
+    """
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/simulation") as ws:
+            ws.send_json({
+                "type": "start",
+                "rhythm_id": "atrial_flutter",
+                "seed": 5,
+                "params": {
+                    "heart_rate_hz": 2.5,
+                    "rhythm": {"atrial_rate_hz": 320 / 60, "conduction_ratio": 4},
+                },
+            })
+            started = receive_json_of_type(ws, "started")
+            assert started["params"]["heart_rate_hz"] * 60 == pytest.approx(80.0, rel=0.01)
+            assert started["params"]["rhythm"]["conduction_ratio"] == 4
+
+            ws.send_json({
+                "type": "update",
+                "params": {
+                    "heart_rate_hz": 2.5,
+                    "rhythm": {"atrial_rate_hz": 300 / 60, "conduction_ratio": 2},
+                },
+            })
+            updated = receive_json_of_type(ws, "updated")
+            assert updated["params"]["heart_rate_hz"] * 60 == pytest.approx(150.0, rel=0.01)
+
+
+def test_a_rhythm_control_outside_its_range_is_clipped_not_rejected():
+    """Un mando fuera de rango no tumba la sesión: se recorta y se declara,
+    igual que la frecuencia de siempre."""
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/simulation") as ws:
+            ws.send_json({
+                "type": "start",
+                "rhythm_id": "atrial_flutter",
+                "seed": 5,
+                "params": {
+                    "heart_rate_hz": 2.5,
+                    "rhythm": {"atrial_rate_hz": 900 / 60, "conduction_ratio": 9},
+                },
+            })
+            started = receive_json_of_type(ws, "started")
+            assert started["params"]["rhythm"]["atrial_rate_hz"] * 60 == pytest.approx(350.0)
+            assert started["params"]["rhythm"]["conduction_ratio"] == 4

@@ -10,7 +10,14 @@ import pathlib
 
 import numpy as np
 
-from ecg_engine import EcgEngine, EngineParams, NoiseParams, get_rhythm, measure
+from ecg_engine import (
+    AtrialActivity,
+    EcgEngine,
+    EngineParams,
+    NoiseParams,
+    get_rhythm,
+    measure,
+)
 
 GOLDEN_SEED: int = 20260725
 GOLDEN_DURATION_S: float = 10.0
@@ -27,6 +34,7 @@ def golden_dir() -> pathlib.Path:
 
 def simulate(rhythm_id: str, noisy: bool) -> dict:
     """Ejecuta la simulación canónica de un ritmo y devuelve sus tres niveles."""
+    definition = get_rhythm(rhythm_id)
     engine = EcgEngine(
         rhythm_id=rhythm_id, seed=GOLDEN_SEED, sample_rate_hz=GOLDEN_SAMPLE_RATE_HZ
     )
@@ -55,7 +63,8 @@ def simulate(rhythm_id: str, noisy: bool) -> dict:
             events,
             signal,
             GOLDEN_SAMPLE_RATE_HZ,
-            get_rhythm(rhythm_id).pr_is_measurable,
+            definition.pr_is_measurable,
+            definition.atrial_activity is AtrialActivity.ORGANIZED,
         ).as_dict(),
     }
 

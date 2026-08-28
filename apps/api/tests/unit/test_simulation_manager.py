@@ -8,6 +8,12 @@ from ecg_engine import EngineParams
 from ecg_engine.types import N_LEADS
 
 
+def _advance(manager: SimulationManager, seconds: float) -> None:
+    """Avanza el reloj de simulación generando señal de verdad."""
+    for _ in range(int(seconds * 500 / CHUNK_SAMPLES)):
+        manager.next_chunk()
+
+
 def test_start_returns_a_fresh_session_id_and_sets_running():
     manager = SimulationManager()
     session_id = manager.start("sinus_normal", None, 20260725)
@@ -62,6 +68,26 @@ def test_update_clamps_to_the_rhythm_range_like_the_engine_does():
     assert applied.heart_rate_hz <= 60 / 60
 
 
+def test_a_zero_rate_is_clamped_by_rhythms_that_do_have_a_rate():
+    """El esquema deja pasar el cero porque la FV lo necesita; el motor lo
+    recorta en todos los demas. Sin esta red, un cero enviado a un ritmo
+    sinusal llegaria a `1.0 / rate_hz`."""
+    manager = SimulationManager()
+    manager.start("sinus_normal", None, 1)
+    applied = manager.update(EngineParams(heart_rate_hz=0.0))
+    assert applied.heart_rate_hz > 0.0
+
+
+def test_ventricular_fibrillation_starts_with_the_zero_rate_it_declares():
+    """El ritmo entero se queda fuera del simulador si esto no funciona: sin
+    poder arrancarlo, la interfaz muestra su nombre sobre el trazado del ritmo
+    anterior."""
+    manager = SimulationManager()
+    manager.start("ventricular_fibrillation", EngineParams(heart_rate_hz=0.0), 1)
+    assert manager.state is SimulationState.RUNNING
+    assert manager.next_chunk() is not None
+
+
 def test_pause_and_resume_toggle_state_without_touching_the_engine():
     manager = SimulationManager()
     manager.start("sinus_normal", None, 1)
@@ -90,3 +116,38 @@ def test_duration_is_simulated_time_not_wall_clock():
     for _ in range(100):
         manager.next_chunk()
     assert manager.duration_s == pytest.approx(10.0)
+
+
+def test_a_flutter_conducts_what_its_controls_say() -> None:
+    """De extremo a extremo dentro del servidor: los mandos del ritmo llegan
+    al motor y el pulso publicado es su consecuencia."""
+    manager = SimulationManager()
+    manager.start(
+        "atrial_flutter",
+        EngineParams(rhythm={"atrial_rate_hz": 300 / 60, "conduction_ratio": 4}),
+        1,
+    )
+    assert manager.params.heart_rate_hz * 60 == pytest.approx(75.0, rel=0.01)
+    assert manager.params.rhythm["conduction_ratio"] == 4
+
+
+def test_moving_a_rhythm_control_in_flight_changes_the_pulse() -> None:
+    manager = SimulationManager()
+    manager.start("atrial_flutter", None, 1)
+    _advance(manager, 2.0)
+    applied = manager.update(
+        EngineParams(rhythm={"atrial_rate_hz": 300 / 60, "conduction_ratio": 3})
+    )
+    assert applied.heart_rate_hz * 60 == pytest.approx(100.0, rel=0.01)
+
+
+def test_the_pulse_of_a_complete_block_is_its_escape() -> None:
+    manager = SimulationManager()
+    manager.start(
+        "av_block_third",
+        EngineParams(rhythm={"atrial_rate_hz": 90 / 60, "escape_rate_hz": 30 / 60}),
+        1,
+    )
+    # Publicar aquí los 90 de la aurícula sería anunciar la frecuencia de unas
+    # cámaras que no conducen para un paciente cuyo pulso es 30.
+    assert manager.params.heart_rate_hz * 60 == pytest.approx(30.0, rel=0.01)

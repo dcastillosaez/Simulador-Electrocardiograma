@@ -3,8 +3,13 @@ import math
 import numpy as np
 import pytest
 
+from ecg_engine import EcgEngine, EngineParams
 from ecg_engine.catalog import RHYTHM_IDS, get_rhythm, list_rhythms
-from ecg_engine.catalog.definitions import ParameterRange, RhythmCategory
+from ecg_engine.catalog.definitions import (
+    CUSTOM_PATIENT_ID,
+    ParameterRange,
+    RhythmCategory,
+)
 from ecg_engine.measurements import measure
 from ecg_engine.types import N_LEADS, EventKind
 
@@ -25,12 +30,25 @@ EXPECTED_IDS = {
 
 
 def test_catalog_contains_exactly_the_twelve_mvp_rhythms():
-    assert set(RHYTHM_IDS) == EXPECTED_IDS
-    assert len(RHYTHM_IDS) == 12
+    """Los doce hallazgos clínicos siguen siendo doce.
+
+    El paciente personalizado se cuenta aparte a propósito. No es un ritmo:
+    es un hueco que rellena el usuario, sin descripción clínica auditable ni
+    referencia que lo respalde, y confundirlo con el catálogo revisado sería
+    exactamente el error que este test existe para impedir.
+    """
+    assert set(RHYTHM_IDS) - {CUSTOM_PATIENT_ID} == EXPECTED_IDS
+    assert len(EXPECTED_IDS) == 12
+
+
+def test_the_custom_patient_is_offered_alongside_the_catalogue():
+    assert CUSTOM_PATIENT_ID in RHYTHM_IDS
+    assert get_rhythm(CUSTOM_PATIENT_ID).category is RhythmCategory.CUSTOM
 
 
 def test_registry_keys_match_definition_ids():
-    assert all(d.rhythm_id in EXPECTED_IDS for d in list_rhythms())
+    known = EXPECTED_IDS | {CUSTOM_PATIENT_ID}
+    assert all(d.rhythm_id in known for d in list_rhythms())
 
 
 def test_unknown_rhythm_raises_with_a_helpful_message():
@@ -132,7 +150,10 @@ def test_editable_rate_actually_changes_the_ventricular_rate(rhythm_id):
     source = definition.build_source(np.random.default_rng(5))
 
     if rate_range.minimum == rate_range.maximum:
-        pytest.skip("frecuencia estructural, declarada como fija")
+        # Frecuencia no gobernable por el mando genérico. Si el ritmo tiene
+        # mandos propios, son ellos los que deben moverla: eso lo comprueba
+        # `TestRhythmParameters`, no este test.
+        pytest.skip("frecuencia estructural o derivada de los mandos del ritmo")
 
     def ventricular_count() -> int:
         events = source.events(0.0, 60.0)
@@ -195,14 +216,19 @@ def test_fibrillation_declares_no_measurable_pulse():
 
 
 @pytest.mark.parametrize("rhythm_id", sorted(EXPECTED_IDS))
-def test_blocks_are_the_only_rhythms_where_command_and_pulse_differ(rhythm_id):
-    """En todo lo que conduce 1:1, mando y pulso son el mismo número. Si
-    empiezan a divergir en otro sitio, o el catálogo está mal o el ritmo no
-    conduce como creemos."""
+def test_only_wenckebach_keeps_a_command_that_is_not_the_pulse(rhythm_id):
+    """`heart_rate_hz` es el pulso ventricular en todo el catálogo menos uno.
+
+    El Mobitz I es la excepción que queda: su mando es la frecuencia sinusal
+    —que es lo que un fármaco mueve— y el pulso sale de ahí tras caer una P
+    de cada cuatro. En el bloqueo completo ya no hay excepción: desde que
+    tiene mandos propios, su sinusal se gobierna con `atrial_rate_hz` y
+    `heart_rate_hz` vale lo que vale el escape, que es el pulso del paciente.
+    """
     definition = get_rhythm(rhythm_id)
     command_hz = definition.default_parameters["heart_rate_hz"]
     diverges = definition.ventricular_rate_hz != pytest.approx(command_hz)
-    if rhythm_id in {"av_block_second_mobitz_i", "av_block_third"}:
+    if rhythm_id == "av_block_second_mobitz_i":
         assert diverges
     else:
         assert not diverges
@@ -323,3 +349,119 @@ def test_no_rhythm_specific_branching_in_the_engine():
             if f'"{rhythm_id}"' in source or f"'{rhythm_id}'" in source:
                 offenders.append(f"{path.name}: {rhythm_id}")
     assert offenders == []
+
+
+class TestRhythmParameters:
+    """Los mandos propios de un ritmo, para lo que no cabe en una frecuencia.
+
+    Antes de esto, el flutter, la taquicardia ventricular y el bloqueo
+    completo declaraban su frecuencia como fija y la interfaz enseñaba «150
+    lpm (fija)». Era cierto en el programa —sus trenes ignoraban el mando— y
+    falso en la clínica: un flutter conduce 2:1, 3:1 o 4:1, una TV va de 100 a
+    250 y un escape de 20 a 45.
+    """
+
+    def _measured(self, rhythm_id: str, rhythm: dict, seconds: float = 60.0):
+        engine = EcgEngine(
+            rhythm_id=rhythm_id, seed=20260725, params=EngineParams(rhythm=rhythm)
+        )
+        engine.generate(int(seconds * 500))
+        events = engine.source.events(0.0, seconds)
+        atrial = len([e for e in events if e.kind is EventKind.ATRIAL]) / seconds
+        ventricular = (
+            len([e for e in events if e.kind is EventKind.VENTRICULAR]) / seconds
+        )
+        return atrial * 60, ventricular * 60, engine.params.heart_rate_hz * 60
+
+    def test_only_three_rhythms_declare_their_own_controls(self):
+        with_controls = {
+            d.rhythm_id for d in list_rhythms() if d.rhythm_parameters
+        }
+        assert with_controls == {
+            "atrial_flutter",
+            "ventricular_tachycardia",
+            "av_block_third",
+        }
+
+    @pytest.mark.parametrize("ratio", [2, 3, 4])
+    def test_the_flutter_conducts_the_ratio_it_is_given(self, ratio):
+        atrial, ventricular, _ = self._measured(
+            "atrial_flutter",
+            {"atrial_rate_hz": 300 / 60, "conduction_ratio": ratio},
+        )
+        assert atrial == pytest.approx(300, rel=0.05)
+        assert ventricular == pytest.approx(300 / ratio, rel=0.06)
+
+    def test_the_flutter_atrium_can_be_moved_within_its_range(self):
+        slow, _, _ = self._measured("atrial_flutter", {"atrial_rate_hz": 250 / 60})
+        fast, _, _ = self._measured("atrial_flutter", {"atrial_rate_hz": 350 / 60})
+        assert slow == pytest.approx(250, rel=0.05)
+        assert fast == pytest.approx(350, rel=0.05)
+
+    def test_the_pulse_of_a_flutter_is_the_quotient_of_its_two_controls(self):
+        """Lo que la interfaz enseña como frecuencia cardíaca no es ninguno de
+        los dos mandos: es su cociente. Un 4:1 sobre 320 son 80 lpm."""
+        _, ventricular, command = self._measured(
+            "atrial_flutter",
+            {"atrial_rate_hz": 320 / 60, "conduction_ratio": 4},
+        )
+        assert command == pytest.approx(80.0, rel=0.01)
+        assert ventricular == pytest.approx(command, rel=0.06)
+
+    @pytest.mark.parametrize("rate", [100, 180, 250])
+    def test_the_ventricular_focus_beats_at_what_it_is_told(self, rate):
+        _, ventricular, command = self._measured(
+            "ventricular_tachycardia", {"ventricular_rate_hz": rate / 60}
+        )
+        assert ventricular == pytest.approx(rate, rel=0.06)
+        assert command == pytest.approx(rate, rel=0.01)
+
+    def test_a_complete_block_moves_its_two_pacemakers_apart(self):
+        atrial, ventricular, command = self._measured(
+            "av_block_third",
+            {"atrial_rate_hz": 90 / 60, "escape_rate_hz": 28 / 60},
+        )
+        assert atrial == pytest.approx(90, rel=0.06)
+        assert ventricular == pytest.approx(28, rel=0.06)
+        # El pulso del paciente es el escape, no la sinusal.
+        assert command == pytest.approx(28, rel=0.01)
+
+    def test_moving_the_sinus_node_does_not_touch_the_escape(self):
+        """Es lo que significa «disociado»: dos relojes que no se hablan."""
+        _, slow_escape, _ = self._measured(
+            "av_block_third", {"atrial_rate_hz": 60 / 60, "escape_rate_hz": 40 / 60}
+        )
+        _, fast_escape, _ = self._measured(
+            "av_block_third", {"atrial_rate_hz": 100 / 60, "escape_rate_hz": 40 / 60}
+        )
+        assert slow_escape == pytest.approx(fast_escape, rel=0.06)
+
+    def test_values_outside_the_clinical_range_are_clipped(self):
+        atrial, ventricular, _ = self._measured(
+            "atrial_flutter",
+            {"atrial_rate_hz": 900 / 60, "conduction_ratio": 9},
+        )
+        assert atrial == pytest.approx(350, rel=0.05)  # el techo del flutter
+        assert ventricular == pytest.approx(350 / 4, rel=0.08)  # el 4:1 máximo
+
+    def test_a_control_that_does_not_exist_in_this_rhythm_is_ignored(self):
+        """Un `conduction_ratio` en un ritmo sinusal no significa nada.
+        Guardarlo lo dejaría en la fila de la sesión como si hubiera hecho
+        algo, y un replay lo leería como si lo hubiera hecho."""
+        engine = EcgEngine(
+            rhythm_id="sinus_normal",
+            seed=1,
+            params=EngineParams(rhythm={"conduction_ratio": 3}),
+        )
+        assert dict(engine.params.rhythm) == {}
+
+    def test_changing_a_control_rebuilds_the_source_in_place(self):
+        """El reloj no se toca: el trazado sigue avanzando donde iba."""
+        engine = EcgEngine(rhythm_id="atrial_flutter", seed=4)
+        engine.generate(2500)
+        before_s = engine.t_s
+        engine.update_params(
+            EngineParams(rhythm={"atrial_rate_hz": 300 / 60, "conduction_ratio": 4})
+        )
+        assert engine.t_s == pytest.approx(before_s)
+        assert engine.params.heart_rate_hz * 60 == pytest.approx(75.0, rel=0.01)

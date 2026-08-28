@@ -158,3 +158,33 @@ def test_start_reinicia_la_farmacologia(manager: SimulationManager) -> None:
     manager.start("sinus_normal", EngineParams(heart_rate_hz=70 / 60), seed=3)
     assert manager.administrations == ()
     assert manager.pharmacology_payload()["active"] == []
+
+
+def test_una_fibrilacion_ventricular_publica_una_parada() -> None:
+    """El payload que ve el alumno tiene que decir «parada», no «120/75».
+
+    Es la sesión entera la que se comprueba aquí y no solo la función: el
+    perfil mecánico tiene que llegar desde el catálogo hasta el canal JSON,
+    y ese recorrido pasa por tres módulos.
+    """
+    manager = SimulationManager()
+    manager.start("ventricular_fibrillation", None, 1)
+    _advance(manager, 2.0)
+
+    physiology = manager.pharmacology_payload()["physiology"]
+    assert physiology["systolic_bp_mmhg"] == 0.0
+    assert physiology["diastolic_bp_mmhg"] == 0.0
+    assert physiology["mean_bp_mmhg"] == 0.0
+    assert physiology["respiratory_rate_bpm"] == 0.0
+    assert physiology["cardiac_output_l_min"] == 0.0
+
+
+def test_un_ritmo_que_bombea_conserva_sus_constantes() -> None:
+    manager = SimulationManager()
+    manager.start("sinus_normal", None, 1)
+    _advance(manager, 2.0)
+
+    physiology = manager.pharmacology_payload()["physiology"]
+    assert physiology["systolic_bp_mmhg"] > 0.0
+    assert physiology["respiratory_rate_bpm"] > 0.0
+    assert physiology["cardiac_output_l_min"] > 0.0
