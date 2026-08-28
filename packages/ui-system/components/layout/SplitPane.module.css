@@ -9,7 +9,19 @@
 }
 
 .pane {
+  /* Contenedor flex y no bloque, y esto NO es cosmetico: lo que va dentro
+     —el area de ECG— se mide a si misma para decidir el alto de sus tiras.
+     Con un `.pane` de bloque, el hijo tomaba la altura de su propio
+     contenido en vez de la del panel: la medida realimentaba lo que la
+     producia. El punto fijo de ese bucle es neutro, asi que el redondeo a
+     1/16 de pixel de cada ciclo bastaba para que la cuadricula fuera
+     encogiendose sola —normal, compacta, muy compacta— sin que nadie
+     tocara nada. Siendo flex, el hijo se ajusta al panel y la medida deja
+     de depender de si misma. */
+  display: flex;
+  flex-direction: column;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 

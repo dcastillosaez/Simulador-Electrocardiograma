@@ -82,6 +82,28 @@ describe("useLayoutMetrics", () => {
     expect(screen.getByTestId("compression").textContent).toBe("very-compact");
   });
 
+  it("ignora las migajas de subpixel que devuelve el navegador", () => {
+    // La regresion que este test impide: el navegador cuantiza el layout a
+    // 1/64 de pixel, asi que una medida vuelve como 599,9375 donde valia 600.
+    // Si esa migaja se acepta, y la altura medida depende aunque sea de lejos
+    // de lo que se dibuja con ella, cada ciclo resta un poco y la cuadricula
+    // encoge sola --normal, compacta, muy compacta-- sin que nadie toque la
+    // ventana. Medio pixel no cambia ninguna decision clinica.
+    const observer = spyResizeObserver();
+    render(<Probe leadCount={12} />);
+
+    act(() => observer.notify({ width: 900, height: 640 }));
+    const strip = screen.getByTestId("strip").textContent;
+
+    act(() => observer.notify({ width: 900, height: 639.9375 }));
+    expect(screen.getByTestId("strip").textContent).toBe(strip);
+
+    // Medio pixel se ignora; un pixel entero no: redimensionar la ventana
+    // tiene que seguir moviendo las tiras.
+    act(() => observer.notify({ width: 900, height: 620 }));
+    expect(screen.getByTestId("strip").textContent).not.toBe(strip);
+  });
+
   it("sigue observando tras el doble montaje de StrictMode", () => {
     // La regresion que este test existe para impedir: un `useEffect` de
     // desmontaje que desconecte el observador queda ejecutado por el ciclo

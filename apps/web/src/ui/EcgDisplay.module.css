@@ -1,6 +1,10 @@
 .display {
   display: flex;
-  flex: 1 1 auto;
+  /* Base 0 y no `auto`: con base automatica el punto de partida del reparto
+     es la altura del contenido —las tiras—, que a su vez sale de medir este
+     mismo elemento. Base 0 rompe esa dependencia: el alto lo pone el padre y
+     las tiras lo obedecen. */
+  flex: 1 1 0;
   min-height: 0;
   min-width: 0;
   /* El area de ECG NO scrollea. Un monitor clinico no scrollea, y perderlo
@@ -15,7 +19,7 @@
 .grid {
   position: relative;
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   /* --space-2: el hueco que descuenta computeLayoutMetrics entre columnas. */
   gap: var(--space-2);
   min-height: 0;

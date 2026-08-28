@@ -8,7 +8,18 @@ equivocado.
 
 from __future__ import annotations
 
-from .projection import baseline_from_params, project
+from .projection import (
+    PatientVitals,
+    baseline_from_params,
+    circulation_adjusted,
+    project,
+)
 from .service import PharmacologySession
 
-__all__ = ["PharmacologySession", "baseline_from_params", "project"]
+__all__ = [
+    "PatientVitals",
+    "PharmacologySession",
+    "baseline_from_params",
+    "circulation_adjusted",
+    "project",
+]

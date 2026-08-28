@@ -98,10 +98,17 @@ def test_engine_params_to_dict_is_the_inverse_shape():
 def test_server_message_builders_produce_the_documented_shape():
     session_id = uuid.uuid4()
     assert started_message(
-        session_id=session_id, seed=1, sample_rate_hz=500, channels=12
+        session_id=session_id,
+        seed=1,
+        sample_rate_hz=500,
+        channels=12,
+        params=EngineParams(heart_rate_hz=1.25),
     ) == {
         "type": "started", "session_id": str(session_id), "seed": 1,
         "sample_rate_hz": 500, "channels": 12,
+        # Los parámetros aplicados viajan con el acuse: sin ellos, la interfaz
+        # no sabe con qué acaba de arrancar hasta que alguien toca un control.
+        "params": engine_params_to_dict(EngineParams(heart_rate_hz=1.25)),
     }
     assert stopped_message(duration_s=12.5) == {
         "type": "stopped", "duration_s": 12.5,
@@ -163,14 +170,6 @@ def test_an_absurd_heart_rate_is_rejected_instead_of_clamped():
         parse_client_message(raw)
 
 
-def test_a_heart_rate_of_zero_is_rejected():
-    raw = json.dumps({
-        "type": "start", "rhythm_id": "x", "params": {"heart_rate_hz": 0.0},
-    })
-    with pytest.raises(ClientMessageError):
-        parse_client_message(raw)
-
-
 def test_free_text_has_a_ceiling():
     # Sin tope, un cliente escribe megabytes en la base de datos --las notas se
     # persisten con la administracion-- y nadie se lo impide.
@@ -212,3 +211,103 @@ def test_the_usual_parameters_still_pass():
     message = parse_client_message(raw)
     assert isinstance(message, StartMessage)
     assert message.params.noise.emg_v == 0.00002
+
+
+def test_a_rhythm_without_rate_can_be_started():
+    """La fibrilación ventricular no tiene frecuencia, y cero es su valor.
+
+    La regresión que este test impide: con `gt=0` en el esquema, el único
+    ritmo cuya frecuencia por catálogo es 0.0 —la FV— no se podía arrancar.
+    El cliente mandaba el valor por defecto del propio catálogo, el servidor
+    respondía `INVALID_PARAMS` y la simulación seguía emitiendo el ritmo
+    anterior: la interfaz decía «Fibrilación ventricular» sobre el trazado de
+    otra cosa, que es lo peor que puede hacer un simulador clínico.
+
+    Cero no es peligroso aguas abajo: la fuente de la FV ignora la frecuencia
+    y cualquier otro ritmo recorta el valor a su rango antes de usarlo.
+    """
+    raw = json.dumps({
+        "type": "start",
+        "rhythm_id": "ventricular_fibrillation",
+        "params": {"heart_rate_hz": 0.0},
+    })
+    message = parse_client_message(raw)
+    assert isinstance(message, StartMessage)
+    assert message.params.heart_rate_hz == 0.0
+
+
+def test_a_negative_rate_is_still_rejected():
+    """Cero es un hecho clínico; por debajo de cero no hay nada que
+    representar."""
+    raw = json.dumps({
+        "type": "start",
+        "rhythm_id": "sinus_normal",
+        "params": {"heart_rate_hz": -1.0},
+    })
+    with pytest.raises(ClientMessageError):
+        parse_client_message(raw)
+
+
+def test_the_rhythm_controls_travel_with_the_parameters():
+    """El flutter manda su aurícula y su grado de bloqueo, no una frecuencia.
+
+    Es lo que sustituye al control deshabilitado: sin este mapa, el cliente
+    solo podía decir «150 lpm» y el servidor lo ignoraba.
+    """
+    raw = json.dumps({
+        "type": "start",
+        "rhythm_id": "atrial_flutter",
+        "params": {
+            "heart_rate_hz": 2.5,
+            "rhythm": {"atrial_rate_hz": 5.0, "conduction_ratio": 3},
+        },
+    })
+    message = parse_client_message(raw)
+    assert message.params.rhythm == {"atrial_rate_hz": 5.0, "conduction_ratio": 3}
+    assert message.params.to_engine_params().rhythm["conduction_ratio"] == 3
+
+
+def test_a_rhythm_map_with_absurd_size_is_refused():
+    raw = json.dumps({
+        "type": "start",
+        "rhythm_id": "sinus_normal",
+        "params": {
+            "heart_rate_hz": 1.2,
+            "rhythm": {f"p{i}": 1.0 for i in range(50)},
+        },
+    })
+    with pytest.raises(ClientMessageError):
+        parse_client_message(raw)
+
+
+def test_the_rhythm_controls_come_back_in_the_updated_message():
+    """Van a la fila de la sesión y al mensaje de vuelta: sin ellos, un
+    replay reconstruiría un flutter 2:1 donde hubo uno 4:1."""
+    params = EngineParams(
+        heart_rate_hz=1.25, rhythm={"atrial_rate_hz": 5.0, "conduction_ratio": 4}
+    )
+    payload = engine_params_to_dict(params)
+    assert payload["rhythm"] == {"atrial_rate_hz": 5.0, "conduction_ratio": 4}
+
+
+def test_a_rhythm_without_controls_does_not_carry_an_empty_map():
+    """Los doce ritmos de siempre siguen produciendo exactamente el mismo
+    payload que antes: lo que no existe no ocupa sitio."""
+    assert "rhythm" not in engine_params_to_dict(EngineParams(heart_rate_hz=1.2))
+
+
+def test_the_start_acknowledgement_carries_the_resolved_pulse():
+    """En un flutter, el pulso no es lo que el cliente mandó: es lo que sale
+    de su aurícula y su grado de bloqueo. El acuse lo lleva ya resuelto."""
+    payload = started_message(
+        session_id=uuid.uuid4(),
+        seed=1,
+        sample_rate_hz=500,
+        channels=12,
+        params=EngineParams(
+            heart_rate_hz=100 / 60,
+            rhythm={"atrial_rate_hz": 300 / 60, "conduction_ratio": 3},
+        ),
+    )
+    assert payload["params"]["heart_rate_hz"] == pytest.approx(100 / 60)
+    assert payload["params"]["rhythm"]["conduction_ratio"] == 3

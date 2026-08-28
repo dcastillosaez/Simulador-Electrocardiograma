@@ -11,9 +11,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Protocol, Sequence, runtime_checkable
+from typing import TYPE_CHECKING, Mapping, Protocol, Sequence, runtime_checkable
 
 import numpy as np
+
+if TYPE_CHECKING:  # pragma: no cover - solo para el comprobador de tipos
+    from .patient import PatientSpec
 
 LEAD_ORDER: tuple[str, ...] = (
     "I", "II", "III", "aVR", "aVL", "aVF",
@@ -135,6 +138,32 @@ class EngineParams:
     noise: NoiseParams = field(default_factory=NoiseParams)
     variability: VariabilityParams = field(default_factory=VariabilityParams)
     axis: AxisParams = field(default_factory=AxisParams)
+    rhythm: Mapping[str, float] = field(default_factory=dict)
+    """Los mandos propios del ritmo elegido, si tiene alguno.
+
+    Un mapa abierto y no campos fijos, por lo mismo que `values` en el canal
+    de medidas: lo que un ritmo necesita gobernar es cosa suya y no del
+    contrato. Un flutter declara su aurícula y su grado de bloqueo, un
+    bloqueo completo su sinusal y su escape, y los demás no declaran nada y
+    siguen manejándose enteros con `heart_rate_hz`.
+
+    Los nombres y los rangos válidos los publica el catálogo en
+    `rhythm_parameters`; lo que llegue aquí sin estar declarado se ignora.
+    """
+
+    patient: "PatientSpec | None" = None
+    """La especificación de un paciente inventado, o `None` para los ritmos
+    del catálogo.
+
+    Viaja con los parámetros y no con la definición del ritmo porque es
+    editable en caliente: mover el PR de un paciente personalizado y ver el
+    trazado cambiar es el sentido entero de la función. Los doce ritmos del
+    catálogo lo dejan a `None` y no se enteran de que existe — su fuente se
+    construye igual que siempre.
+
+    El tipo llega como texto y no como import: `patient` depende de
+    conducción, trenes y plantillas, y todos ellos dependen de este módulo.
+    """
 
 
 @runtime_checkable

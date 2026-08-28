@@ -6,6 +6,8 @@ from dataclasses import replace
 
 from .definitions import (
     AXIS_PARAMETER_RANGES,
+    CUSTOM_PATIENT_ID,
+    AtrialActivity,
     DEFINITIONS,
     ParameterRange,
     RhythmCategory,
@@ -30,7 +32,9 @@ _BY_ID: dict[str, RhythmDefinition] = {d.rhythm_id: d for d in _ALL}
 RHYTHM_IDS: tuple[str, ...] = tuple(_BY_ID)
 
 __all__ = [
+    "CUSTOM_PATIENT_ID",
     "RHYTHM_IDS",
+    "AtrialActivity",
     "ParameterRange",
     "RhythmCategory",
     "RhythmDefinition",

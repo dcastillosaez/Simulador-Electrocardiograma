@@ -25,7 +25,7 @@ from pharmacology_engine import DrugAdministration, PharmacologyError, Route
 from .cardiac import cardiac_events_payload
 from .errors import InvalidParamsError, RhythmNotFoundError
 from .measuring import MeasurementWindow, measurements_payload
-from .pharmacology import PharmacologySession
+from .pharmacology import PatientVitals, PharmacologySession
 
 CHUNK_SAMPLES = 50  # 100 ms a 500 Hz — la cadencia de streaming del diseño
 _SEED_UPPER_BOUND = 2**31
@@ -64,12 +64,14 @@ class SimulationManager:
         # administraciones, no el resultado de mezclarlas.
         self._command_params: EngineParams | None = None
         self._pharmacology: PharmacologySession | None = None
+        self._vitals: PatientVitals | None = None
 
     def start(
         self,
         rhythm_id: str,
         params: EngineParams | None,
         seed: int | None,
+        vitals: PatientVitals | None = None,
     ) -> uuid.UUID:
         resolved_seed = (
             seed if seed is not None else secrets.randbelow(_SEED_UPPER_BOUND)
@@ -95,7 +97,13 @@ class SimulationManager:
         # 300 lpm dejaría un basal farmacológico que el motor de señal nunca
         # llegó a usar.
         self._command_params = self._engine.params
-        self._pharmacology = PharmacologySession(self._command_params)
+        # El perfil mecánico viaja con la sesión farmacológica: es lo que hace
+        # que una fibrilación ventricular publique una parada y no las
+        # constantes de un paciente que camina.
+        self._vitals = vitals
+        self._pharmacology = PharmacologySession(
+            self._command_params, self._profile(), vitals
+        )
         self.state = SimulationState.RUNNING
         return self.session_id
 
@@ -140,12 +148,19 @@ class SimulationManager:
         assert self._engine is not None
         return self._engine.t_s
 
-    def update(self, params: EngineParams) -> EngineParams:
+    def update(
+        self, params: EngineParams, vitals: PatientVitals | None = None
+    ) -> EngineParams:
         assert self._engine is not None
         self._engine.update_params(params)
         # El recorte lo hace el motor, así que el mando se relee de él.
         self._command_params = self._engine.params
-        self.pharmacology.rebase(self._command_params)
+        if vitals is not None:
+            self._vitals = vitals
+        # Las constantes de un paciente inventado se editan en caliente igual
+        # que sus intervalos: mover su tensión basal tiene que llegar al panel
+        # sin reiniciar la sesión.
+        self.pharmacology.rebase(self._command_params, self._vitals)
         # Reaplicar de inmediato: sin esto, un `update` con fármacos a bordo
         # dejaría el motor generando con la frecuencia de mando pelada hasta
         # el siguiente chunk, y se vería un salto en el trazado.
@@ -232,21 +247,35 @@ class SimulationManager:
     def measurements(self) -> dict | None:
         """Medidas de la ventana actual, o `None` si aun no hay senal.
 
-        El calculo es del motor; aqui solo se le da la ventana y el hecho de
-        catalogo que el motor no puede deducir de la senal: si el ritmo tiene
-        siquiera un PR que medir (un flutter no lo tiene, y su relacion F-QRS
-        es tan regular que ningun guardarrail estadistico lo delataria).
+        El calculo es del motor; aqui solo se le dan la ventana y los dos
+        hechos de catalogo que el motor no puede deducir de la senal: si el
+        ritmo tiene siquiera un PR que medir (un flutter no lo tiene, y su
+        relacion F-QRS es tan regular que ningun guardarrail estadistico lo
+        delataria) y si su actividad auricular se cuenta (las ondas f de una
+        fibrilacion se generan, pero no se miden).
         """
         if self._engine is None or self._window is None:
             return None
+        definition = get_rhythm(self.rhythm_id)
         return measurements_payload(
             source=self._engine.source,
             window=self._window,
             t_end_s=self._engine.t_s,
-            pr_is_measurable=get_rhythm(self.rhythm_id).pr_is_measurable,
+            pr_is_measurable=definition.pr_is_measurable,
+            atrial_activity=definition.atrial_activity,
         )
 
     def _profile(self) -> MechanicalProfile:
+        """El perfil mecánico vigente.
+
+        En un paciente inventado sale de su propia descripción: quitarle la
+        aurícula y el escape lo deja sin latidos, y eso es una asistolia
+        aunque el catálogo diga que el ritmo personalizado bombea. La spec es
+        la única que puede saberlo.
+        """
+        patient = self._command_params.patient if self._command_params else None
+        if patient is not None:
+            return patient.mechanical_profile
         return get_rhythm(self.rhythm_id).mechanical_profile
 
     def cardiac_events(self) -> dict | None:

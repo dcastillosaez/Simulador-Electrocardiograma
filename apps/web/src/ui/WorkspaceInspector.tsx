@@ -5,6 +5,24 @@ import type { MeasurementSession } from "../measure/session";
 import type { SnapMode } from "../measure/snap";
 import type { ToolId } from "../measure/tools";
 import type { SessionState } from "../simulation-runtime/session-runtime";
+import type { AtrialActivityName } from "../types/ws-messages";
+
+/** Lo que se escribe donde iría la frecuencia auricular cuando no hay ninguna
+ * que contar. No es un hueco a secas: en una fibrilación, «fibrilatoria» es
+ * el hallazgo, y un guion sin más se lee como un fallo del simulador. */
+const ATRIAL_ACTIVITY_LABEL: Record<AtrialActivityName, string | null> = {
+  organized: null,
+  fibrillatory: "Fibrilatoria",
+  absent: "Ausente",
+};
+
+/** El motor publica la relación en su forma canónica; aquí solo se traduce.
+ * Los ratios («2:1», «4:3») pasan tal cual: se escriben igual en cualquier
+ * idioma. */
+const AV_RELATIONSHIP_LABEL: Record<string, string> = {
+  dissociated: "Disociada",
+  variable: "Variable",
+};
 
 const GAIN_CLIPPING_HINT =
   "La ganancia elegida no cabe en el alto de tira disponible: el trazo puede " +
@@ -22,8 +40,12 @@ export interface WorkspaceInspectorProps {
   gainFits: boolean;
   exportError: string | null;
   rhythmName: string | null;
-  bpm: number | null;
   axisDeg: number | null;
+  /** Qué hay entre QRS y QRS. Solo explica el hueco de la frecuencia
+   * auricular; no es una medida. */
+  atrialActivity: AtrialActivityName | null;
+  /** Relación entre las dos frecuencias, como la publica el motor. */
+  avRelationship: string | null;
   measurements: Record<string, number | null> | null;
   /** Estado fisiológico publicado por el motor farmacológico. `null` hasta
    * la primera publicación. Es un canal distinto del de medidas y por eso
@@ -50,8 +72,9 @@ export function WorkspaceInspector({
   gainFits,
   exportError,
   rhythmName,
-  bpm,
   axisDeg,
+  atrialActivity,
+  avRelationship,
   measurements,
   physiology,
   measureSession,
@@ -70,6 +93,26 @@ export function WorkspaceInspector({
     return value === undefined || value === null
       ? { value: "", unavailable: true as const }
       : { value: String(Math.round(value)), unavailable: false as const };
+  };
+
+  /** La frecuencia auricular, que a veces no es un número.
+   *
+   * Tres respuestas y las tres distintas: el número cuando la aurícula está
+   * organizada, la palabra que explica por qué no lo hay —«Fibrilatoria»,
+   * «Ausente»— cuando el ritmo no la tiene, y el hueco mientras no ha
+   * llegado ninguna medida. */
+  const atrialRate = () => {
+    const label = atrialActivity ? ATRIAL_ACTIVITY_LABEL[atrialActivity] : null;
+    if (label) return { value: label, unit: undefined, unavailable: false as const };
+    return measured("atrial_rate_bpm");
+  };
+
+  const avConduction = () => {
+    if (avRelationship === null) return { value: "", unavailable: true as const };
+    return {
+      value: AV_RELATIONSHIP_LABEL[avRelationship] ?? avRelationship,
+      unavailable: false as const,
+    };
   };
 
   /** Una constante del estado fisiológico publicado por la farmacología.
@@ -147,12 +190,24 @@ export function WorkspaceInspector({
         <Section title="Ritmo">
           <MetricGrid>
             <Metric label="Ritmo" value={rhythmName ?? ""} unavailable={rhythmName === null} />
-            <Metric
-              label="FC"
-              value={bpm === null ? "" : String(bpm)}
-              unit="lpm"
-              unavailable={bpm === null}
-            />
+            {/* Dos frecuencias y no una. En un ritmo sinusal dicen lo mismo y
+                la distinción parece pedante; en un bloqueo AV completo la
+                aurícula va a 75 y el ventrículo a 40, y «la FC» es un número
+                que no describe a nadie. Van siempre las dos, también cuando
+                coinciden: buscar las dos es el hábito que se está enseñando.
+
+                Son las MEDIDAS sobre la señal, no la frecuencia de mando del
+                control de la izquierda. Antes aquí se mostraba el mando, y en
+                un bloqueo completo eso significaba anunciar 75 lpm para un
+                paciente con pulso de 40. */}
+            <Metric label="FC auricular" unit="lpm" {...atrialRate()} />
+            <Metric label="FC ventricular" unit="lpm" {...measured("ventricular_rate_bpm")} />
+            {/* La lectura que convierte dos números en un diagnóstico: el 2:1
+                del flutter, la disociación de un bloqueo completo o de una
+                TV. La calcula el motor sobre los eventos —no comparando las
+                dos cifras—, porque dos frecuencias iguales por casualidad no
+                son una conducción 1:1. */}
+            <Metric label="Cond. AV" {...avConduction()} />
             <Metric
               label="Eje"
               value={

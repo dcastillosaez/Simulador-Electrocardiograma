@@ -9,10 +9,11 @@ Trabaja exclusivamente en unidades SI: segundos, voltios y hercios.
     signal = engine.generate(500)   # (12, 500) en voltios
 """
 
-from .catalog import get_rhythm, list_rhythms
+from .catalog import CUSTOM_PATIENT_ID, AtrialActivity, get_rhythm, list_rhythms
 from .engine import EcgEngine
-from .measurements import Measurements, measure, qtc_bazett_s
+from .measurements import Measurements, av_relationship, measure, qtc_bazett_s
 from .mechanics import Chamber, ContractionMode, MechanicalProfile
+from .patient import AvConduction, PatientSpec, build_patient_source
 from .types import (
     DEFAULT_SAMPLE_RATE_HZ,
     LEAD_ORDER,
@@ -25,6 +26,11 @@ from .types import (
 __version__ = "1.0.0"
 
 __all__ = [
+    "AtrialActivity",
+    "AvConduction",
+    "CUSTOM_PATIENT_ID",
+    "PatientSpec",
+    "build_patient_source",
     "MechanicalProfile",
     "ContractionMode",
     "Chamber",
@@ -38,6 +44,7 @@ __all__ = [
     "VariabilityParams",
     "get_rhythm",
     "list_rhythms",
+    "av_relationship",
     "measure",
     "qtc_bazett_s",
 ]

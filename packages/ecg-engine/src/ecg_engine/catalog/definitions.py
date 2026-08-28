@@ -26,9 +26,30 @@ from ..conduction import (
     WenckebachPR,
 )
 from ..overlays import ST_ELEVATION_INFERIOR
+from ..patient import PatientSpec, build_patient_source
 from ..rhythm import EventTrain, RegularTrain
 from ..sources import BeatBasedSource, VentricularFibrillationSource
 from ..types import EventKind, SignalSource, VariabilityParams
+
+
+class AtrialActivity(str, Enum):
+    """Qué hay en la línea de base entre QRS y QRS.
+
+    Es un hecho del ritmo y no de la señal, por la misma razón que
+    `pr_is_measurable`: contar los eventos auriculares que el motor genera da
+    siempre un número, y en una fibrilación ese número —unas 420 por
+    minuto— no es una frecuencia auricular, es el ruido de una aurícula que
+    no se contrae. Un informe dice «actividad fibrilatoria», nunca «frecuencia
+    auricular de 420 lpm».
+
+    `ORGANIZED` incluye el flutter: sus ondas F son regulares, se cuentan y
+    su frecuencia —300 por minuto— es un hallazgo diagnóstico de primera
+    línea.
+    """
+
+    ORGANIZED = "organized"
+    FIBRILLATORY = "fibrillatory"
+    ABSENT = "absent"
 
 
 class RhythmCategory(str, Enum):
@@ -37,6 +58,10 @@ class RhythmCategory(str, Enum):
     VENTRICULAR = "ventricular"
     BLOCK = "block"
     ISCHEMIA = "ischemia"
+    CUSTOM = "custom"
+    """El paciente personalizado. Categoría propia y no «sinus» porque no es
+    un hallazgo clínico: es un hueco que el usuario rellena, y la interfaz
+    tiene que poder separarlo de los ritmos auditados."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,22 +112,73 @@ class RhythmDefinition:
     disociadas. Deducirlo de la dispersión de los datos —que fue el primer
     intento— publicaba un PR de 49,8 ms para una FA y de 140 ms para un
     flutter: números perfectamente calculados y clínicamente inexistentes.
+
+    `atrial_activity` es lo mismo aplicado a la frecuencia auricular: dice si
+    lo que hay entre QRS y QRS se cuenta o no se cuenta. Ver `AtrialActivity`.
     """
 
     rhythm_id: str
     display_name: str
     category: RhythmCategory
-    build_source: Callable[[np.random.Generator], SignalSource]
+    build_source: SourceFactory
     default_parameters: Mapping[str, float]
     editable_parameters: Mapping[str, ParameterRange]
     ventricular_rate_hz: float
     pr_is_measurable: bool
     clinical_description: str
     references: tuple[str, ...]
+    # Los ocho ritmos con aurícula organizada no lo declaran: solo la FA y
+    # la FV escriben algo.
+    atrial_activity: AtrialActivity = AtrialActivity.ORGANIZED
+    #: Los mandos propios de este ritmo, además de la frecuencia y el eje.
+    #:
+    #: Un ritmo con un solo marcapasos gobernable se maneja entero con
+    #: `heart_rate_hz` y deja esto vacío. Los que tienen dos —un flutter con
+    #: su aurícula y su grado de bloqueo, un bloqueo completo con su sinusal
+    #: y su escape— no caben en un número: forzarlos producía el control
+    #: deshabilitado que la interfaz enseñaba como «150 lpm (fija)», que era
+    #: cierto en el programa y falso en la clínica.
+    rhythm_parameters: Mapping[str, ParameterRange] = field(default_factory=dict)
+    #: De dónde sale el pulso cuando no es `heart_rate_hz`.
+    #:
+    #: `heart_rate_hz` significa lo mismo en todo el sistema: el pulso
+    #: ventricular, que es lo que un clínico llama frecuencia cardíaca y lo
+    #: que toma la farmacología como basal. En los ritmos de arriba ese pulso
+    #: es una consecuencia —la aurícula partida por el grado de bloqueo, el
+    #: escape de un bloqueo completo— y esta función es la que lo calcula.
+    #: Sin ella harían falta dos verdades para el mismo número.
+    derived_rate_hz: Callable[[Mapping[str, float]], float] | None = None
     allowed_overlays: tuple[str, ...] = field(default=())
     # Los ocho ritmos con mecánica normal no lo declaran: solo los cuatro
     # que se apartan escriben algo.
     mechanical_profile: MechanicalProfile = field(default=NORMAL_PROFILE)
+
+
+CUSTOM_PATIENT_ID: str = "custom_patient"
+"""Identificador del paciente personalizado.
+
+Es una constante y no un literal repartido porque tres capas preguntan por
+él: el motor, para saber que la fuente sale de una especificación; la API,
+para exigir esa especificación al arrancar; y la interfaz, para abrir el
+editor en vez de los controles normales.
+"""
+
+
+#: Una fábrica de fuentes recibe su generador y los mandos propios del ritmo.
+#:
+#: El segundo argumento es opcional y casi todas las fábricas lo ignoran: un
+#: ritmo sinusal no tiene nada que leer ahí. Lo usan las tres que no caben en
+#: una sola frecuencia.
+SourceFactory = Callable[..., SignalSource]
+
+
+def _param(
+    params: Mapping[str, float] | None, name: str, default: float
+) -> float:
+    """Un mando del ritmo, o su valor de catálogo si nadie lo ha tocado."""
+    if params is None or name not in params:
+        return default
+    return float(params[name])
 
 
 def _bpm(value: float) -> float:
@@ -122,10 +198,10 @@ def _atrial_train(
     )
 
 
-def _sinus_like(
-    rate_bpm: float, pr_s: float = 0.16
-) -> Callable[[np.random.Generator], SignalSource]:
-    def build(rng: np.random.Generator) -> SignalSource:
+def _sinus_like(rate_bpm: float, pr_s: float = 0.16) -> SourceFactory:
+    def build(
+        rng: np.random.Generator, params: Mapping[str, float] | None = None
+    ) -> SignalSource:
         return BeatBasedSource(
             atrial=_atrial_train(_bpm(rate_bpm), rng),
             conduction=FixedPR(pr_s=pr_s),
@@ -136,7 +212,9 @@ def _sinus_like(
     return build
 
 
-def _build_atrial_fibrillation(rng: np.random.Generator) -> SignalSource:
+def _build_atrial_fibrillation(
+    rng: np.random.Generator, params: Mapping[str, float] | None = None
+) -> SignalSource:
     # Dos generadores hijos independientes, y esto no es un detalle de
     # estilo. Aquí hay dos fuentes de aleatoriedad —el tren de ondas f y la
     # conducción irregular del nodo AV— y ambas cachean su línea temporal
@@ -167,18 +245,33 @@ def _build_atrial_fibrillation(rng: np.random.Generator) -> SignalSource:
     )
 
 
-def _build_atrial_flutter(rng: np.random.Generator) -> SignalSource:
+def _build_atrial_flutter(
+    rng: np.random.Generator, params: Mapping[str, float] | None = None
+) -> SignalSource:
+    """El circuito auricular y el filtro del nodo AV, cada uno por su lado.
+
+    Son dos hechos independientes y por eso son dos mandos. La macrorreentrada
+    gira a su propia velocidad —entre 250 y 350 por minuto— y el nodo AV deja
+    pasar una de cada dos, tres o cuatro. Lo que se ve en el trazado, esos 150
+    lpm de libro, no es ninguno de los dos: es su cociente.
+    """
     return BeatBasedSource(
         atrial=RegularTrain(
-            kind=EventKind.ATRIAL, template_id="flutter_f", rate_hz=_bpm(300)
+            kind=EventKind.ATRIAL,
+            template_id="flutter_f",
+            rate_hz=_param(params, "atrial_rate_hz", _bpm(300)),
         ),
-        conduction=FixedRatioBlock(ratio=2, pr_s=0.14),
+        conduction=FixedRatioBlock(
+            ratio=int(_param(params, "conduction_ratio", 2)), pr_s=0.14
+        ),
         variability=VariabilityParams(),
         rng=rng,
     )
 
 
-def _build_ventricular_tachycardia(rng: np.random.Generator) -> SignalSource:
+def _build_ventricular_tachycardia(
+    rng: np.random.Generator, params: Mapping[str, float] | None = None
+) -> SignalSource:
     return BeatBasedSource(
         # Las aurículas siguen en ritmo sinusal, a su propio paso y sin
         # relación con el foco ventricular: eso *es* la disociación
@@ -193,21 +286,30 @@ def _build_ventricular_tachycardia(rng: np.random.Generator) -> SignalSource:
             kind=EventKind.ATRIAL, template_id="sinus_p", rate_hz=_bpm(75)
         ),
         conduction=CompleteBlock(),
+        # Lo que manda aquí es el foco ventricular, y su velocidad separa una
+        # TV lenta de una que degenera: entre 100 y 250 hay tres decisiones
+        # clínicas distintas.
         escape=RegularTrain(
-            kind=EventKind.VENTRICULAR, template_id="wide_qrst", rate_hz=_bpm(180)
+            kind=EventKind.VENTRICULAR,
+            template_id="wide_qrst",
+            rate_hz=_param(params, "ventricular_rate_hz", _bpm(180)),
         ),
         variability=VariabilityParams(),
         rng=rng,
     )
 
 
-def _build_ventricular_fibrillation(rng: np.random.Generator) -> SignalSource:
+def _build_ventricular_fibrillation(
+    rng: np.random.Generator, params: Mapping[str, float] | None = None
+) -> SignalSource:
     return VentricularFibrillationSource(
         coarseness=0.7, amplitude_v=0.00040, dominant_hz=6.0, rng=rng
     )
 
 
-def _build_av_block_second(rng: np.random.Generator) -> SignalSource:
+def _build_av_block_second(
+    rng: np.random.Generator, params: Mapping[str, float] | None = None
+) -> SignalSource:
     return BeatBasedSource(
         atrial=_atrial_train(_bpm(75), rng),
         conduction=WenckebachPR(
@@ -218,19 +320,31 @@ def _build_av_block_second(rng: np.random.Generator) -> SignalSource:
     )
 
 
-def _build_av_block_third(rng: np.random.Generator) -> SignalSource:
+def _build_av_block_third(
+    rng: np.random.Generator, params: Mapping[str, float] | None = None
+) -> SignalSource:
+    """Dos marcapasos que no se hablan, y por eso dos mandos.
+
+    La sinusal sigue a lo suyo mientras el pulso lo pone el escape, y de dónde
+    salga ese escape cambia el pronóstico: uno de la unión ronda los 45 y uno
+    ventricular baja de 30. Un solo control no podía decir eso.
+    """
     return BeatBasedSource(
-        atrial=_atrial_train(_bpm(75), rng),
+        atrial=_atrial_train(_param(params, "atrial_rate_hz", _bpm(75)), rng),
         conduction=CompleteBlock(),
         escape=RegularTrain(
-            kind=EventKind.VENTRICULAR, template_id="escape_qrst", rate_hz=_bpm(40)
+            kind=EventKind.VENTRICULAR,
+            template_id="escape_qrst",
+            rate_hz=_param(params, "escape_rate_hz", _bpm(40)),
         ),
         variability=VariabilityParams(),
         rng=rng,
     )
 
 
-def _build_stemi_inferior(rng: np.random.Generator) -> SignalSource:
+def _build_stemi_inferior(
+    rng: np.random.Generator, params: Mapping[str, float] | None = None
+) -> SignalSource:
     return BeatBasedSource(
         atrial=_atrial_train(_bpm(78), rng),
         conduction=FixedPR(pr_s=0.16),
@@ -253,6 +367,30 @@ def _fixed(rate_hz: float) -> ParameterRange:
     deshabilitado.
     """
     return ParameterRange(minimum=rate_hz, maximum=rate_hz, default=rate_hz)
+
+
+#: Los mandos del flutter. La aurícula gira entre 250 y 350 —fuera de ahí ya
+#: no es un flutter típico— y el nodo AV deja pasar una de cada dos, tres o
+#: cuatro; el 1:1 es excepcional y peligroso, y el 5:1 no se ve.
+FLUTTER_PARAMETERS: Mapping[str, ParameterRange] = {
+    "atrial_rate_hz": ParameterRange(_bpm(250), _bpm(350), _bpm(300)),
+    "conduction_ratio": ParameterRange(2.0, 4.0, 2.0),
+}
+
+#: El foco de una taquicardia ventricular. Por debajo de 100 es un ritmo
+#: idioventricular acelerado y por encima de 250 es un flutter ventricular:
+#: los dos extremos son otra cosa, y el catálogo los deja fuera.
+VENTRICULAR_TACHYCARDIA_PARAMETERS: Mapping[str, ParameterRange] = {
+    "ventricular_rate_hz": ParameterRange(_bpm(100), _bpm(250), _bpm(180)),
+}
+
+#: Los dos marcapasos de un bloqueo completo. El escape llega a 45 si nace en
+#: la unión y baja de 30 si nace en el ventrículo; esa diferencia es la que
+#: decide si el paciente está mareado o inconsciente.
+AV_BLOCK_THIRD_PARAMETERS: Mapping[str, ParameterRange] = {
+    "atrial_rate_hz": ParameterRange(_bpm(60), _bpm(100), _bpm(75)),
+    "escape_rate_hz": ParameterRange(_bpm(20), _bpm(45), _bpm(40)),
+}
 
 
 AXIS_PARAMETER_RANGES: Mapping[str, ParameterRange] = {
@@ -340,6 +478,10 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         references=(
             "Hindricks G, et al. 2020 ESC Guidelines for atrial fibrillation",
         ),
+        # Las ondas f del motor van a 420 por minuto y con jitter alto. Ese
+        # número existe en el generador, no en la clínica: nadie mide la
+        # frecuencia auricular de una FA.
+        atrial_activity=AtrialActivity.FIBRILLATORY,
         # La aurícula no bombea; el ventrículo sí, aunque irregular.
         mechanical_profile=MechanicalProfile(
             atrial_mode=ContractionMode.FIBRILLATING,
@@ -355,7 +497,15 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         category=RhythmCategory.SUPRAVENTRICULAR,
         build_source=_build_atrial_flutter,
         default_parameters={"heart_rate_hz": _bpm(150)},
+        # La frecuencia ventricular no se manda: se deduce de los dos mandos
+        # de abajo. El rango sigue declarado como fijo porque nadie escribe
+        # este número — lo escribe la aritmética.
         editable_parameters={"heart_rate_hz": _fixed(_bpm(150))},
+        rhythm_parameters=FLUTTER_PARAMETERS,
+        derived_rate_hz=lambda p: (
+            _param(p, "atrial_rate_hz", _bpm(300))
+            / max(1.0, _param(p, "conduction_ratio", 2.0))
+        ),
         ventricular_rate_hz=_bpm(150),
         pr_is_measurable=False,
         clinical_description=(
@@ -403,6 +553,8 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         build_source=_build_ventricular_tachycardia,
         default_parameters={"heart_rate_hz": _bpm(180)},
         editable_parameters={"heart_rate_hz": _fixed(_bpm(180))},
+        rhythm_parameters=VENTRICULAR_TACHYCARDIA_PARAMETERS,
+        derived_rate_hz=lambda p: _param(p, "ventricular_rate_hz", _bpm(180)),
         ventricular_rate_hz=_bpm(180),
         pr_is_measurable=False,
         clinical_description=(
@@ -441,6 +593,9 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
             "Zeppenfeld K, et al. 2022 ESC Guidelines for ventricular "
             "arrhythmias",
         ),
+        # Su fuente no emite eventos: no hay onda que contar en ninguna de
+        # las dos cámaras.
+        atrial_activity=AtrialActivity.ABSENT,
         # No hay sístole: solo temblor. Es la diferencia entre un
         # corazón que bombea y uno que no.
         mechanical_profile=MechanicalProfile(
@@ -494,8 +649,14 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         display_name="Bloqueo AV completo",
         category=RhythmCategory.BLOCK,
         build_source=_build_av_block_third,
-        default_parameters={"heart_rate_hz": _bpm(75)},
-        editable_parameters={"heart_rate_hz": _fixed(_bpm(75))},
+        default_parameters={"heart_rate_hz": _bpm(40)},
+        # El pulso de este ritmo es el escape, no la sinusal: `heart_rate_hz`
+        # vale 40, no 75. Publicar 75 aquí sería anunciar la frecuencia
+        # auricular de un paciente cuyo pulso es 40 — el error que el panel
+        # de las dos frecuencias existe para no cometer.
+        editable_parameters={"heart_rate_hz": _fixed(_bpm(40))},
+        rhythm_parameters=AV_BLOCK_THIRD_PARAMETERS,
+        derived_rate_hz=lambda p: _param(p, "escape_rate_hz", _bpm(40)),
         ventricular_rate_hz=_bpm(40),
         pr_is_measurable=False,
         clinical_description=(
@@ -505,6 +666,32 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
         ),
         references=(
             "Glikson M, et al. 2021 ESC Guidelines on cardiac pacing",
+        ),
+    ),
+    RhythmDefinition(
+        rhythm_id=CUSTOM_PATIENT_ID,
+        display_name="Paciente personalizado",
+        category=RhythmCategory.CUSTOM,
+        # Sin especificación, un adulto sano: quien abre el editor parte de
+        # alguien normal y lo enferma. La `PatientSpec` real llega con los
+        # parámetros de la sesión y sustituye a esta fuente por completo.
+        build_source=lambda rng, params=None: build_patient_source(
+            PatientSpec(), rng
+        ),
+        default_parameters={"heart_rate_hz": _bpm(70)},
+        editable_parameters={
+            "heart_rate_hz": ParameterRange(_bpm(0), _bpm(400), _bpm(70))
+        },
+        ventricular_rate_hz=_bpm(70),
+        pr_is_measurable=True,
+        clinical_description=(
+            "Paciente definido por el usuario: frecuencias, conducción "
+            "auriculoventricular, intervalos y morfología se fijan a mano. No "
+            "es un hallazgo clínico auditado, sino el material con el que "
+            "construir uno."
+        ),
+        references=(
+            "Sin referencia clínica: el contenido lo aporta quien lo configura",
         ),
     ),
     RhythmDefinition(

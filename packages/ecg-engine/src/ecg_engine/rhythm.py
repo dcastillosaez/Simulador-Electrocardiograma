@@ -81,6 +81,27 @@ class EventTrain:
 
 
 @dataclass(frozen=True, slots=True)
+class SilentTrain:
+    """Un tren que no emite nada.
+
+    Existe para poder decir «esta cámara no despolariza» sin inventar un caso
+    especial aguas abajo: `BeatBasedSource` sigue teniendo un tren auricular,
+    la política de conducción sigue recibiendo una lista, y quien late es el
+    escape. Es la forma que toma una aurícula parada —y, el día que llegue,
+    la asistolia completa— sin un solo `if` fuera de aquí.
+    """
+
+    kind: EventKind = EventKind.ATRIAL
+
+    def set_rate_hz(self, rate_hz: float) -> None:
+        """Sin eventos que espaciar, la frecuencia no significa nada."""
+        return None
+
+    def events(self, t0_s: float, t1_s: float) -> list[CardiacEvent]:
+        return []
+
+
+@dataclass(frozen=True, slots=True)
 class RegularTrain:
     """Tren perfectamente regular: sin variabilidad, sin estado, sin RNG."""
 

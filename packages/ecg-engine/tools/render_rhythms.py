@@ -26,6 +26,7 @@ from matplotlib.ticker import MultipleLocator  # noqa: E402
 
 from ecg_engine import (  # noqa: E402
     LEAD_ORDER,
+    AtrialActivity,
     EcgEngine,
     EngineParams,
     NoiseParams,
@@ -105,6 +106,19 @@ def _caption(definition, measurements) -> str:
     pulse = definition.ventricular_rate_hz * 60.0
     parts = [f"pulso {pulse:.0f} lpm" if pulse else "sin pulso medible"]
 
+    # La auricular solo cuando aporta algo: en un ritmo conducido 1:1 repetir
+    # el mismo número dos veces es ruido, y en una FA no hay número. Se
+    # compara con la ventricular MEDIDA y no con el pulso nominal del
+    # catálogo: los dos números medidos salen de la misma ventana de diez
+    # segundos, y contra el nominal cualquier redondeo delataría una
+    # diferencia que no existe.
+    atrial_bpm = measurements.atrial_rate_hz * 60.0
+    ventricular_bpm = measurements.ventricular_rate_hz * 60.0
+    if not np.isnan(atrial_bpm) and (
+        np.isnan(ventricular_bpm) or abs(atrial_bpm - ventricular_bpm) > 2.0
+    ):
+        parts.append(f"aurículas {atrial_bpm:.0f} lpm")
+
     if definition.pr_is_measurable and not np.isnan(measurements.pr_mean_s):
         parts.append(f"PR {measurements.pr_mean_s * 1000:.0f} ms")
     else:
@@ -132,7 +146,11 @@ def render(definition, out_dir: pathlib.Path) -> pathlib.Path:
     source = engine.source
     events = source.events(0.0, DURATION_S) if hasattr(source, "events") else []
     measurements = measure(
-        events, signal_v, SAMPLE_RATE_HZ, definition.pr_is_measurable
+        events,
+        signal_v,
+        SAMPLE_RATE_HZ,
+        definition.pr_is_measurable,
+        definition.atrial_activity is AtrialActivity.ORGANIZED,
     )
 
     width_mm = DURATION_S * MM_PER_S

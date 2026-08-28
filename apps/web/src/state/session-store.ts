@@ -10,6 +10,7 @@ import type {
   DrugAdministrationRecord,
   FiredInteraction,
 } from "../types/drugs";
+import type { AtrialActivityName } from "../types/ws-messages";
 
 export interface SessionStoreState {
   connectionState: SessionState;
@@ -27,6 +28,13 @@ export interface SessionStoreState {
    * llegado ninguna; dentro, un valor `null` significa «no medible en este
    * ritmo», que no es lo mismo que «todavia no medido». */
   measurements: Record<string, number | null> | null;
+  /** Que hay entre QRS y QRS, segun el ritmo en curso. Viaja con las medidas
+   * y no dentro de `measurements` porque no es un numero: es lo que explica
+   * el hueco de la frecuencia auricular en una fibrilacion. */
+  atrialActivity: AtrialActivityName | null;
+  /** Relacion entre las dos frecuencias: un ratio de conduccion, `variable`,
+   * `dissociated`, o `null` si falta alguna de las dos. */
+  avRelationship: string | null;
 
   /** Farmacos vivos ahora mismo, tal y como los publica el servidor a 1 Hz.
    * Vacio no significa «todavia no ha llegado nada»: significa que no hay
@@ -66,6 +74,8 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
   lastDisconnect: null,
   framesLost: 0,
   measurements: null,
+  atrialActivity: null,
+  avRelationship: null,
   activeDrugs: [],
   interactions: [],
   physiology: null,
@@ -89,12 +99,18 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
         sessionId: message.session_id,
         seed: message.seed,
         sampleRateHz: message.sample_rate_hz,
+        // Los del ritmo que acaba de arrancar, no los del anterior. Sin esta
+        // línea, el panel seguía mostrando el pulso del ritmo saliente hasta
+        // que alguien tocara un control.
+        params: message.params,
         lastError: null,
         framesLost: 0,
         // Un ritmo nuevo invalida las medidas del anterior: dejarlas
         // visibles mostraria el PR del ritmo saliente junto al trazado del
         // entrante hasta la primera medida nueva, un segundo despues.
         measurements: null,
+        atrialActivity: null,
+        avRelationship: null,
         // Un `start` es una sesion nueva: no puede heredar la adrenalina de
         // la anterior, igual que no hereda sus medidas.
         activeDrugs: [],
@@ -108,7 +124,11 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
     const onResumed = () => set({ connectionState: "running" });
     const onStopped = () => set({ connectionState: "stopped" });
     const onMeasurements = (message: SessionRuntimeEvents["measurements"]) =>
-      set({ measurements: message.values });
+      set({
+        measurements: message.values,
+        atrialActivity: message.atrial_activity,
+        avRelationship: message.av_relationship,
+      });
     const onPharmacology = (message: SessionRuntimeEvents["pharmacology"]) =>
       set({
         activeDrugs: message.active,

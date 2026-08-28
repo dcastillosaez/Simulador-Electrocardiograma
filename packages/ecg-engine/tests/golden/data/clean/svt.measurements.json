@@ -1,5 +1,6 @@
 {
-  "heart_rate_hz": 3.1,
+  "atrial_rate_hz": 3.1,
+  "ventricular_rate_hz": 3.1,
   "rr_mean_s": 0.33006789985289253,
   "rr_std_s": 0.009235566037298684,
   "pr_mean_s": 0.08999999999999994,

@@ -1,0 +1,105 @@
+.hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+}
+
+/* La frecuencia que va a tener el ventriculo. Se destaca porque es la
+   consecuencia de todo lo que hay encima: quien mueve un bloqueo 3:1 esta
+   mirando este numero, no el deslizador. */
+.anticipated {
+  margin: 0;
+  padding-top: var(--space-1);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.nameField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.nameLabel {
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+}
+
+.nameInput {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-background);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+}
+
+.nameInput:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: -1px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.action {
+  flex: 1 1 auto;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-hover);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: background var(--motion-fast);
+}
+
+.action:hover:not(:disabled) {
+  background: var(--panel-border);
+}
+
+.action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.status {
+  margin: 0;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+}
+
+.error {
+  margin: 0;
+  color: var(--status-critical, var(--text-primary));
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+}
+
+/* Rotulo visible sobre cada control. El `aria-label` que llevan dentro
+   `NumberField` y `Slider` no se ve, y tres cajas seguidas sin nombre --PR,
+   QRS, QT-- obligan a adivinar cual es cual. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fieldLabel {
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}

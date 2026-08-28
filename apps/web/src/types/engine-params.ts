@@ -1,3 +1,5 @@
+import type { PatientPayload } from "./patients";
+
 export interface NoiseParamsPayload {
   emg_v: number;
   mains_v: number;
@@ -26,4 +28,10 @@ export interface EngineParamsPayload {
   noise: NoiseParamsPayload;
   variability: VariabilityParamsPayload;
   axis: AxisParamsPayload;
+  /** Los mandos propios del ritmo elegido. Vacío en los que se manejan con
+   * `heart_rate_hz` a secas. */
+  rhythm?: Record<string, number>;
+  /** El paciente inventado, solo en el ritmo `custom_patient`. Los doce del
+   * catálogo lo dejan sin poner. */
+  patient?: PatientPayload;
 }

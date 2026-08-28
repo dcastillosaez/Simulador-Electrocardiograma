@@ -15,6 +15,7 @@ es decir 0,001 V.
 
 from __future__ import annotations
 
+from .custom_beat import custom_template, is_custom
 from .types import BeatTemplate, GaussianComponent, WaveTarget
 
 _SIGMA_EXTENT: float = 2.5
@@ -115,6 +116,10 @@ TEMPLATES: dict[str, BeatTemplate] = {
 
 
 def get_template(template_id: str) -> BeatTemplate:
+    # Las plantillas a medida no están en el diccionario: se reconstruyen del
+    # identificador, que es donde vive su especificación. Ver `custom_beat`.
+    if is_custom(template_id):
+        return custom_template(template_id)
     try:
         return TEMPLATES[template_id]
     except KeyError as exc:

@@ -231,3 +231,52 @@ describe("medidas fisiologicas", () => {
     expect(useSessionStore.getState().measurements).toBeNull();
   });
 });
+
+
+describe("el acuse de arranque", () => {
+  const PARAMS = (heartRateHz: number) => ({
+    heart_rate_hz: heartRateHz,
+    noise: { emg_v: 0, mains_v: 0, baseline_v: 0, motion_v: 0, clip_v: null },
+    variability: {
+      respiration_hz: 0.25,
+      rsa_fraction: 0.04,
+      amplitude_fraction: 0.03,
+      rr_jitter_fraction: 0.015,
+    },
+    axis: {
+      orientation_deg: 50,
+      p_offset_deg: 3.4,
+      qrs_offset_deg: 0,
+      st_offset_deg: 0,
+      t_offset_deg: 0,
+    },
+  });
+
+  it("sustituye los parametros del ritmo anterior", () => {
+    // El pulso de un bloqueo completo no es el de la taquicardia que se acaba
+    // de dejar atras. Sin esto, el panel seguia ensenando el numero viejo
+    // hasta que alguien tocara un control.
+    const fake = new FakeWebSocket();
+    const runtime = new SessionRuntime("ws://test", () => fake as unknown as WebSocket);
+    useSessionStore.getState().attachRuntime(runtime);
+    runtime.connect();
+    fake.dispatch("open", {});
+
+    fake.dispatch("message", {
+      data: JSON.stringify({ type: "updated", params: PARAMS(3.0) }),
+    });
+    expect(useSessionStore.getState().params?.heart_rate_hz).toBeCloseTo(3.0);
+
+    fake.dispatch("message", {
+      data: JSON.stringify({
+        type: "started",
+        session_id: "33333333-3333-3333-3333-333333333333",
+        seed: 7,
+        sample_rate_hz: 500,
+        channels: 12,
+        params: PARAMS(40 / 60),
+      }),
+    });
+    expect(useSessionStore.getState().params?.heart_rate_hz).toBeCloseTo(40 / 60);
+  });
+});

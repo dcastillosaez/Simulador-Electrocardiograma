@@ -67,6 +67,10 @@ export interface StartedMessage {
   seed: number;
   sample_rate_hz: number;
   channels: number;
+  /** Los parámetros que el motor aplicó, que no siempre son los que se
+   * mandaron: recorta al rango del ritmo y calcula la frecuencia en los que
+   * tienen mandos propios. */
+  params: EngineParamsPayload;
 }
 
 export interface UpdatedMessage {
@@ -96,19 +100,36 @@ export interface ErrorMessage {
 /** Medidas fisiológicas de la ventana de señal, calculadas en el servidor.
  *
  * `values` es un mapa abierto y no un objeto de campos fijos: el contrato
- * está pensado para crecer —eje eléctrico, frecuencia auricular, y lo que
- * necesiten el corazón 3D y el módulo de farmacología— sin que un cliente
- * anterior deje de funcionar. Un valor `null` significa «no medible en este
+ * está pensado para crecer —eje eléctrico y lo que necesiten el corazón 3D y
+ * el módulo de farmacología— sin que un cliente anterior deje de funcionar. Un valor `null` significa «no medible en este
  * ritmo», no «error»: un flutter no tiene PR y una FV no tiene QT.
  *
  * Las unidades van en el nombre de la clave a propósito. El frontend no
  * convierte ni corrige nada: esas son fórmulas clínicas y viven en el motor.
  */
+export type AtrialActivityName = "organized" | "fibrillatory" | "absent";
+
+/** Relación entre las dos frecuencias, tal y como la escribe el motor.
+ *
+ * Un ratio de conducción (`"1:1"`, `"2:1"`, `"4:3"`), `"variable"` cuando hay
+ * conducción sin proporción estable, `"dissociated"` cuando cada cámara va
+ * por su cuenta, y `null` cuando falta una de las dos frecuencias. El
+ * frontend traduce estas etiquetas, no las calcula: la regla de qué es una
+ * disociación es clínica y vive en el motor.
+ */
+export type AvRelationship = string;
+
 export interface MeasurementsMessage {
   type: "measurements";
   t_s: number;
   window_s: number;
   values: Record<string, number | null>;
+  /** Qué hay entre QRS y QRS. Acompaña siempre a `atrial_rate_bpm`, también
+   * cuando esa frecuencia llega vacía: en una fibrilación el hueco no es un
+   * fallo de medida, es el hallazgo, y sin esta etiqueta la interfaz no
+   * puede distinguir «no medible» de «todavía no medido». */
+  atrial_activity: AtrialActivityName;
+  av_relationship: AvRelationship | null;
 }
 
 /** Acuse de una administracion concreta. Llega antes que el

@@ -119,3 +119,38 @@ class DrugAdministrationRow(Base):
     created_at: Mapped[dt.datetime] = mapped_column(
         _TZ_DATETIME, nullable=False, server_default=func.now()
     )
+
+
+class CustomPatientRow(Base):
+    """Un paciente inventado, guardado con nombre para volver a usarlo.
+
+    La cuarta tabla, y la primera que guarda contenido docente en vez de
+    registro de lo ocurrido. Por eso es la única que el usuario edita y
+    borra: `sessions` y `drug_administrations` son historia clínica de una
+    simulación y no se tocan.
+
+    `spec` guarda el paciente **entero**, con sus constantes, y no un puntero
+    a nada: es lo que permite cargarlo dentro de un año aunque el editor haya
+    ganado campos por el camino. Los que falten toman su valor por defecto al
+    validarse, que es exactamente el comportamiento que se quiere.
+
+    El nombre es único porque es la forma en que un docente lo busca. Dos
+    «Bloqueo para la clase del martes» distintos serían un problema de quien
+    los guardó, no de quien los lee.
+    """
+
+    __tablename__ = "custom_patients"
+
+    id: Mapped[uuid.UUID] = mapped_column(_PORTABLE_UUID, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    spec: Mapped[dict] = mapped_column(_PORTABLE_JSON, nullable=False)
+    # La versión del motor con la que se guardó. No restringe la carga --un
+    # paciente es una descripción, no una señal-- pero deja constancia de con
+    # qué se dibujaba cuando alguien lo dio por bueno.
+    engine_semver: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        _TZ_DATETIME, nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        _TZ_DATETIME, nullable=False, server_default=func.now()
+    )

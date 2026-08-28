@@ -1,0 +1,10 @@
+{
+  "atrial_rate_hz": 1.2,
+  "ventricular_rate_hz": 1.2,
+  "rr_mean_s": 0.8487325889771142,
+  "rr_std_s": 0.023749227704029898,
+  "pr_mean_s": 0.16000000000000011,
+  "qrs_duration_s": 0.09000000000000002,
+  "qt_s": 0.4,
+  "r_amplitude_lead_ii_v": 0.001127956904505399
+}

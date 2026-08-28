@@ -48,7 +48,9 @@ def test_el_catalogo_sigue_disponible(app_sin_base):
     with TestClient(app) as client:
         respuesta = client.get("/api/rhythms")
         assert respuesta.status_code == 200
-        assert len(respuesta.json()) == 12
+        # Los doce ritmos y el paciente personalizado: el catálogo entero sale
+        # del motor, así que sin base de datos no falta ninguno.
+        assert len(respuesta.json()) == 13
 
 
 def test_se_puede_simular_sin_base_de_datos(app_sin_base):
