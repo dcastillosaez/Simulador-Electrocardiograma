@@ -3,12 +3,21 @@ import { act, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useLayoutMetrics } from "./useLayoutMetrics";
 
-function Probe({ leadCount, columnCount = 1 }: { leadCount: number; columnCount?: number }) {
+function Probe({
+  leadCount,
+  columnCount = 1,
+  reservedWidthPx,
+}: {
+  leadCount: number;
+  columnCount?: number;
+  reservedWidthPx?: number;
+}) {
   const { containerRef, metrics } = useLayoutMetrics({
     rowCount: leadCount,
     columnCount,
     gain: "auto" as const,
     paperSpeedMmS: 25,
+    reservedWidthPx,
   });
   return (
     <div ref={containerRef}>
@@ -75,11 +84,25 @@ describe("useLayoutMetrics", () => {
     const observer = spyResizeObserver();
     render(<Probe leadCount={12} />);
 
-    act(() => observer.notify({ width: 900, height: 640 }));
+    // Alto de sobra: con el papel entero cabiendo, la tira ocupa todo el
+    // ancho medido y ahi se ve que la medida ha entrado.
+    act(() => observer.notify({ width: 900, height: 4000 }));
+    expect(Number(screen.getByTestId("width").textContent)).toBe(900);
 
     // (640 - 11 huecos de 4px) / 12 = 49,67px: por debajo del minimo blando.
-    expect(Number(screen.getByTestId("width").textContent)).toBe(900);
+    act(() => observer.notify({ width: 900, height: 640 }));
     expect(screen.getByTestId("compression").textContent).toBe("very-compact");
+    // Y con ese alto el papel ya no se estira hasta el borde: encoge para
+    // conservar la ganancia estandar, y lo que sobra es el hueco del corazon.
+    expect(Number(screen.getByTestId("width").textContent)).toBeLessThan(900);
+  });
+
+  it("no cuenta como suyo el ancho reservado a lo que va al lado", () => {
+    const observer = spyResizeObserver();
+    render(<Probe leadCount={1} reservedWidthPx={300} />);
+
+    act(() => observer.notify({ width: 1000, height: 4000 }));
+    expect(Number(screen.getByTestId("width").textContent)).toBe(700);
   });
 
   it("ignora las migajas de subpixel que devuelve el navegador", () => {
@@ -121,7 +144,7 @@ describe("useLayoutMetrics", () => {
     expect(observer.observed.length).toBeGreaterThan(0);
     expect(observer.disconnects).toBe(0);
 
-    act(() => observer.notify({ width: 800, height: 600 }));
+    act(() => observer.notify({ width: 800, height: 4000 }));
     expect(Number(screen.getByTestId("width").textContent)).toBe(800);
   });
 });

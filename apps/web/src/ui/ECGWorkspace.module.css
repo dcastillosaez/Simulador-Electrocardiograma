@@ -1,3 +1,62 @@
+/* El área central: el ECG a la izquierda con el ancho que le pide el papel, y
+   el corazón acoplado a su derecha ocupando lo que sobre.
+
+   El reparto no es una fracción arbitraria ni un divisor que se arrastra: lo
+   decide la geometría del papel. Cuando el alto no da para los 40mm de tira a
+   ganancia estándar, `computeLayoutMetrics` encoge la escala en vez de bajar
+   la ganancia, y entonces el ECG necesita menos ancho del disponible. Ese
+   sobrante era una franja vacía; ahora es donde vive el corazón, que agradece
+   un formato más cuadrado que la banda apaisada de antes. */
+.stage {
+  display: flex;
+  flex-direction: row;
+  gap: var(--space-3);
+  /* Sin `min-*: 0` un hijo con contenido empuja el contenedor más allá de lo
+     que le da el grid y reaparece el scroll que el spec descarta. Es el mismo
+     fallo clásico de Flexbox que ya documenta AppShell. */
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Ancho exacto —el que dicta el papel—, nunca elástico: si creciera, la
+   medida que produce ese ancho dependería del ancho, que es el bucle que hizo
+   encoger la cuadrícula sola en su día. El alto sí es todo el disponible. */
+.ecgPane {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* El corazón se queda con lo que sobre a lo ancho, pero no con todo el alto:
+   se acomoda en un marco cuadrado pegado abajo. Cuadrado porque un corazón es
+   igual de alto que de ancho y estirar su caja solo añade fondo; abajo porque
+   ahí está el pie de la consola y arriba manda el trazado. */
+.heartPane {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.heartFrame {
+  flex: 0 1 auto;
+  /* Cuadrado mientras quepa; si el hueco es más bajo que ancho, manda el alto
+     y el marco se queda más estrecho en vez de desbordar. */
+  aspect-ratio: 1;
+  width: 100%;
+  max-height: 100%;
+  margin-left: auto;
+  min-height: 0;
+}
+
 .clock {
   /* Al extremo derecho de la barra de estado. `margin-left: auto` en un
      contenedor flex y no `justify-content: space-between` en la barra: la

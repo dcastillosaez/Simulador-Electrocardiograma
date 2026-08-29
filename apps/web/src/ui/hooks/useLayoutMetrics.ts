@@ -20,6 +20,14 @@ export interface UseLayoutMetricsParams {
    * electrocardiografo; un numero la fija. */
   gain: GainSetting;
   paperSpeedMmS: number;
+  /** Ancho del contenedor medido que NO es para el ECG: el hueco del corazon
+   * y el aire entre los dos.
+   *
+   * Se descuenta aqui y no fuera porque lo que se observa es el area entera.
+   * Medir directamente el panel del ECG seria mas corto de escribir y volveria
+   * a montar el bucle que hacia encoger la cuadricula sola: el ancho de ese
+   * panel sale de estas metricas, asi que no puede ser tambien su entrada. */
+  reservedWidthPx?: number;
 }
 
 export interface UseLayoutMetricsResult {
@@ -38,6 +46,7 @@ export function useLayoutMetrics({
   columnCount,
   gain,
   paperSpeedMmS,
+  reservedWidthPx = 0,
 }: UseLayoutMetricsParams): UseLayoutMetricsResult {
   const [size, setSize] = useState({
     widthPx: FALLBACK_WIDTH_PX,
@@ -88,7 +97,7 @@ export function useLayoutMetrics({
   return {
     containerRef,
     metrics: computeLayoutMetrics({
-      availableWidthPx: size.widthPx,
+      availableWidthPx: Math.max(1, size.widthPx - reservedWidthPx),
       availableHeightPx: size.heightPx,
       rowCount,
       columnCount,
