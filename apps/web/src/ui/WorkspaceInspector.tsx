@@ -24,6 +24,38 @@ const AV_RELATIONSHIP_LABEL: Record<string, string> = {
   variable: "Variable",
 };
 
+/** Los ritmos en los que la aurícula y el ventrículo son el mismo latido.
+ *
+ * En un ritmo sinusal las dos frecuencias son el mismo número por
+ * construcción —el nodo sinusal manda y el ventrículo obedece—, así que
+ * enseñarlas por separado es repetir un dato y dar a entender que puede
+ * haber discrepancia donde no la hay. En el resto del catálogo la distinción
+ * es el hallazgo: la aurícula de un bloqueo completo va a 75 y el ventrículo
+ * a 40, y «la FC» ahí es un número que no describe a nadie.
+ *
+ * La lista es de identificadores del catálogo y no de un prefijo: un ritmo
+ * nuevo tiene que entrar aquí a propósito, no por cómo se llame. */
+/** Ritmos cuya onda auricular no es una P.
+ *
+ * En un flutter lo que se cuenta son ondas F, y llamarlas P sería enseñar mal
+ * justo donde la distinción importa. El resto de ritmos con aurícula
+ * organizada tienen P de verdad; los que no tienen ninguna —fibrilación
+ * auricular, fibrilación ventricular— no llegan aquí: su rótulo se decide por
+ * la actividad auricular que publica el motor. */
+const ATRIAL_WAVE_LABEL: Record<string, string> = {
+  atrial_flutter: "FC ondas F",
+};
+
+/** El rótulo genérico, para cuando no hay onda auricular que contar y el valor
+ * es una palabra —«Fibrilatoria», «Ausente»— en vez de un número. */
+const ATRIAL_RATE_LABEL = "FC auricular";
+
+const SINGLE_RATE_RHYTHMS = new Set([
+  "sinus_normal",
+  "sinus_tachycardia",
+  "sinus_bradycardia",
+]);
+
 const GAIN_CLIPPING_HINT =
   "La ganancia elegida no cabe en el alto de tira disponible: el trazo puede " +
   "recortarse. Baja la ganancia o muestra menos derivaciones.";
@@ -40,6 +72,9 @@ export interface WorkspaceInspectorProps {
   gainFits: boolean;
   exportError: string | null;
   rhythmName: string | null;
+  /** El identificador del ritmo, para decidir si las dos frecuencias son un
+   * hallazgo o el mismo número escrito dos veces. */
+  rhythmId: string | null;
   axisDeg: number | null;
   /** Qué hay entre QRS y QRS. Solo explica el hueco de la frecuencia
    * auricular; no es una medida. */
@@ -72,6 +107,7 @@ export function WorkspaceInspector({
   gainFits,
   exportError,
   rhythmName,
+  rhythmId,
   axisDeg,
   atrialActivity,
   avRelationship,
@@ -105,6 +141,20 @@ export function WorkspaceInspector({
     const label = atrialActivity ? ATRIAL_ACTIVITY_LABEL[atrialActivity] : null;
     if (label) return { value: label, unit: undefined, unavailable: false as const };
     return measured("atrial_rate_bpm");
+  };
+
+  /** Cómo se llama la frecuencia auricular en este ritmo.
+   *
+   * En un bloqueo completo lo que hay que contar son dos cosas distintas sobre
+   * el mismo trazado —las P por un lado y los QRS por otro—, y el rótulo tiene
+   * que decir cuál es cuál: «auricular» y «ventricular» nombran cámaras, no lo
+   * que se cuenta con el compás en la mano. Cuando no hay onda que contar el
+   * rótulo vuelve a ser el genérico, porque el valor ya explica por qué. */
+  const atrialLabel = () => {
+    if (atrialActivity && ATRIAL_ACTIVITY_LABEL[atrialActivity]) {
+      return ATRIAL_RATE_LABEL;
+    }
+    return (rhythmId && ATRIAL_WAVE_LABEL[rhythmId]) ?? "FC ondas P";
   };
 
   const avConduction = () => {
@@ -190,18 +240,28 @@ export function WorkspaceInspector({
         <Section title="Ritmo">
           <MetricGrid>
             <Metric label="Ritmo" value={rhythmName ?? ""} unavailable={rhythmName === null} />
-            {/* Dos frecuencias y no una. En un ritmo sinusal dicen lo mismo y
-                la distinción parece pedante; en un bloqueo AV completo la
-                aurícula va a 75 y el ventrículo a 40, y «la FC» es un número
-                que no describe a nadie. Van siempre las dos, también cuando
-                coinciden: buscar las dos es el hábito que se está enseñando.
+            {/* Dos frecuencias y no una, salvo en los sinusales. En un
+                bloqueo AV completo la aurícula va a 75 y el ventrículo a 40, y
+                «la FC» es un número que no describe a nadie; en un ritmo
+                sinusal son el mismo latido contado dos veces y el desglose
+                solo hace ruido.
 
                 Son las MEDIDAS sobre la señal, no la frecuencia de mando del
                 control de la izquierda. Antes aquí se mostraba el mando, y en
                 un bloqueo completo eso significaba anunciar 75 lpm para un
                 paciente con pulso de 40. */}
-            <Metric label="FC auricular" unit="lpm" {...atrialRate()} />
-            <Metric label="FC ventricular" unit="lpm" {...measured("ventricular_rate_bpm")} />
+            {rhythmId !== null && SINGLE_RATE_RHYTHMS.has(rhythmId) ? (
+              <Metric label="FC" unit="lpm" {...measured("ventricular_rate_bpm")} />
+            ) : (
+              <>
+                <Metric label={atrialLabel()} unit="lpm" {...atrialRate()} />
+                <Metric
+                  label="FC complejos QRS"
+                  unit="lpm"
+                  {...measured("ventricular_rate_bpm")}
+                />
+              </>
+            )}
             {/* La lectura que convierte dos números en un diagnóstico: el 2:1
                 del flutter, la disociación de un bloqueo completo o de una
                 TV. La calcula el motor sobre los eventos —no comparando las

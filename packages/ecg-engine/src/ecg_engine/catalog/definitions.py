@@ -251,7 +251,7 @@ def _build_atrial_flutter(
     """El circuito auricular y el filtro del nodo AV, cada uno por su lado.
 
     Son dos hechos independientes y por eso son dos mandos. La macrorreentrada
-    gira a su propia velocidad —entre 250 y 350 por minuto— y el nodo AV deja
+    gira a su propia velocidad —de 100 a 350 por minuto— y el nodo AV deja
     pasar una de cada dos, tres o cuatro. Lo que se ve en el trazado, esos 150
     lpm de libro, no es ninguno de los dos: es su cociente.
     """
@@ -369,11 +369,13 @@ def _fixed(rate_hz: float) -> ParameterRange:
     return ParameterRange(minimum=rate_hz, maximum=rate_hz, default=rate_hz)
 
 
-#: Los mandos del flutter. La aurícula gira entre 250 y 350 —fuera de ahí ya
-#: no es un flutter típico— y el nodo AV deja pasar una de cada dos, tres o
-#: cuatro; el 1:1 es excepcional y peligroso, y el 5:1 no se ve.
+#: Los mandos del flutter. El flutter típico gira entre 250 y 350, y ahí sigue
+#: su valor por defecto; pero un circuito frenado por antiarrítmicos —clase IC
+#: o amiodarona— baja de 250 sin dejar de ser un flutter, así que el suelo del
+#: mando está en 100 y no en el límite del libro. El nodo AV deja pasar una de
+#: cada dos, tres o cuatro; el 1:1 es excepcional y peligroso, y el 5:1 no se ve.
 FLUTTER_PARAMETERS: Mapping[str, ParameterRange] = {
-    "atrial_rate_hz": ParameterRange(_bpm(250), _bpm(350), _bpm(300)),
+    "atrial_rate_hz": ParameterRange(_bpm(100), _bpm(350), _bpm(300)),
     "conduction_ratio": ParameterRange(2.0, 4.0, 2.0),
 }
 

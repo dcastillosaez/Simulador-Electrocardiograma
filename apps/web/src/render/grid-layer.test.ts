@@ -18,8 +18,9 @@ function metricsOf(heightPx: number, rows: number, gain: "auto" | number) {
 
 
 const GAIN = 10;
-// La escala fisica ya no depende del alto de tira: un milimetro son PX_PER_MM
-// pixeles siempre, y lo que se adapta a la altura es la ganancia.
+// Alto de sobra: asi la escala la manda el ancho y un milimetro son
+// exactamente PX_PER_MM pixeles, que es la referencia en la que estan escritas
+// las cifras de este fichero.
 const METRICS = metricsOf(152, 1, GAIN);
 const THEME = getTheme("dark").ecg;
 
@@ -33,14 +34,22 @@ describe("timeToPx / voltageToPx", () => {
     expect(voltageToPx(0.001, METRICS)).toBeCloseTo(10 * METRICS.viewportScalePxPerMm, 5);
   });
 
-  it("voltageToPx escala con la ganancia, no con el alto de la tira", () => {
-    // Antes comprimir la ventana encogia el trazo. Ahora no: el milimetro es
-    // el milimetro, y lo que cambia cuando no cabe es la ganancia -- que es
-    // como se comporta un electrocardiografo.
+  it("1mV son 10mm de papel, encoja lo que encoja el papel", () => {
+    // Al comprimir la ventana el milimetro mide menos pixeles y el trazo se
+    // dibuja mas pequeno, pero encoge con su cuadricula: 1mV sigue midiendo
+    // diez cuadros pequenos, que es lo que se cuenta al medir un voltaje.
     const comprimida = metricsOf(46, 1, GAIN);
-    expect(voltageToPx(0.001, comprimida)).toBeCloseTo(voltageToPx(0.001, METRICS), 5);
+    expect(comprimida.viewportScalePxPerMm).toBeLessThan(
+      METRICS.viewportScalePxPerMm
+    );
+    expect(voltageToPx(0.001, comprimida)).toBeCloseTo(
+      10 * comprimida.viewportScalePxPerMm,
+      5
+    );
+  });
 
-    const mediaGanancia = metricsOf(46, 1, GAIN / 2);
+  it("voltageToPx escala con la ganancia", () => {
+    const mediaGanancia = metricsOf(152, 1, GAIN / 2);
     expect(voltageToPx(0.001, mediaGanancia)).toBeCloseTo(
       voltageToPx(0.001, METRICS) / 2,
       5
@@ -58,14 +67,21 @@ describe("computeGridLines", () => {
     expect(lines.verticalMajor[1]).toBeCloseTo(5 * METRICS.viewportScalePxPerMm, 5);
   });
 
-  it("el espaciado no cambia al comprimir la ventana", () => {
-    // La cuadricula representa milimetros de papel. Si se estirase o encogiese
-    // con la ventana dejaria de servir para medir, que es justo el defecto que
-    // este cambio corrige.
+  it("al comprimir la ventana la cuadricula encoge entera, sin deformarse", () => {
+    // La cuadricula representa milimetros de papel. Puede dibujarse mas
+    // pequena —eso es encoger el papel— pero nunca estirarse en un eje y no en
+    // el otro: en cuanto la celda deja de ser cuadrada, medir sobre ella pasa
+    // a ser mentira.
     const comprimida = metricsOf(46, 1, "auto");
-    const anchas = computeGridLines(200, 200, METRICS);
-    const juntas = computeGridLines(200, 200, comprimida);
-    expect(juntas.verticalMinor.length).toBe(anchas.verticalMinor.length);
+    const lines = computeGridLines(200, 200, comprimida);
+    expect(lines.verticalMinor[1] - lines.verticalMinor[0]).toBeCloseTo(
+      comprimida.viewportScalePxPerMm,
+      5
+    );
+    expect(lines.verticalMinor[1] - lines.verticalMinor[0]).toBeCloseTo(
+      lines.horizontalMinor[1] - lines.horizontalMinor[0],
+      5
+    );
   });
 
   it("la celda es cuadrada: el mismo espaciado en los dos ejes", () => {

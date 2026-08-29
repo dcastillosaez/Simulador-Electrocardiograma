@@ -5,7 +5,6 @@ import styles from "./EcgDisplay.module.css";
 import { LeadStrip } from "./LeadStrip";
 
 export interface EcgDisplayProps {
-  containerRef: (element: HTMLElement | null) => void;
   /** Una lista por columna. Con un solo elemento es la vista clásica. */
   leadColumns: readonly (readonly LeadName[])[];
   metrics: LayoutMetrics;
@@ -23,7 +22,6 @@ export interface EcgDisplayProps {
  * poder comparar el mismo latido entre derivaciones es justo lo que se busca
  * al partir la pantalla. */
 export function EcgDisplay({
-  containerRef,
   leadColumns,
   metrics,
   registerTrace,
@@ -31,7 +29,7 @@ export function EcgDisplay({
   overlay,
 }: EcgDisplayProps) {
   return (
-    <div className={styles.display} ref={containerRef}>
+    <div className={styles.display}>
       <div className={styles.grid}>
         {leadColumns.map((leads, index) => (
           <div className={styles.column} key={index}>

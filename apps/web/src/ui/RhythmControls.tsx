@@ -17,7 +17,10 @@ interface ControlSpec {
   /** Y de vuelta. */
   toEngine: (value: number) => number;
   step: number;
-  hint?: (displayed: number) => string;
+  /** La pista bajo el mando. Recibe también los otros rangos del ritmo,
+   * porque un mismo control significa cosas distintas según a qué ritmo
+   * pertenezca. */
+  hint?: (displayed: number, ranges: Record<string, ParameterRange>) => string;
 }
 
 const PER_MINUTE: Omit<ControlSpec, "label"> = {
@@ -31,8 +34,12 @@ export const RHYTHM_CONTROLS: Record<string, ControlSpec> = {
   atrial_rate_hz: {
     label: "Frecuencia auricular",
     ...PER_MINUTE,
-    hint: (bpm) =>
-      bpm >= 250
+    // El flutter y el bloqueo completo comparten el nombre del mando y no
+    // significan lo mismo. Distinguirlos por el número era frágil: un flutter
+    // frenado por antiarrítmicos late por debajo de 250 y seguía leyéndose
+    // como nodo sinusal. Quien tiene conducción AV declarada es el flutter.
+    hint: (_bpm, ranges) =>
+      "conduction_ratio" in ranges
         ? "Las ondas F del circuito auricular, que no cambian con el bloqueo."
         : "El nodo sinusal, que en un bloqueo completo va a lo suyo.",
   },
@@ -119,7 +126,9 @@ export function RhythmControls({
                 onChange={(value) => onChange(name, spec.toEngine(value))}
               />
             )}
-            {spec.hint && <p className={styles.hint}>{spec.hint(displayed)}</p>}
+            {spec.hint && (
+              <p className={styles.hint}>{spec.hint(displayed, ranges)}</p>
+            )}
           </div>
         );
       })}

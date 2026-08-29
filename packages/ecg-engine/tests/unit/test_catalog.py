@@ -392,11 +392,18 @@ class TestRhythmParameters:
         assert atrial == pytest.approx(300, rel=0.05)
         assert ventricular == pytest.approx(300 / ratio, rel=0.06)
 
-    def test_the_flutter_atrium_can_be_moved_within_its_range(self):
-        slow, _, _ = self._measured("atrial_flutter", {"atrial_rate_hz": 250 / 60})
-        fast, _, _ = self._measured("atrial_flutter", {"atrial_rate_hz": 350 / 60})
-        assert slow == pytest.approx(250, rel=0.05)
-        assert fast == pytest.approx(350, rel=0.05)
+    @pytest.mark.parametrize("rate", [100, 180, 250, 350])
+    def test_the_flutter_atrium_can_be_moved_within_its_range(self, rate):
+        """El suelo del mando está en 100, no en los 250 del flutter típico.
+
+        Un circuito frenado por antiarrítmicos late por debajo de 250 y sigue
+        siendo un flutter; el rango del libro describe el caso frecuente, no
+        el límite de lo posible.
+        """
+        measured, _, _ = self._measured(
+            "atrial_flutter", {"atrial_rate_hz": rate / 60}
+        )
+        assert measured == pytest.approx(rate, rel=0.05)
 
     def test_the_pulse_of_a_flutter_is_the_quotient_of_its_two_controls(self):
         """Lo que la interfaz enseña como frecuencia cardíaca no es ninguno de

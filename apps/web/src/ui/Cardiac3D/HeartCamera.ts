@@ -23,9 +23,15 @@ export const DEFAULT_PRESET: CameraPreset = "anterior";
 /** Distancia de la cámara al centro del modelo, en unidades de escena.
  *
  * El modelo se normaliza a altura 1, así que este número no depende de las
- * unidades de la fuente anatómica: con un campo de visión de 35 grados, 0,32
- * deja el corazón encuadrado con algo de aire alrededor. */
-export const CAMERA_DISTANCE = 0.32;
+ * unidades de la fuente anatómica: con un campo de visión de 35 grados, 0,45
+ * deja el corazón entero con aire de sobra alrededor.
+ *
+ * Estaba en 0,32, que llenaba el marco de lado a lado. Con la escena en su
+ * propio recuadro —y no ya en una banda ancha bajo el ECG— eso se leía como
+ * un primer plano: el corazón se salía por los bordes al orbitar y no había
+ * dónde apoyar la vista. La rueda del ratón sigue acercándolo tanto como se
+ * quiera; esto solo fija dónde empieza. */
+export const CAMERA_DISTANCE = 0.45;
 
 /** Las vistas superior e inferior llevan un Z mínimo a propósito: una cámara
  * exactamente sobre el eje Y mirando hacia abajo tiene su vector "arriba"

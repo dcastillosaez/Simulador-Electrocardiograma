@@ -5,7 +5,6 @@ import {
   Panel,
   SectionTitle,
   Sidebar,
-  SplitPane,
   StatusBar,
   Tooltip,
 } from "@ui-system";
@@ -97,6 +96,17 @@ const COMPRESSION_TONE = {
 const COMPRESSION_HINT =
   "Altura disponible insuficiente para la representación óptima de 12 derivaciones.";
 
+/** Lo mínimo que se le deja al corazón a lo ancho.
+ *
+ * Por debajo de esto el modelo se ve de lejos y los mandos de vista se
+ * amontonan: es el ancho a partir del cual la escena sigue siendo útil. Si el
+ * ECG necesita menos de lo disponible, el corazón se queda con todo el resto y
+ * no solo con este mínimo. */
+const HEART_MIN_WIDTH_PX = 260;
+/** El aire entre el ECG y el corazón. Es `--space-3`, y se descuenta del ancho
+ * disponible porque el reparto lo calcula el motor de layout, no el CSS. */
+const STAGE_GAP_PX = 12;
+
 export interface ECGWorkspaceProps {
   wsUrl: string;
   apiBaseUrl: string;
@@ -155,6 +165,7 @@ export function ECGWorkspace({
     columnCount: columnsForLayout(layout),
     gain,
     paperSpeedMmS,
+    reservedWidthPx: HEART_MIN_WIDTH_PX + STAGE_GAP_PX,
   });
 
   // La ventana visible del anillo. A la velocidad de referencia son los
@@ -450,18 +461,22 @@ export function ECGWorkspace({
       }
       ecg={
         // El corazón va dentro del área `ecg` del grid, no en una zona nueva:
-        // así el `AppShell` no se toca y el divisor solo reparte un alto que
-        // ya está acotado. `useLayoutMetrics` mide el contenedor real, de modo
-        // que las tiras se recalculan solas al arrastrarlo, sin cablear nada
-        // entre los dos componentes.
-        <SplitPane
-          label="Reparto entre ECG y corazón"
-          defaultTopFraction={0.65}
-          minTopFraction={0.3}
-          maxTopFraction={0.85}
-          top={
+        // así el `AppShell` no se toca. Y va al lado y no debajo porque es
+        // donde queda sitio: el ECG ocupa a lo ancho lo que le pide el papel
+        // —ni un píxel más, o la escala tendría que estirarse y la ganancia
+        // estándar volvería a no caber— y lo que sobra deja de ser franja
+        // vacía. De paso el corazón gana un marco casi cuadrado, que le sienta
+        // mejor que la banda apaisada de antes.
+        //
+        // El contenedor medido es el área entera, no el panel del ECG: el
+        // ancho de ese panel SALE de estas métricas, así que no puede ser
+        // también su entrada.
+        <div className={styles.stage} ref={containerRef}>
+          <div
+            className={styles.ecgPane}
+            style={{ width: `${Math.round(metrics.ecgWidthPx)}px` }}
+          >
             <EcgDisplay
-              containerRef={containerRef}
               leadColumns={leadColumns}
               metrics={metrics}
               registerTrace={registerTrace}
@@ -483,9 +498,13 @@ export function ECGWorkspace({
                 />
               }
             />
-          }
-          bottom={<HeartScene runtime={runtime} />}
-        />
+          </div>
+          <div className={styles.heartPane}>
+            <div className={styles.heartFrame}>
+              <HeartScene runtime={runtime} />
+            </div>
+          </div>
+        </div>
       }
       inspector={
         <WorkspaceInspector
@@ -498,6 +517,7 @@ export function ECGWorkspace({
           gainFits={metrics.gainFits}
           exportError={exportError}
           rhythmName={selectedRhythm?.display_name ?? null}
+          rhythmId={selectedRhythm?.rhythm_id ?? null}
           atrialActivity={store.atrialActivity}
           avRelationship={store.avRelationship}
           axisDeg={currentParams?.axis.orientation_deg ?? null}
