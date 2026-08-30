@@ -69,6 +69,41 @@ jobs:
         working-directory: apps/web
         run: npm test
 
+  escritorio:
+    name: Escritorio (Tauri)
+    # Windows y no Ubuntu porque es la única plataforma en la que este crate
+    # existe: `job.rs` usa job objects de Windows y el bundle es un NSIS. Un
+    # test verde en Linux no diría nada del programa que se distribuye.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable @ 2026-08-05
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: apps/desktop/src-tauri
+      # Aquí viven los tests del arranque del backend, de la licencia firmada y
+      # del contador de arranques fallidos, que hasta ahora solo se ejecutaban
+      # en la máquina de quien se acordara. Y el que vigila que el escritorio
+      # siga sin hacer conexiones salientes, que es una promesa escrita en
+      # `docs/instalacion.md` y por tanto ya distribuida.
+      # `tauri.conf.json` declara el backend empaquetado como recurso del
+      # bundle, y el build script se niega a compilar si esa carpeta no existe.
+      # Es deliberado y hay que conservarlo: sin esa negativa, un `tauri build`
+      # sin haber pasado antes PyInstaller produce un instalador sin backend
+      # dentro **y sin fallar**, que es la peor de las dos formas de romperse.
+      #
+      # Aquí no se bundlea nada —solo se compila y se corren los tests— así que
+      # basta con que la ruta exista. Empaquetar el backend de verdad son tres
+      # minutos de PyInstaller en cada pull request para no comprobar nada que
+      # `release.yml` no compruebe ya, ahí sí sobre el artefacto real.
+      - name: Marcador del recurso del backend
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force apps/api/packaging/dist/ecg-api | Out-Null
+
+      - name: Tests
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --quiet
+
   dependencias:
     name: Vulnerabilidades conocidas
     runs-on: ubuntu-latest
