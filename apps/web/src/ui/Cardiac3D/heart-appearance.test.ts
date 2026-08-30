@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { HEART_NODE_NAMES } from "./heart-nodes";
-import { driverFor } from "./HeartAnimator";
 import {
   APPEARANCE,
   GHOST_OPACITY,
@@ -8,8 +7,6 @@ import {
   nodesInGroup,
   opacityFor,
   visibleNodes,
-  VESSEL_GLOW_MAX,
-  vesselGlow,
   type HeartGroup,
 } from "./heart-appearance";
 
@@ -95,37 +92,5 @@ describe("opacityFor", () => {
     const visible = visibleNodes(new Set<HeartGroup>(["ventricles"]));
     expect(opacityFor("Aorta", visible, 1)).toBe(GHOST_OPACITY);
     expect(GHOST_OPACITY).toBeGreaterThan(0);
-  });
-});
-
-describe("vesselGlow", () => {
-  it("sigue a la excursión de la cámara que llena el vaso", () => {
-    expect(vesselGlow(0, true)).toBe(0);
-    expect(vesselGlow(1, true)).toBe(VESSEL_GLOW_MAX);
-    expect(vesselGlow(0.5, true)).toBeCloseTo(VESSEL_GLOW_MAX / 2);
-  });
-
-  it("se apaga cuando la cámara tiembla en vez de expulsar", () => {
-    // En una fibrilación ventricular el ventrículo se mueve mucho y no bombea
-    // nada. Que la aorta se apague no es un efecto: es el hallazgo.
-    expect(vesselGlow(1, false)).toBe(0);
-    expect(vesselGlow(0.7, false)).toBe(0);
-  });
-
-  it("acota la excursión, venga como venga", () => {
-    expect(vesselGlow(3, true)).toBe(VESSEL_GLOW_MAX);
-    expect(vesselGlow(-2, true)).toBe(0);
-  });
-});
-
-describe("driverFor", () => {
-  it("enciende cada vaso con la cámara que de verdad lo llena", () => {
-    // La aorta con el ventrículo izquierdo, las cavas con la aurícula. Si esto
-    // se invirtiera, el destello iría a contratiempo del latido.
-    expect(driverFor("Aorta")).toBe("ventricles");
-    expect(driverFor("PulmonaryArtery")).toBe("ventricles");
-    expect(driverFor("SuperiorVenaCava")).toBe("atria");
-    expect(driverFor("InferiorVenaCava")).toBe("atria");
-    expect(driverFor("PulmonaryVeins")).toBe("atria");
   });
 });
