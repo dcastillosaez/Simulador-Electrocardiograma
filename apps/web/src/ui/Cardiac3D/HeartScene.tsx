@@ -1,7 +1,8 @@
-import { Suspense, useState } from "react";
+import { Suspense, useCallback, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
-import { SegmentedControl } from "@ui-system";
+import { SegmentedControl, Slider } from "@ui-system";
+import { HEART_GROUPS, type HeartGroup } from "./heart-appearance";
 import {
   CAMERA_PRESETS,
   DEFAULT_PRESET,
@@ -26,6 +27,12 @@ const PRESET_OPTIONS = (Object.keys(CAMERA_PRESETS) as CameraPreset[]).map(
   (value) => ({ value, label: PRESET_LABELS[value] })
 );
 
+const GROUP_LABELS: Record<HeartGroup, string> = {
+  ventricles: "Ventrículos",
+  atria: "Aurículas",
+  vessels: "Grandes vasos",
+};
+
 export interface HeartSceneProps {
   runtime: SessionRuntime;
 }
@@ -33,6 +40,16 @@ export interface HeartSceneProps {
 export function HeartScene({ runtime }: HeartSceneProps) {
   const { timeline, heartState } = useCardiacTimeline(runtime);
   const [preset, setPreset] = useState<CameraPreset>(DEFAULT_PRESET);
+  const [isolated, setIsolated] = useState<ReadonlySet<HeartGroup>>(new Set());
+  const [opacity, setOpacity] = useState(1);
+
+  const toggleGroup = useCallback((group: HeartGroup) => {
+    setIsolated((current) => {
+      const next = new Set(current);
+      if (!next.delete(group)) next.add(group);
+      return next;
+    });
+  }, []);
 
   return (
     <section className={styles.scene} aria-label="Corazón 3D">
@@ -42,6 +59,37 @@ export function HeartScene({ runtime }: HeartSceneProps) {
           value={preset}
           options={PRESET_OPTIONS}
           onChange={setPreset}
+        />
+      </div>
+
+      {/* Aislamiento y opacidad. Botones de dos estados y no un
+          `SegmentedControl`: los grupos se combinan —ventrículos *y*
+          aurículas— y un radiogroup solo deja elegir uno.
+
+          Ninguno pulsado enseña el corazón entero. Lo que se aparta no
+          desaparece: se queda como un fantasma, porque una cámara aislada
+          flotando en el vacío pierde la referencia de dónde estaba. */}
+      <div className={styles.layers}>
+        <div className={styles.groups} role="group" aria-label="Aislar estructuras">
+          {HEART_GROUPS.map((group) => (
+            <button
+              key={group}
+              type="button"
+              className={`${styles.group} ${isolated.has(group) ? styles.groupActive : ""}`}
+              aria-pressed={isolated.has(group)}
+              onClick={() => toggleGroup(group)}
+            >
+              {GROUP_LABELS[group]}
+            </button>
+          ))}
+        </div>
+        <Slider
+          label="Opacidad"
+          value={opacity}
+          min={0.15}
+          max={1}
+          step={0.05}
+          onChange={setOpacity}
         />
       </div>
 
@@ -70,7 +118,13 @@ export function HeartScene({ runtime }: HeartSceneProps) {
         <directionalLight position={[-3, 1, -2]} intensity={0.5} />
 
         <Suspense fallback={null}>
-          <HeartModel runtime={runtime} timeline={timeline} heartState={heartState} />
+          <HeartModel
+            runtime={runtime}
+            timeline={timeline}
+            heartState={heartState}
+            isolated={isolated}
+            opacity={opacity}
+          />
         </Suspense>
 
         {/* Nunca autoRotate: el spec lo descarta, y con razón — un modelo que

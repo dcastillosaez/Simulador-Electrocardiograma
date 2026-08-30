@@ -29,3 +29,48 @@
   font-family: var(--font-ui);
   font-size: var(--font-size-xs);
 }
+
+/* Mandos de capas. Abajo a la derecha, en la esquina que no usan ni los
+   presets de vista ni la atribución de licencia. */
+.layers {
+  position: absolute;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-end;
+}
+
+.groups {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.group {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-background);
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: background var(--motion-fast), color var(--motion-fast);
+}
+
+.group:hover {
+  background: var(--panel-hover);
+}
+
+.groupActive {
+  background: var(--panel-hover);
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.group:focus-visible {
+  outline: 2px solid var(--ecg-trace);
+  outline-offset: 1px;
+}
