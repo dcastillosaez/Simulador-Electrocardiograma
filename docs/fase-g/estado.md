@@ -318,7 +318,10 @@ cd apps/api && ECG_TEST_DB=sqlite uv run pytest -q
 # Frontend
 cd apps/web && npm test
 
-# Shell de escritorio
+# Shell de escritorio. Necesita que exista la carpeta del backend empaquetado
+# —el build script de Tauri no compila sin el recurso que declara el bundle—,
+# pero para compilar y pasar los tests basta con que la ruta exista:
+#   mkdir -p apps/api/packaging/dist/ecg-api
 cd apps/desktop/src-tauri && cargo test
 
 # Backend empaquetado

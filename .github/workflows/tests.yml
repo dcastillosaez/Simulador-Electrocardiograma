@@ -86,6 +86,20 @@ jobs:
       # en la máquina de quien se acordara. Y el que vigila que el escritorio
       # siga sin hacer conexiones salientes, que es una promesa escrita en
       # `docs/instalacion.md` y por tanto ya distribuida.
+      # `tauri.conf.json` declara el backend empaquetado como recurso del
+      # bundle, y el build script se niega a compilar si esa carpeta no existe.
+      # Es deliberado y hay que conservarlo: sin esa negativa, un `tauri build`
+      # sin haber pasado antes PyInstaller produce un instalador sin backend
+      # dentro **y sin fallar**, que es la peor de las dos formas de romperse.
+      #
+      # Aquí no se bundlea nada —solo se compila y se corren los tests— así que
+      # basta con que la ruta exista. Empaquetar el backend de verdad son tres
+      # minutos de PyInstaller en cada pull request para no comprobar nada que
+      # `release.yml` no compruebe ya, ahí sí sobre el artefacto real.
+      - name: Marcador del recurso del backend
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force apps/api/packaging/dist/ecg-api | Out-Null
+
       - name: Tests
         working-directory: apps/desktop/src-tauri
         run: cargo test --quiet
