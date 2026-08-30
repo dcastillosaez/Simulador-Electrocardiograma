@@ -43,6 +43,19 @@ export function SplitPane({
     [minTopFraction, maxTopFraction]
   );
 
+  /** Desplazamiento relativo al valor vigente, no al que vio el último
+   * render. Con teclas mantenidas llegan varias pulsaciones antes de que
+   * React vuelva a pintar, y calcularlas todas desde la misma fracción hace
+   * que solo cuente la última: el divisor se queda clavado tras el primer
+   * paso. */
+  const nudge = useCallback(
+    (delta: number) =>
+      setFraction((current) =>
+        clamp(current + delta, minTopFraction, maxTopFraction)
+      ),
+    [minTopFraction, maxTopFraction]
+  );
+
   useEffect(() => {
     if (!isDragging) return;
 
@@ -69,10 +82,10 @@ export function SplitPane({
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      apply(fraction - KEYBOARD_STEP);
+      nudge(-KEYBOARD_STEP);
     } else if (event.key === "ArrowDown") {
       event.preventDefault();
-      apply(fraction + KEYBOARD_STEP);
+      nudge(KEYBOARD_STEP);
     } else if (event.key === "Home") {
       event.preventDefault();
       apply(defaultTopFraction);

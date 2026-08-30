@@ -456,7 +456,14 @@ export function ECGWorkspace({
         // entre los dos componentes.
         <SplitPane
           label="Reparto entre ECG y corazón"
-          defaultTopFraction={0.65}
+          /* 55/45 y no 65/35. Con el reparto anterior el corazón se quedaba
+             en 272 px de alto contra 806 de ancho en una ventana de 1440×900:
+             el modelo se encaja por el campo de visión vertical, así que esa
+             franja apaisada lo dejaba diminuto con los lados vacíos.
+             Medido a 55/45: el ECG conserva las seis derivaciones sin
+             disparar el aviso de tira compacta ni el de ganancia que no cabe,
+             y el corazón gana un 30% de alto. */
+          defaultTopFraction={0.55}
           minTopFraction={0.3}
           maxTopFraction={0.85}
           top={
