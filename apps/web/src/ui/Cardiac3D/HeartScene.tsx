@@ -6,6 +6,7 @@ import { HEART_GROUPS, type HeartGroup } from "./heart-appearance";
 import {
   CAMERA_FOV_DEG,
   CAMERA_PRESETS,
+  CAMERA_UP,
   DEFAULT_PRESET,
   MAX_ZOOM_DISTANCE,
   MIN_ZOOM_DISTANCE,
@@ -102,6 +103,10 @@ export function HeartScene({ runtime }: HeartSceneProps) {
         key={preset}
         camera={{
           position: presetPosition(preset),
+          // `up` explícito y no el de Three.js por defecto: en las vistas
+          // superior e inferior el eje Y es la dirección de mirada y no puede
+          // ser además el "arriba" de la pantalla.
+          up: CAMERA_UP[preset],
           fov: CAMERA_FOV_DEG,
           near: 0.01,
           far: 20,
