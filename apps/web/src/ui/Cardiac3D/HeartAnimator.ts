@@ -30,6 +30,16 @@ const DEFORMATION: Record<
   InferiorVenaCava: { driver: "atria", longitudinal: 0.002, radial: 0.004 },
 };
 
+/** Qué cámara manda sobre esa estructura.
+ *
+ * Se expone porque el destello de flujo de los grandes vasos tiene que
+ * encenderse con la misma cámara que los deforma: la aorta con el ventrículo
+ * que la llena, las cavas con la aurícula. Derivarlo de aquí en vez de
+ * escribir la lista otra vez evita que las dos se desincronicen. */
+export function driverFor(name: HeartNodeName): keyof Excursions {
+  return DEFORMATION[name].driver;
+}
+
 /** Escala mínima admisible. Con excursiones acotadas a [-1, 1] y factores por
  * debajo de 0,05 no se alcanza nunca, pero una escala nula o negativa
  * invierte las normales de la malla y el modelo se vería del revés: más vale

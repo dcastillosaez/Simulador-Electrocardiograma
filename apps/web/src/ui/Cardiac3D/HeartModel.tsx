@@ -2,11 +2,13 @@ import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import { Mesh, MeshStandardMaterial } from "three";
-import { applyExcursion } from "./HeartAnimator";
+import { applyExcursion, driverFor } from "./HeartAnimator";
 import { HEART_NODE_NAMES, bindHeartNodes, type HeartNodeName, type Object3DLike } from "./heart-nodes";
 import {
   APPEARANCE,
+  VESSEL_GLOW_COLOR,
   opacityFor,
+  vesselGlow,
   visibleNodes,
   type HeartGroup,
 } from "./heart-appearance";
@@ -62,6 +64,10 @@ export function HeartModel({
       table[name] = new MeshStandardMaterial({
         color: look.color,
         roughness: look.roughness,
+        // El destello de flujo de los grandes vasos se enciende variando
+        // `emissiveIntensity` en cada fotograma; el color se fija una vez.
+        emissive: VESSEL_GLOW_COLOR,
+        emissiveIntensity: 0,
         // Un tejido no es metal. Un pelín por encima de cero para que los
         // grandes vasos cojan algo del reflejo especular y no queden planos.
         metalness: 0.04,
@@ -128,13 +134,47 @@ export function HeartModel({
       timeline.current.prune(tS - PRUNE_MARGIN_S);
     }
 
-    applyExcursion(nodes, {
+    const excursions = {
       atria: excursionFor("atria", tS, timeline.current, heartState),
       ventricles: excursionFor("ventricles", tS, timeline.current, heartState),
-    });
+    };
+    applyExcursion(nodes, excursions);
+
+    // Destello de flujo en los grandes vasos. `emissiveIntensity` es un
+    // uniforme: se puede escribir en cada fotograma sin recompilar nada, al
+    // revés que `transparent`.
+    //
+    // Se multiplica por la opacidad para que un vaso apartado siga siendo un
+    // fantasma. Sin eso, aislar los ventrículos dejaría la aorta invisible
+    // pero encendida, brillando en el vacío.
+    for (const name of HEART_NODE_NAMES) {
+      if (APPEARANCE[name].kind !== "vessel") continue;
+      const driver = driverFor(name);
+      const material = materials[name];
+      material.emissiveIntensity =
+        vesselGlow(excursions[driver], isFlowing(driver, heartState)) *
+        material.opacity;
+    }
   });
 
   return <primitive object={scene} />;
+}
+
+/** Si esa cámara está moviendo sangre de verdad.
+ *
+ * Solo la contracción organizada expulsa. Un ventrículo que fibrila se mueve
+ * mucho y no bombea nada, así que los vasos que dependen de él se quedan
+ * apagados — que es exactamente lo que hay que ver en una FV. Sin estado
+ * todavía se asume que sí: lo contrario dejaría el corazón apagado durante el
+ * cuarto de segundo que tarda en llegar el primero. */
+function isFlowing(
+  chamber: ChamberName,
+  heartState: HeartStateValues | null
+): boolean {
+  if (heartState === null) return true;
+  const mode =
+    chamber === "atria" ? heartState.atrial_mode : heartState.ventricular_mode;
+  return mode === "synchronous";
 }
 
 /** Contracción organizada y temblor son excluyentes por cámara, y quien

@@ -153,3 +153,36 @@ export function opacityFor(
   if (!visible.has(name)) return GHOST_OPACITY;
   return baseOpacity;
 }
+
+/** Color del destello de flujo en los grandes vasos.
+ *
+ * Ámbar y no amarillo puro: sobre el rojo de la aorta un amarillo limón vira a
+ * naranja sucio, y sobre el azul del tronco pulmonar se va a verde. El ámbar
+ * aguanta encima de las dos familias y sigue leyéndose como "aquí está pasando
+ * sangre ahora". */
+export const VESSEL_GLOW_COLOR = 0xffc247;
+
+/** Tope del destello.
+ *
+ * Medido en pantalla, no elegido a ojo. Un emisivo ámbar se suma igual sobre
+ * cualquier base, así que el vaso más oscuro es el que antes se lava: a 0,85
+ * la aorta y el tronco pulmonar salen del mismo amarillo, y a 0,40 el tronco
+ * pulmonar —azul oscuro— ya vira a crema mientras la aorta aguanta dorada. A
+ * 0,25 los dos se encienden de forma inconfundible y siguen distinguiéndose.
+ *
+ * Conviene juzgarlo en movimiento y no en una captura: el destello dura unos
+ * 250 ms de cada ciclo, y lo que lo hace legible es que aparezca y desaparezca
+ * con el latido, no su intensidad absoluta. */
+export const VESSEL_GLOW_MAX = 0.25;
+
+/** Intensidad del destello para una excursión dada.
+ *
+ * `flowing` es lo que separa un corazón que expulsa de uno que solo tiembla:
+ * en una fibrilación ventricular la cámara se mueve —y el modelo lo enseña—
+ * pero no sale sangre, así que la aorta no debe encenderse. Que el vaso se
+ * apague del todo en la FV no es un efecto: es el hallazgo. */
+export function vesselGlow(excursion: number, flowing: boolean): number {
+  if (!flowing) return 0;
+  const clamped = Math.min(1, Math.max(0, excursion));
+  return clamped * VESSEL_GLOW_MAX;
+}
