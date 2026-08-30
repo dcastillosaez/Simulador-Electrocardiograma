@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
-import { Mesh, MeshStandardMaterial } from "three";
+import { Mesh, MeshStandardMaterial, Plane, Vector3 } from "three";
 import { applyExcursion } from "./HeartAnimator";
 import { HEART_NODE_NAMES, bindHeartNodes, type HeartNodeName, type Object3DLike } from "./heart-nodes";
 import {
@@ -10,6 +10,12 @@ import {
   visibleNodes,
   type HeartGroup,
 } from "./heart-appearance";
+import { CUT_AXES, cutPlaneConstant, type CutAxis } from "./heart-cut";
+import {
+  CLIPPED_MESH_ORDER,
+  HeartCutaway,
+  createCapMaterial,
+} from "./HeartCutaway";
 import type { CardiacTimeline, ChamberName } from "../../cardiac/cardiac-timeline";
 import { tremorExcursion } from "../../cardiac/tremor";
 import type { HeartStateValues } from "./useCardiacTimeline";
@@ -25,6 +31,8 @@ export interface HeartModelProps {
   isolated: ReadonlySet<HeartGroup>;
   /** Opacidad de lo que está visible, de 0 a 1. */
   opacity: number;
+  /** Corte anatómico activo, o `null` si el corazón se ve entero. */
+  cut: { axis: CutAxis; position: number } | null;
 }
 
 /** Cuánto se descarta de la cola por detrás de la cabeza de reproducción. Un
@@ -42,6 +50,7 @@ export function HeartModel({
   heartState,
   isolated,
   opacity,
+  cut,
 }: HeartModelProps) {
   const { scene } = useGLTF(HEART_MODEL_URL);
   const nodes = useMemo(
@@ -74,11 +83,49 @@ export function HeartModel({
   // que los materiales hay que soltarlos a mano: cambiar de preset de cámara
   // remonta el `Canvas`, y sin esto se acumularía un juego de nueve por cada
   // cambio de vista.
+  // Un material de tapa por estructura, con su mismo color. Se crean siempre,
+  // aunque no haya corte: son nueve materiales que no se dibujan si el grupo
+  // de tapas no está montado, y crearlos y destruirlos al vuelo cada vez que
+  // se activa el corte daría un tirón en el primer fotograma.
+  const capMaterials = useMemo(() => {
+    const table = {} as Record<HeartNodeName, MeshStandardMaterial>;
+    for (const name of HEART_NODE_NAMES) {
+      table[name] = createCapMaterial(APPEARANCE[name].color);
+    }
+    return table;
+  }, []);
+
+  // El plano vive fuera del render: Three.js guarda la referencia dentro de
+  // cada material, así que hay que mover *este* objeto, no sustituirlo. Si se
+  // creara uno nuevo en cada cambio del mando, los materiales seguirían
+  // apuntando al viejo y el corte no se movería.
+  const plane = useMemo(() => new Plane(new Vector3(0, 0, -1), 0), []);
+
   useEffect(() => {
     return () => {
       for (const material of Object.values(materials)) material.dispose();
+      for (const material of Object.values(capMaterials)) material.dispose();
     };
-  }, [materials]);
+  }, [materials, capMaterials]);
+
+  useEffect(() => {
+    if (cut === null) return;
+    const [x, y, z] = CUT_AXES[cut.axis].normal;
+    plane.normal.set(x, y, z);
+    plane.constant = cutPlaneConstant(cut.axis, cut.position);
+  }, [plane, cut]);
+
+  useEffect(() => {
+    const planes = cut === null ? null : [plane];
+    for (const name of HEART_NODE_NAMES) {
+      const mesh = nodes[name] as unknown as Mesh;
+      materials[name].clippingPlanes = planes;
+      // Las mallas de color van detrás de todas las pasadas de stencil y de
+      // todas las tapas. Con el orden por defecto —cero para todo— la tapa se
+      // dibujaría antes de que el stencil dijera dónde va.
+      mesh.renderOrder = cut === null ? 0 : CLIPPED_MESH_ORDER;
+    }
+  }, [nodes, materials, plane, cut]);
 
   useEffect(() => {
     const visible = visibleNodes(isolated);
@@ -108,8 +155,19 @@ export function HeartModel({
       // contrario de lo que pide quien la aisló.
       material.depthWrite = !translucent;
       mesh.material = material;
+
+      // La tapa hereda la misma opacidad: una estructura apartada tiene que
+      // ser fantasma también por dentro del corte, o el aislamiento se rompe
+      // justo en la superficie que más se mira.
+      const cap = capMaterials[name];
+      if (cap.transparent !== translucent) {
+        cap.transparent = translucent;
+        cap.needsUpdate = true;
+      }
+      cap.opacity = alpha;
+      cap.depthWrite = !translucent;
     }
-  }, [nodes, materials, isolated, opacity]);
+  }, [nodes, materials, capMaterials, isolated, opacity]);
 
   useFrame(() => {
     // El reloj es la cabeza de reproducción del buffer, NUNCA el reloj de
@@ -134,7 +192,14 @@ export function HeartModel({
     });
   });
 
-  return <primitive object={scene} />;
+  return (
+    <>
+      <primitive object={scene} />
+      {cut !== null && (
+        <HeartCutaway nodes={nodes} plane={plane} capMaterials={capMaterials} />
+      )}
+    </>
+  );
 }
 
 /** Contracción organizada y temblor son excluyentes por cámara, y quien
