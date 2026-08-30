@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import { SegmentedControl, Slider } from "@ui-system";
@@ -20,6 +20,7 @@ import {
   type CameraPreset,
 } from "./HeartCamera";
 import { HeartModel } from "./HeartModel";
+import { ScaleBar } from "./ScaleBar";
 import { useCardiacTimeline } from "./useCardiacTimeline";
 import type { SessionRuntime } from "../../simulation-runtime/session-runtime";
 import styles from "./HeartScene.module.css";
@@ -70,6 +71,8 @@ export function HeartScene({ runtime }: HeartSceneProps) {
   const [opacity, setOpacity] = useState(1);
   const [cutting, setCutting] = useState(false);
   const [cutPosition, setCutPosition] = useState(DEFAULT_CUT_POSITION);
+  const scaleBarRef = useRef<HTMLDivElement>(null);
+  const scaleLabelRef = useRef<HTMLSpanElement>(null);
 
   const toggleGroup = useCallback((group: HeartGroup) => {
     setIsolated((current) => {
@@ -181,6 +184,7 @@ export function HeartScene({ runtime }: HeartSceneProps) {
             red —hay empaquetado de escritorio—. Un relleno hemisférico da un
             resultado parecido sin salir a Internet. */}
         <LocalClipping />
+        <ScaleBar barRef={scaleBarRef} labelRef={scaleLabelRef} />
 
         <hemisphereLight args={["#fff4ee", "#2b2233", 0.55]} />
         <ambientLight intensity={0.35} />
@@ -208,6 +212,13 @@ export function HeartScene({ runtime }: HeartSceneProps) {
           maxDistance={MAX_ZOOM_DISTANCE}
         />
       </Canvas>
+
+      {/* Barra de escala. Un corte sin referencia se mira; con ella se mide,
+          que es lo que distingue una herramienta docente de una ilustración. */}
+      <div className={styles.scale} aria-hidden="true">
+        <div ref={scaleBarRef} className={styles.scaleBar} />
+        <span ref={scaleLabelRef} className={styles.scaleLabel} />
+      </div>
 
       {/* La licencia del modelo es CC BY-SA: la atribución tiene que estar
           donde se ve el modelo, no solo en el repositorio. El texto es el que

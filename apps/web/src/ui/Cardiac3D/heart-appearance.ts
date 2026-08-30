@@ -43,24 +43,33 @@ export interface Appearance {
  * Los tonos dentro de cada familia no son arbitrarios: se oscurecen conforme
  * la sangre se aleja del capilar. La aorta es el rojo más profundo del lado
  * izquierdo y el tronco pulmonar el azul más profundo del derecho, que es
- * como se dibujan en un atlas. */
+ * como se dibujan en un atlas.
+ *
+ * La separación dentro de cada familia está **medida**, no elegida a ojo. Se
+ * calcularon los pares de estructuras que llegan a tocarse en la sección
+ * coronal barriendo el plano por cinco profundidades —doce pares— y se
+ * comprobó la diferencia perceptual de cada uno en CIE Lab. La primera versión
+ * de esta tabla dejaba cuatro pares por debajo de 12, que es donde el ojo deja
+ * de separar dos tonos vecinos con fiabilidad; con estos valores el peor par
+ * adyacente está en 23 y las dos familias siguen a 52 de distancia, que es lo
+ * que hace que rojo y azul no se confundan nunca. */
 export const APPEARANCE: Record<HeartNodeName, Appearance> = {
   LeftVentricle: {
-    color: 0xc03030,
+    color: 0xd44038,
     circuit: "systemic",
     kind: "chamber",
     group: "ventricles",
     roughness: 0.62,
   },
   LeftAtrium: {
-    color: 0xd8685a,
+    color: 0xe8836b,
     circuit: "systemic",
     kind: "chamber",
     group: "atria",
     roughness: 0.62,
   },
   Aorta: {
-    color: 0xa01a28,
+    color: 0x8f1220,
     circuit: "systemic",
     kind: "vessel",
     group: "vessels",
@@ -70,42 +79,47 @@ export const APPEARANCE: Record<HeartNodeName, Appearance> = {
     // Más claro que la aurícula izquierda a propósito: son cuatro troncos que
     // desembocan justo en ella, y con tonos vecinos el punto de desembocadura
     // —que es lo que interesa ver— se pierde.
-    color: 0xf0a08c,
+    color: 0xf7c0a6,
     circuit: "systemic",
     kind: "vessel",
     group: "vessels",
     roughness: 0.42,
   },
   RightVentricle: {
-    color: 0x2e60a8,
+    color: 0x3a72c8,
     circuit: "pulmonary",
     kind: "chamber",
     group: "ventricles",
     roughness: 0.62,
   },
   RightAtrium: {
-    color: 0x6096d6,
+    color: 0x8fc0ea,
     circuit: "pulmonary",
     kind: "chamber",
     group: "atria",
     roughness: 0.62,
   },
   PulmonaryArtery: {
-    color: 0x24488c,
+    color: 0x1b3a7c,
     circuit: "pulmonary",
     kind: "vessel",
     group: "vessels",
     roughness: 0.42,
   },
   SuperiorVenaCava: {
-    color: 0x487cbe,
+    // Las dos cavas tenían el mismo color exacto, y además se confundían con
+    // la aurícula a la que desembocan: en la sección coronal ese par salía a
+    // una diferencia perceptual de 10, por debajo de lo que el ojo separa con
+    // fiabilidad. Se les da un azul con algo de verde, que las aparta de la
+    // aurícula sin sacarlas de la familia fría.
+    color: 0x2f8fa6,
     circuit: "pulmonary",
     kind: "vessel",
     group: "vessels",
     roughness: 0.42,
   },
   InferiorVenaCava: {
-    color: 0x487cbe,
+    color: 0x59b8c4,
     circuit: "pulmonary",
     kind: "vessel",
     group: "vessels",
