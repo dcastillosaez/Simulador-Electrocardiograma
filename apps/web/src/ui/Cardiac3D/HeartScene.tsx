@@ -4,8 +4,11 @@ import { OrbitControls } from "@react-three/drei";
 import { SegmentedControl, Slider } from "@ui-system";
 import { HEART_GROUPS, type HeartGroup } from "./heart-appearance";
 import {
+  CAMERA_FOV_DEG,
   CAMERA_PRESETS,
   DEFAULT_PRESET,
+  MAX_ZOOM_DISTANCE,
+  MIN_ZOOM_DISTANCE,
   presetPosition,
   type CameraPreset,
 } from "./HeartCamera";
@@ -97,7 +100,12 @@ export function HeartScene({ runtime }: HeartSceneProps) {
         // `key`: cambiar de preset reposiciona la cámara. Sin remontar, los
         // OrbitControls conservan su objetivo y la vista nueva sale torcida.
         key={preset}
-        camera={{ position: presetPosition(preset), fov: 35, near: 0.01, far: 10 }}
+        camera={{
+          position: presetPosition(preset),
+          fov: CAMERA_FOV_DEG,
+          near: 0.01,
+          far: 20,
+        }}
         // `powerPreference: high-performance` pide la GPU dedicada en
         // portátiles con gráficos híbridos, donde la integrada no sostiene 60
         // fps con este número de triángulos.
@@ -133,8 +141,8 @@ export function HeartScene({ runtime }: HeartSceneProps) {
           enablePan
           enableZoom
           autoRotate={false}
-          minDistance={0.12}
-          maxDistance={1.2}
+          minDistance={MIN_ZOOM_DISTANCE}
+          maxDistance={MAX_ZOOM_DISTANCE}
         />
       </Canvas>
 

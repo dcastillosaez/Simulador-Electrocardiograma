@@ -87,12 +87,26 @@ export function HeartModel({
       const material = materials[name];
       const alpha = opacityFor(name, visible, opacity);
 
+      const translucent = alpha < 1;
+
+      // `opacity` es un uniforme y se recoge sola. `transparent` no: cambia el
+      // programa de sombreado y el renderizador no se entera hasta que se le
+      // marca `needsUpdate`. Sin esta línea los mandos de aislamiento y
+      // opacidad no hacen nada visible —el estado de React cambia, el material
+      // también, y la escena sigue igual—, que es exactamente el fallo que
+      // tuvo esta escena hasta que se probó en la aplicación.
+      //
+      // Se marca solo cuando el flag cambia de verdad: recompilar en cada
+      // movimiento del slider costaría un tirón por cada píxel arrastrado.
+      if (material.transparent !== translucent) {
+        material.transparent = translucent;
+        material.needsUpdate = true;
+      }
       material.opacity = alpha;
-      material.transparent = alpha < 1;
       // Lo translúcido no escribe profundidad: si lo hiciera, una estructura
       // fantasma delante taparía a la que se está aislando, que es justo lo
       // contrario de lo que pide quien la aisló.
-      material.depthWrite = alpha >= 1;
+      material.depthWrite = !translucent;
       mesh.material = material;
     }
   }, [nodes, materials, isolated, opacity]);
