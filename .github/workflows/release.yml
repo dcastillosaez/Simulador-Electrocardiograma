@@ -56,6 +56,12 @@ jobs:
     # release y subirle el instalador.
     permissions:
       contents: write
+      # La attestation de procedencia se firma con un token OIDC efimero de
+      # este workflow y se registra en el log publico de transparencia: no hay
+      # clave que guardar, y quien descargue el instalador puede comprobar que
+      # salio de este repositorio y de este commit.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -126,19 +132,74 @@ jobs:
         env:
           ECG_SIGN_THUMBPRINT: ${{ secrets.ECG_SIGN_THUMBPRINT }}
 
+      # El hash se calcula una sola vez, sobre el fichero que se va a publicar,
+      # y viaja al cuerpo de la release. Publicar el instalador sin decir cual
+      # es su huella deja a quien lo descarga sin forma de comprobar que le ha
+      # llegado entero y sin tocar.
+      - name: Huella del instalador
+        id: huella
+        shell: pwsh
+        run: |
+          $inst = Get-Item "apps/desktop/src-tauri/target/release/bundle/nsis/*setup.exe"
+          $sha = (Get-FileHash $inst.FullName -Algorithm SHA256).Hash.ToLower()
+          "nombre=$($inst.Name)" >> $env:GITHUB_OUTPUT
+          "sha256=$sha"         >> $env:GITHUB_OUTPUT
+          "$sha  $($inst.Name)" | Out-File -Encoding ascii "$($inst.DirectoryName)/SHA256SUMS.txt"
+          "$($inst.Name)"
+          "sha256: $sha"
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: instalador-windows
-          path: apps/desktop/src-tauri/target/release/bundle/nsis/*setup.exe
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/nsis/*setup.exe
+            apps/desktop/src-tauri/target/release/bundle/nsis/SHA256SUMS.txt
+
+      # Firma criptografica de la relacion «este binario salio de este commit,
+      # en este workflow». No sustituye a la firma Authenticode --no silencia a
+      # SmartScreen-- pero es lo que permite verificar la procedencia sin
+      # confiar en nadie:
+      #
+      #     gh attestation verify "Simulador ECG_x.y.z_x64-setup.exe" --repo <owner>/<repo>
+      - name: Attestation de procedencia
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: apps/desktop/src-tauri/target/release/bundle/nsis/*setup.exe
 
       - name: Publicar la release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          files: apps/desktop/src-tauri/target/release/bundle/nsis/*setup.exe
+          files: |
+            apps/desktop/src-tauri/target/release/bundle/nsis/*setup.exe
+            apps/desktop/src-tauri/target/release/bundle/nsis/SHA256SUMS.txt
           draft: true
           body: |
             Simulador de ECG — ${{ github.ref_name }}
 
             Herramienta docente. No está destinada al diagnóstico ni al
             tratamiento de pacientes.
+
+            ## Cómo comprobar que el instalador es el que se publicó aquí
+
+            Huella SHA-256 de `${{ steps.huella.outputs.nombre }}`:
+
+            ```
+            ${{ steps.huella.outputs.sha256 }}
+            ```
+
+            En PowerShell, sobre el fichero descargado:
+
+            ```powershell
+            Get-FileHash ".\${{ steps.huella.outputs.nombre }}" -Algorithm SHA256
+            ```
+
+            Y la procedencia —que este binario salió de este repositorio y de
+            este commit, compilado por este workflow— con la CLI de GitHub:
+
+            ```powershell
+            gh attestation verify ".\${{ steps.huella.outputs.nombre }}" --repo ${{ github.repository }}
+            ```
+
+            Instrucciones completas, y qué hace el instalador en la máquina, en
+            [docs/instalacion.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/instalacion.md).

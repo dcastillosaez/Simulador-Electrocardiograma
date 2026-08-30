@@ -242,20 +242,61 @@ manipulado). Son cuatro conversaciones distintas con el usuario.
 
 Dos workflows:
 
-- **`tests.yml`** en cada push y PR: API contra los dos motores, frontend, y
-  `npm audit`/`pip-audit` que **avisan sin bloquear** — en un proyecto pequeño,
-  un aviso que impide mergear un viernes es un aviso que se acaba ignorando.
+- **`tests.yml`** en cada push y PR: API contra los dos motores, frontend,
+  escritorio (`cargo test` en Windows) y `npm audit`/`pip-audit` que **avisan
+  sin bloquear** — en un proyecto pequeño, un aviso que impide mergear un
+  viernes es un aviso que se acaba ignorando.
 - **`release.yml`** con un tag: tests → frontend → backend empaquetado →
   comprobación de que el backend existe → instalador firmado → **smoke test que
-  instala, arranca y desinstala en el runner** → comprobación de firma →
-  publicación como borrador.
+  instala, arranca y desinstala en el runner** → comprobación de firma → huella
+  SHA-256 → attestation de procedencia → publicación como borrador.
 
 Dos detalles que no son adorno: la comprobación de que el backend se empaquetó
 antes de bundlear, porque sin ella el instalador sale sin él **y sin fallar**;
 y el smoke test, porque un instalador que no se ha ejecutado nunca no es un
 release.
 
+### Procedencia verificable
+
+Mientras no haya certificado de una autoridad reconocida, SmartScreen va a
+avisar y no hay metadato que lo evite. Lo que sí se puede dar es algo más
+fuerte que el aviso: la release publica la **huella SHA-256** del instalador
+—junto a un `SHA256SUMS.txt`— y una **attestation de procedencia**
+(`actions/attest-build-provenance`), que firma la relación «este binario salió
+de este commit, en este workflow» con un token OIDC efímero y la registra en el
+log público de transparencia. Se comprueba con:
+
+```powershell
+gh attestation verify ".\Simulador ECG_0.1.0_x64-setup.exe" --repo dcastillosaez/Simulador-Electrocardiograma
+```
+
+No silencia a SmartScreen —Windows no mira eso— pero es lo que pedirá cualquier
+departamento de informática antes de aprobar una instalación, y no depende de
+confiar en la palabra de nadie. El procedimiento completo, y qué hace el
+instalador en la máquina, está en [`docs/instalacion.md`](../instalacion.md).
+
 No se ha disparado todavía: requiere hacer push de un tag.
+
+### La ausencia de red, defendida por un test
+
+`apps/desktop/src-tauri/tests/sin_conexiones_salientes.rs` comprueba tres cosas:
+que no hay ninguna dependencia declarada que hable por la red, que `main.rs` no
+registra ningún plugin de Tauri, y que `docs/instalacion.md` sigue conteniendo
+la promesa que los otros dos vigilan.
+
+El motivo es que esa promesa **ya está distribuida**. Es el argumento con el que
+un hospital aprueba la instalación en una tarde, y basta con añadir
+`tauri-plugin-updater` para arreglar otra cosa para que pase a ser mentira sin
+que nada falle ni nadie se entere: el programa seguiría funcionando igual de
+bien. El test convierte eso en un fallo de CI con instrucciones —actualizar el
+documento y avisar a los centros donde la aplicación esté aprobada como
+offline— en vez de en un descubrimiento incómodo meses después.
+
+Queda pendiente una decisión, no una implementación: `tauri.conf.json` declara
+un updater con su endpoint y su clave, y el binario no lo compila. O se retira
+esa sección y el escritorio es offline por diseño, o se activa el updater y hay
+que rehacer la sección de red de `docs/instalacion.md`. Hoy la configuración
+dice una cosa y el binario hace otra.
 
 ## Lo que queda, y no es programación
 
