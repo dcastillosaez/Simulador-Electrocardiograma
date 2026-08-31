@@ -34,6 +34,27 @@ export const CUT_AXES: Record<CutAxis, CutAxisSpec> = {
 
 export const DEFAULT_CUT_AXIS: CutAxis = "coronal";
 
+/** Orden en que se ofrecen. El coronal primero por ser el que más enseña. */
+export const CUT_AXIS_ORDER = ["coronal", "transversal", "sagittal"] as const;
+
+export const CUT_AXIS_LABELS: Record<CutAxis, string> = {
+  coronal: "Coronal",
+  transversal: "Transversal",
+  sagittal: "Sagital",
+};
+
+/** Un plano activo: por qué eje corta y por dónde.
+ *
+ * Son varios y no uno porque los cortes **no son excluyentes**: Three.js
+ * acepta una lista de planos y conserva la geometría que está del lado bueno
+ * de todos, así que dos planos abren una esquina y tres abren un octante. Es
+ * el corte de esquina de cualquier atlas, y para ver la relación entre cámaras
+ * dice más que un plano solo. */
+export interface ActiveCut {
+  axis: CutAxis;
+  position: number;
+}
+
 /** Dónde arranca el plano, de 0 a 1 sobre el recorrido del eje.
  *
  * Medido barriendo el eje y midiendo el área que ocupa cada cámara en la

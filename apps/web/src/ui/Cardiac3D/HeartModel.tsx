@@ -10,7 +10,13 @@ import {
   visibleNodes,
   type HeartGroup,
 } from "./heart-appearance";
-import { CUT_AXES, cutPlaneConstant, type CutAxis } from "./heart-cut";
+import {
+  CUT_AXES,
+  CUT_AXIS_ORDER,
+  cutPlaneConstant,
+  type ActiveCut,
+  type CutAxis,
+} from "./heart-cut";
 import {
   CLIPPED_MESH_ORDER,
   HeartCutaway,
@@ -31,8 +37,9 @@ export interface HeartModelProps {
   isolated: ReadonlySet<HeartGroup>;
   /** Opacidad de lo que está visible, de 0 a 1. */
   opacity: number;
-  /** Corte anatómico activo, o `null` si el corazón se ve entero. */
-  cut: { axis: CutAxis; position: number } | null;
+  /** Cortes anatómicos activos. Vacío deja el corazón entero. No son
+   * excluyentes: dos planos abren una esquina y tres un octante. */
+  cuts: ActiveCut[];
 }
 
 /** Cuánto se descarta de la cola por detrás de la cabeza de reproducción. Un
@@ -50,7 +57,7 @@ export function HeartModel({
   heartState,
   isolated,
   opacity,
-  cut,
+  cuts,
 }: HeartModelProps) {
   const { scene } = useGLTF(HEART_MODEL_URL);
   const nodes = useMemo(
@@ -79,10 +86,6 @@ export function HeartModel({
     return table;
   }, []);
 
-  // La escena viene del caché de `useGLTF` y sobrevive a este componente, así
-  // que los materiales hay que soltarlos a mano: cambiar de preset de cámara
-  // remonta el `Canvas`, y sin esto se acumularía un juego de nueve por cada
-  // cambio de vista.
   // Un material de tapa por estructura, con su mismo color. Se crean siempre,
   // aunque no haya corte: son nueve materiales que no se dibujan si el grupo
   // de tapas no está montado, y crearlos y destruirlos al vuelo cada vez que
@@ -95,12 +98,31 @@ export function HeartModel({
     return table;
   }, []);
 
-  // El plano vive fuera del render: Three.js guarda la referencia dentro de
-  // cada material, así que hay que mover *este* objeto, no sustituirlo. Si se
-  // creara uno nuevo en cada cambio del mando, los materiales seguirían
+  // Un plano por eje, creados una vez. Three.js guarda la referencia dentro
+  // de cada material, así que hay que mover *estos* objetos, no sustituirlos:
+  // creando uno nuevo en cada cambio del mando, los materiales seguirían
   // apuntando al viejo y el corte no se movería.
-  const plane = useMemo(() => new Plane(new Vector3(0, 0, -1), 0), []);
+  const planes = useMemo(() => {
+    const table = {} as Record<CutAxis, Plane>;
+    for (const axis of CUT_AXIS_ORDER) {
+      const [x, y, z] = CUT_AXES[axis].normal;
+      table[axis] = new Plane(new Vector3(x, y, z), 0);
+    }
+    return table;
+  }, []);
 
+  // La lista que reciben los materiales. Se reconstruye solo cuando cambia
+  // qué ejes están activos, no cuando se mueve un mando: el número de planos
+  // está cocido en el programa de sombreado y cambiarlo obliga a recompilar.
+  const activePlanes = useMemo(
+    () => cuts.map((cut) => planes[cut.axis]),
+    [planes, cuts]
+  );
+
+  // La escena viene del caché de `useGLTF` y sobrevive a este componente, así
+  // que los materiales hay que soltarlos a mano: cambiar de preset de cámara
+  // remonta el `Canvas`, y sin esto se acumularía un juego por cada cambio de
+  // vista.
   useEffect(() => {
     return () => {
       for (const material of Object.values(materials)) material.dispose();
@@ -109,23 +131,28 @@ export function HeartModel({
   }, [materials, capMaterials]);
 
   useEffect(() => {
-    if (cut === null) return;
-    const [x, y, z] = CUT_AXES[cut.axis].normal;
-    plane.normal.set(x, y, z);
-    plane.constant = cutPlaneConstant(cut.axis, cut.position);
-  }, [plane, cut]);
+    for (const cut of cuts) {
+      planes[cut.axis].constant = cutPlaneConstant(cut.axis, cut.position);
+    }
+  }, [planes, cuts]);
 
   useEffect(() => {
-    const planes = cut === null ? null : [plane];
+    const list = activePlanes.length === 0 ? null : activePlanes;
     for (const name of HEART_NODE_NAMES) {
       const mesh = nodes[name] as unknown as Mesh;
-      materials[name].clippingPlanes = planes;
+      const material = materials[name];
+      // El número de planos de recorte se compila dentro del sombreador, así
+      // que pasar de uno a dos exige recompilar. Cambiar la constante de un
+      // plano ya existente no: eso es un uniforme y se recoge solo.
+      const antes = material.clippingPlanes?.length ?? 0;
+      material.clippingPlanes = list;
+      if (antes !== activePlanes.length) material.needsUpdate = true;
       // Las mallas de color van detrás de todas las pasadas de stencil y de
       // todas las tapas. Con el orden por defecto —cero para todo— la tapa se
       // dibujaría antes de que el stencil dijera dónde va.
-      mesh.renderOrder = cut === null ? 0 : CLIPPED_MESH_ORDER;
+      mesh.renderOrder = list === null ? 0 : CLIPPED_MESH_ORDER;
     }
-  }, [nodes, materials, plane, cut]);
+  }, [nodes, materials, activePlanes]);
 
   useEffect(() => {
     const visible = visibleNodes(isolated);
@@ -195,8 +222,12 @@ export function HeartModel({
   return (
     <>
       <primitive object={scene} />
-      {cut !== null && (
-        <HeartCutaway nodes={nodes} plane={plane} capMaterials={capMaterials} />
+      {activePlanes.length > 0 && (
+        <HeartCutaway
+          nodes={nodes}
+          planes={activePlanes}
+          capMaterials={capMaterials}
+        />
       )}
     </>
   );

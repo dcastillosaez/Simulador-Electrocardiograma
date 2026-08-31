@@ -3,6 +3,8 @@ import { MODEL_HALF_EXTENTS } from "./HeartCamera";
 import {
   CAP_SIZE,
   CUT_AXES,
+  CUT_AXIS_LABELS,
+  CUT_AXIS_ORDER,
   DEFAULT_CUT_AXIS,
   DEFAULT_CUT_POSITION,
   MAX_CUT_POSITION,
@@ -87,6 +89,35 @@ describe("CAP_SIZE", () => {
     };
     for (const axis of AXES) {
       expect(CAP_SIZE).toBeGreaterThan(diagonals[axis]);
+    }
+  });
+});
+
+describe("planos combinables", () => {
+  it("ofrece los tres ejes, con el coronal primero", () => {
+    expect([...CUT_AXIS_ORDER]).toEqual(["coronal", "transversal", "sagittal"]);
+    expect(CUT_AXIS_ORDER[0]).toBe(DEFAULT_CUT_AXIS);
+  });
+
+  it("cada eje tiene su etiqueta", () => {
+    for (const axis of CUT_AXIS_ORDER) {
+      expect(CUT_AXIS_LABELS[axis]).toBeTruthy();
+    }
+  });
+
+  it("las tres normales son perpendiculares entre sí", () => {
+    // Es lo que hace que combinarlas abra una esquina limpia en vez de una
+    // cuña: dos planos oblicuos entre sí recortarían en diagonal.
+    const pares: Array<[typeof CUT_AXIS_ORDER[number], typeof CUT_AXIS_ORDER[number]]> = [
+      ["coronal", "transversal"],
+      ["coronal", "sagittal"],
+      ["transversal", "sagittal"],
+    ];
+    for (const [a, b] of pares) {
+      const na = CUT_AXES[a].normal;
+      const nb = CUT_AXES[b].normal;
+      const producto = na[0] * nb[0] + na[1] * nb[1] + na[2] * nb[2];
+      expect(producto).toBe(0);
     }
   });
 });

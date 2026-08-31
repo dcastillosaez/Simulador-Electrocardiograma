@@ -11,7 +11,6 @@ import {
   MeshBasicMaterial,
   MeshStandardMaterial,
   NotEqualStencilFunc,
-  Group,
   Plane,
   PlaneGeometry,
   ReplaceStencilOp,
@@ -27,12 +26,17 @@ import { CAP_SIZE } from "./heart-cut";
  * lee como un error de modelado, no como un corte. Estas tapas son lo que
  * convierte el agujero en una sección maciza del color de la estructura.
  *
- * La técnica es la del ejemplo `webgl_clipping_stencil` de Three.js, y no hay
- * otra más simple que funcione: por cada estructura se cuentan en el buffer de
- * stencil las caras traseras menos las delanteras que hay delante del plano
- * —donde el resultado no es cero, el rayo entró en el sólido y no salió, así
- * que ahí hay material cortado— y después se pinta un cuadrado enorme dejando
- * pasar solo esos píxeles.
+ * La técnica es la del ejemplo `webgl_clipping_stencil` de Three.js: por cada
+ * estructura se cuentan en el buffer de stencil las caras traseras menos las
+ * delanteras —donde el resultado no es cero, el rayo entró en el sólido y no
+ * salió, así que ahí hay material cortado— y después se pinta un cuadrado
+ * enorme dejando pasar solo esos píxeles.
+ *
+ * **Vale igual para varios planos a la vez.** La cuenta del stencil no depende
+ * de qué plano abrió el sólido, así que las dos pasadas por estructura sirven
+ * para todas las tapas: solo hay que añadir un cuadrado por plano. Por eso
+ * pasar de un corte a tres cuesta 18 pasadas de stencil igualmente y 27 tapas
+ * en vez de 9, y no el triple de todo.
  *
  * Tres detalles que no son opcionales:
  *
@@ -45,33 +49,42 @@ import { CAP_SIZE } from "./heart-cut";
  * montaje ya no encontraba las estructuras y `bindHeartNodes` reventaba.
  * Comprobado: encender y apagar el corte tres veces y cambiar de vista bastaba.
  *
- * El orden de dibujado importa y por eso va explícito: stencil, tapa, y las
+ * El orden de dibujado importa y por eso va explícito: stencil, tapas, y las
  * mallas de color al final. Con el orden por defecto la tapa se dibujaría
  * antes de que el stencil estuviera escrito.
  *
- * El stencil se limpia después de cada tapa. Sin eso, la cuenta de una
- * estructura contaminaría la siguiente y las cámaras se taparían unas con el
- * color de otras. */
+ * El stencil se limpia después de la **última** tapa de cada estructura. Antes
+ * contaminaría a las tapas que aún faltan por dibujar de esa misma estructura;
+ * después, la cuenta pasaría a la siguiente y las cámaras se taparían unas con
+ * el color de otras. */
 
 export interface HeartCutawayProps {
   nodes: HeartNodes;
-  plane: Plane;
+  /** Planos activos. La geometría se conserva donde está del lado bueno de
+   * todos: dos planos abren una esquina, tres un octante. */
+  planes: Plane[];
   /** Material de tapa por estructura. Los crea y actualiza `HeartModel`, que
    * es quien sabe de opacidad y aislamiento. */
   capMaterials: Record<HeartNodeName, MeshStandardMaterial>;
 }
 
-/** Dónde entra cada cosa en el orden de dibujado. Separados de diez en diez
- * para que quepan las tres pasadas de cada estructura sin solaparse. */
-const STENCIL_ORDER = (index: number) => index * 10 + 1;
-const CAP_ORDER = (index: number) => index * 10 + 2;
+/** Hueco de orden de dibujado por estructura. Diez da sitio a la pasada de
+ * stencil y a una tapa por plano sin invadir el de la siguiente. */
+const SLOT = 10;
+const STENCIL_ORDER = (structure: number) => structure * SLOT + 1;
+const CAP_ORDER = (structure: number, plane: number) => structure * SLOT + 2 + plane;
 
 /** Las nueve mallas de color, después de todas las tapas. */
-export const CLIPPED_MESH_ORDER = HEART_NODE_NAMES.length * 10 + 10;
+export const CLIPPED_MESH_ORDER = HEART_NODE_NAMES.length * SLOT + SLOT;
 
-export function HeartCutaway({ nodes, plane, capMaterials }: HeartCutawayProps) {
-  const capGroup = useRef<Group>(null);
+interface CapEntry {
+  mesh: Mesh;
+  plane: Plane;
+}
+
+export function HeartCutaway({ nodes, planes, capMaterials }: HeartCutawayProps) {
   const stencilMeshes = useRef<Mesh[]>([]);
+  const caps = useRef<CapEntry[]>([]);
 
   const capGeometry = useMemo(() => new PlaneGeometry(CAP_SIZE, CAP_SIZE), []);
 
@@ -83,13 +96,16 @@ export function HeartCutaway({ nodes, plane, capMaterials }: HeartCutawayProps) 
     for (const name of HEART_NODE_NAMES) {
       // `colorWrite: false` y `depthTest: false`: estas dos pasadas no pintan
       // nada ni miran la profundidad, solo llevan la cuenta en el stencil.
+      // Llevan **todos** los planos: la cuenta tiene que ser la del sólido ya
+      // recortado por los tres, o la tapa de uno se saldría por donde corta
+      // otro.
       const base = {
         depthWrite: false,
         depthTest: false,
         colorWrite: false,
         stencilWrite: true,
         stencilFunc: AlwaysStencilFunc,
-        clippingPlanes: [plane],
+        clippingPlanes: planes,
       };
       const back = new MeshBasicMaterial({ ...base, side: BackSide });
       back.stencilFail = IncrementWrapStencilOp;
@@ -104,12 +120,14 @@ export function HeartCutaway({ nodes, plane, capMaterials }: HeartCutawayProps) 
       table[name] = { back, front };
     }
     return table;
-  }, [plane]);
+  }, [planes]);
 
   useEffect(() => {
     const tracked = stencilMeshes;
+    const trackedCaps = caps;
     return () => {
       tracked.current = [];
+      trackedCaps.current = [];
       capGeometry.dispose();
       for (const pair of Object.values(stencilMaterials)) {
         pair.back.dispose();
@@ -130,63 +148,62 @@ export function HeartCutaway({ nodes, plane, capMaterials }: HeartCutawayProps) 
       mesh.matrixWorldNeedsUpdate = true;
     }
 
-    // El plano se mueve con el mando, así que la tapa se recoloca en cada
-    // fotograma. Son nueve objetos que comparten transformación: se mueve el
-    // grupo una vez y no cada malla.
-    const group = capGroup.current;
-    if (!group) return;
-    plane.coplanarPoint(group.position);
-    // `lookAt` orienta el +Z del objeto hacia el punto. El cuadrado tiene su
-    // normal en +Z y la normal del plano apunta hacia la mitad que se quita,
-    // así que se mira al lado contrario para que la tapa dé la cara a quien
-    // observa.
-    group.lookAt(
-      group.position.x - plane.normal.x,
-      group.position.y - plane.normal.y,
-      group.position.z - plane.normal.z
-    );
+    // Cada tapa se pega a su plano, que se mueve con el mando.
+    for (const { mesh, plane } of caps.current) {
+      plane.coplanarPoint(mesh.position);
+      // `lookAt` orienta el +Z del objeto hacia el punto. El cuadrado tiene su
+      // normal en +Z y la normal del plano apunta hacia la mitad que se quita,
+      // así que se mira al lado contrario para que la tapa dé la cara a quien
+      // observa.
+      mesh.lookAt(
+        mesh.position.x - plane.normal.x,
+        mesh.position.y - plane.normal.y,
+        mesh.position.z - plane.normal.z
+      );
+    }
   });
 
   return (
     <>
-      {HEART_NODE_NAMES.map((name, index) => {
+      {HEART_NODE_NAMES.map((name, structure) => {
         const node = nodes[name] as unknown as Mesh;
         const geometry = node.geometry as BufferGeometry;
         const { back, front } = stencilMaterials[name];
-        const track = (mesh: Mesh | null) => {
+        const trackStencil = (mesh: Mesh | null) => {
           if (mesh === null) return;
           mesh.matrixAutoUpdate = false;
           mesh.userData.source = node;
           if (!stencilMeshes.current.includes(mesh)) stencilMeshes.current.push(mesh);
         };
+
         return (
-          <group key={`stencil-${name}`}>
+          <group key={`cut-${name}`}>
             <mesh
-              ref={track}
+              ref={trackStencil}
               geometry={geometry}
               material={back}
-              renderOrder={STENCIL_ORDER(index)}
+              renderOrder={STENCIL_ORDER(structure)}
             />
             <mesh
-              ref={track}
+              ref={trackStencil}
               geometry={geometry}
               material={front}
-              renderOrder={STENCIL_ORDER(index)}
+              renderOrder={STENCIL_ORDER(structure)}
             />
+            {planes.map((plane, index) => (
+              <CapMesh
+                key={`cap-${name}-${index}`}
+                geometry={capGeometry}
+                material={capMaterials[name]}
+                plane={plane}
+                renderOrder={CAP_ORDER(structure, index)}
+                clearsStencil={index === planes.length - 1}
+                register={caps}
+              />
+            ))}
           </group>
         );
       })}
-
-      <group ref={capGroup}>
-        {HEART_NODE_NAMES.map((name, index) => (
-          <CapMesh
-            key={`cap-${name}`}
-            geometry={capGeometry}
-            material={capMaterials[name]}
-            renderOrder={CAP_ORDER(index)}
-          />
-        ))}
-      </group>
     </>
   );
 }
@@ -197,22 +214,32 @@ export function HeartCutaway({ nodes, plane, capMaterials }: HeartCutawayProps) 
 function CapMesh({
   geometry,
   material,
+  plane,
   renderOrder,
+  clearsStencil,
+  register,
 }: {
   geometry: PlaneGeometry;
   material: MeshStandardMaterial;
+  plane: Plane;
   renderOrder: number;
+  clearsStencil: boolean;
+  register: { current: CapEntry[] };
 }) {
   const ref = useRef<Mesh>(null);
 
   useEffect(() => {
     const mesh = ref.current;
     if (!mesh) return;
-    mesh.onAfterRender = (renderer) => renderer.clearStencil();
+    register.current.push({ mesh, plane });
+    if (clearsStencil) {
+      mesh.onAfterRender = (renderer) => renderer.clearStencil();
+    }
     return () => {
       mesh.onAfterRender = () => {};
+      register.current = register.current.filter((entry) => entry.mesh !== mesh);
     };
-  }, []);
+  }, [plane, clearsStencil, register]);
 
   return (
     <mesh ref={ref} geometry={geometry} material={material} renderOrder={renderOrder} />

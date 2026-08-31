@@ -1,13 +1,16 @@
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import { SegmentedControl, Slider } from "@ui-system";
 import { HEART_GROUPS, type HeartGroup } from "./heart-appearance";
 import {
-  DEFAULT_CUT_AXIS,
+  CUT_AXIS_LABELS,
+  CUT_AXIS_ORDER,
   DEFAULT_CUT_POSITION,
   MAX_CUT_POSITION,
   MIN_CUT_POSITION,
+  type ActiveCut,
+  type CutAxis,
 } from "./heart-cut";
 import {
   CAMERA_FOV_DEG,
@@ -69,8 +72,34 @@ export function HeartScene({ runtime }: HeartSceneProps) {
   const [preset, setPreset] = useState<CameraPreset>(DEFAULT_PRESET);
   const [isolated, setIsolated] = useState<ReadonlySet<HeartGroup>>(new Set());
   const [opacity, setOpacity] = useState(1);
-  const [cutting, setCutting] = useState(false);
-  const [cutPosition, setCutPosition] = useState(DEFAULT_CUT_POSITION);
+  // Un corte por eje, cada uno con su profundidad. `null` es apagado.
+  const [cuts, setCuts] = useState<Record<CutAxis, number | null>>({
+    coronal: null,
+    transversal: null,
+    sagittal: null,
+  });
+
+  const toggleCut = useCallback((axis: CutAxis) => {
+    setCuts((current) => ({
+      ...current,
+      [axis]: current[axis] === null ? DEFAULT_CUT_POSITION : null,
+    }));
+  }, []);
+
+  const moveCut = useCallback((axis: CutAxis, position: number) => {
+    setCuts((current) => ({ ...current, [axis]: position }));
+  }, []);
+
+  // La lista que baja al modelo. Se memoiza porque `HeartModel` la usa como
+  // dependencia para decidir si hay que recompilar los materiales.
+  const activeCuts: ActiveCut[] = useMemo(
+    () =>
+      CUT_AXIS_ORDER.filter((axis) => cuts[axis] !== null).map((axis) => ({
+        axis,
+        position: cuts[axis] as number,
+      })),
+    [cuts]
+  );
   const scaleBarRef = useRef<HTMLDivElement>(null);
   const scaleLabelRef = useRef<HTMLSpanElement>(null);
 
@@ -114,31 +143,36 @@ export function HeartScene({ runtime }: HeartSceneProps) {
             </button>
           ))}
         </div>
-        <div className={styles.groups}>
-          <button
-            type="button"
-            className={`${styles.group} ${cutting ? styles.groupActive : ""}`}
-            aria-pressed={cutting}
-            onClick={() => setCutting((on) => !on)}
-          >
-            Corte coronal
-          </button>
+        {/* Los tres planos son combinables, no alternativas: Three.js conserva
+            la geometría que está del lado bueno de todos, así que dos abren
+            una esquina y tres un octante. */}
+        <div className={styles.groups} role="group" aria-label="Planos de corte">
+          {CUT_AXIS_ORDER.map((axis) => (
+            <button
+              key={axis}
+              type="button"
+              className={`${styles.group} ${cuts[axis] !== null ? styles.groupActive : ""}`}
+              aria-pressed={cuts[axis] !== null}
+              onClick={() => toggleCut(axis)}
+            >
+              {CUT_AXIS_LABELS[axis]}
+            </button>
+          ))}
         </div>
-        {/* `key` en los dos: el de profundidad aparece y desaparece con el
-            corte, y sin clave React reutiliza la instancia del hermano al
-            reconciliar. El síntoma es que mover un mando cambia el valor del
-            otro. */}
-        {cutting && (
+        {/* `key` en todos: estos aparecen y desaparecen, y sin clave React
+            reutiliza la instancia del hermano al reconciliar. El síntoma es
+            que mover un mando cambia el valor de otro. */}
+        {CUT_AXIS_ORDER.filter((axis) => cuts[axis] !== null).map((axis) => (
           <Slider
-            key="cut-depth"
-            label="Profundidad"
-            value={cutPosition}
+            key={`cut-${axis}`}
+            label={CUT_AXIS_LABELS[axis]}
+            value={cuts[axis] as number}
             min={MIN_CUT_POSITION}
             max={MAX_CUT_POSITION}
             step={0.01}
-            onChange={setCutPosition}
+            onChange={(value) => moveCut(axis, value)}
           />
-        )}
+        ))}
         <Slider
           key="opacity"
           label="Opacidad"
@@ -198,7 +232,7 @@ export function HeartScene({ runtime }: HeartSceneProps) {
             heartState={heartState}
             isolated={isolated}
             opacity={opacity}
-            cut={cutting ? { axis: DEFAULT_CUT_AXIS, position: cutPosition } : null}
+            cuts={activeCuts}
           />
         </Suspense>
 
