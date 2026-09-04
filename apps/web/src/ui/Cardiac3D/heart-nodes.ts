@@ -20,6 +20,18 @@ export const HEART_NODE_NAMES = [
   "PulmonaryVeins",
   "SuperiorVenaCava",
   "InferiorVenaCava",
+  // Sintetizado, no anatomico. BodyParts3D no trae miocardio ventricular: sus
+  // conceptos de "pared" son los musculos papilares y una membrana fina, y de
+  // los 83 elementos del corazon los 61 que no son cavidad son vasos
+  // coronarios. Esta malla se calcula engordando cada cavidad hacia fuera su
+  // propio grosor —12 mm el ventriculo izquierdo, 5 el derecho, 2,5 las
+  // auriculas— y repartiendo el espacio disputado por cercania. Ver
+  // `docs/fase-d/miocardio-y-fuente.md`.
+  //
+  // Va en la lista, y no aparte, porque asi lo recogen solas las tablas de
+  // deformacion, aspecto y tapas del corte. Lo que lo mantiene honesto es que
+  // viene apagado y se enciende a proposito.
+  "Myocardium",
 ] as const;
 
 export type HeartNodeName = (typeof HEART_NODE_NAMES)[number];

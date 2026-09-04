@@ -11,7 +11,7 @@ from typing import Any, Sequence
 
 from ecg_engine.mechanics import MechanicalProfile
 from ecg_engine.types import CardiacEvent
-from heart_engine import derive_mechanical_events
+from heart_engine import derive_mechanical_events, derive_valve_events
 
 CARDIAC_INTERVAL_S: float = 0.25
 """Cada cuánto se publica.
@@ -31,11 +31,20 @@ def cardiac_events_payload(
     t_start_s: float,
     t_end_s: float,
 ) -> dict[str, Any]:
-    """Compone el mensaje de contracciones para la ventana dada."""
+    """Compone el mensaje de contracciones para la ventana dada.
+
+    Las válvulas viajan en el mismo mensaje y no en uno propio: se derivan de
+    estas mismas contracciones, así que separarlas abriría la puerta a que
+    llegaran desparejadas —el corazón latiendo con la coreografía valvular del
+    mensaje anterior— por un reordenamiento del transporte o un descarte.
+    """
     mechanical = derive_mechanical_events(events, profile, rr_s)
     return {
         "type": "cardiac_events",
         "t_start_s": round(t_start_s, 3),
         "t_end_s": round(t_end_s, 3),
         "events": [event.as_payload() for event in mechanical],
+        "valves": [
+            valve.as_payload() for valve in derive_valve_events(mechanical, profile)
+        ],
     }

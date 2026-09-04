@@ -23,8 +23,16 @@ import {
   type CameraPreset,
 } from "./HeartCamera";
 import { HeartModel } from "./HeartModel";
+import { HEART_VALVES, VALVE_ORDER } from "./heart-valves";
 import { ScaleBar } from "./ScaleBar";
+import {
+  NO_CYCLE_LABEL,
+  ValveReadout,
+  apertureLabel,
+  type ValveHandles,
+} from "./ValveReadout";
 import { useCardiacTimeline } from "./useCardiacTimeline";
+import { RESTING_APERTURE } from "../../cardiac/valve-timeline";
 import type { SessionRuntime } from "../../simulation-runtime/session-runtime";
 import styles from "./HeartScene.module.css";
 
@@ -45,6 +53,8 @@ const GROUP_LABELS: Record<HeartGroup, string> = {
   ventricles: "Ventrículos",
   atria: "Aurículas",
   vessels: "Grandes vasos",
+  myocardium: "Miocardio",
+  valves: "Válvulas",
 };
 
 /** Enciende el recorte local del renderizador.
@@ -68,10 +78,11 @@ export interface HeartSceneProps {
 }
 
 export function HeartScene({ runtime }: HeartSceneProps) {
-  const { timeline, heartState } = useCardiacTimeline(runtime);
+  const { timeline, valves, heartState } = useCardiacTimeline(runtime);
   const [preset, setPreset] = useState<CameraPreset>(DEFAULT_PRESET);
   const [isolated, setIsolated] = useState<ReadonlySet<HeartGroup>>(new Set());
   const [opacity, setOpacity] = useState(1);
+  const [myocardium, setMyocardium] = useState(false);
   // Un corte por eje, cada uno con su profundidad. `null` es apagado.
   const [cuts, setCuts] = useState<Record<CutAxis, number | null>>({
     coronal: null,
@@ -102,6 +113,32 @@ export function HeartScene({ runtime }: HeartSceneProps) {
   );
   const scaleBarRef = useRef<HTMLDivElement>(null);
   const scaleLabelRef = useRef<HTMLSpanElement>(null);
+  const phaseRef = useRef<HTMLSpanElement>(null);
+  const valveHandles = useRef<ValveHandles>({});
+
+  // Las devoluciones de llamada que enganchan cada fila del panel con su
+  // hueco. Memoizadas por dos: React llama a una `ref` con `null` y luego con
+  // el elemento cada vez que la función cambia de identidad, y con una función
+  // nueva por renderizado el panel se desengancharía al mover cualquier mando.
+  const registerValve = useMemo(
+    () =>
+      Object.fromEntries(
+        VALVE_ORDER.map((valve) => [
+          valve,
+          {
+            fill: (element: HTMLSpanElement | null) => {
+              (valveHandles.current[valve] ??= { fill: null, state: null }).fill =
+                element;
+            },
+            state: (element: HTMLSpanElement | null) => {
+              (valveHandles.current[valve] ??= { fill: null, state: null }).state =
+                element;
+            },
+          },
+        ])
+      ),
+    []
+  );
 
   const toggleGroup = useCallback((group: HeartGroup) => {
     setIsolated((current) => {
@@ -142,6 +179,19 @@ export function HeartScene({ runtime }: HeartSceneProps) {
               {GROUP_LABELS[group]}
             </button>
           ))}
+        </div>
+        {/* El miocardio aparte de los grupos de aislar: no es una alternativa
+            a las cámaras sino una capa que las envuelve, y encenderla tiene
+            que ser deliberado porque es geometría sintetizada. */}
+        <div className={styles.groups}>
+          <button
+            type="button"
+            className={`${styles.group} ${myocardium ? styles.groupActive : ""}`}
+            aria-pressed={myocardium}
+            onClick={() => setMyocardium((on) => !on)}
+          >
+            Miocardio
+          </button>
         </div>
         {/* Los tres planos son combinables, no alternativas: Three.js conserva
             la geometría que está del lado bueno de todos, así que dos abren
@@ -219,6 +269,12 @@ export function HeartScene({ runtime }: HeartSceneProps) {
             resultado parecido sin salir a Internet. */}
         <LocalClipping />
         <ScaleBar barRef={scaleBarRef} labelRef={scaleLabelRef} />
+        <ValveReadout
+          runtime={runtime}
+          valves={valves}
+          phaseRef={phaseRef}
+          handles={valveHandles}
+        />
 
         <hemisphereLight args={["#fff4ee", "#2b2233", 0.55]} />
         <ambientLight intensity={0.35} />
@@ -229,9 +285,11 @@ export function HeartScene({ runtime }: HeartSceneProps) {
           <HeartModel
             runtime={runtime}
             timeline={timeline}
+            valves={valves}
             heartState={heartState}
             isolated={isolated}
             opacity={opacity}
+            showMyocardium={myocardium}
             cuts={activeCuts}
           />
         </Suspense>
@@ -252,6 +310,42 @@ export function HeartScene({ runtime }: HeartSceneProps) {
       <div className={styles.scale} aria-hidden="true">
         <div ref={scaleBarRef} className={styles.scaleBar} />
         <span ref={scaleLabelRef} className={styles.scaleLabel} />
+      </div>
+
+      {/* Estado de las cuatro válvulas y fase del ciclo. En el corazón entero
+          las válvulas quedan dentro de las cavidades y no se ven; esto deja
+          leer desde el primer momento que la mitral se cierra con el QRS, y
+          el botón «Válvulas» sirve para comprobarlo en el modelo.
+
+          `aria-hidden`, como la barra de escala y por el mismo motivo: un
+          valor que cambia sesenta veces por segundo no se puede leer en voz
+          alta, y anunciarlo dejaría el lector de pantalla inservible. */}
+      <div className={styles.valves} aria-hidden="true">
+        {/* El contenido inicial es la posición de reposo, no un hueco: antes
+            del primer latido las válvulas están donde las deja la presión, y
+            un panel en blanco se lee como un fallo de carga. React no vuelve a
+            tocarlo —el literal no cambia entre renderizados— así que lo que
+            escriba `ValveReadout` después se queda. */}
+        <span ref={phaseRef} className={styles.valvePhase}>
+          {NO_CYCLE_LABEL}
+        </span>
+        {VALVE_ORDER.map((valve) => (
+          <div key={valve} className={styles.valveRow}>
+            <span className={styles.valveName}>{HEART_VALVES[valve].label}</span>
+            <span className={styles.valveTrack}>
+              <span
+                ref={registerValve[valve].fill}
+                className={styles.valveFill}
+                style={{
+                  width: `${RESTING_APERTURE[HEART_VALVES[valve].group] * 100}%`,
+                }}
+              />
+            </span>
+            <span ref={registerValve[valve].state} className={styles.valveState}>
+              {apertureLabel(RESTING_APERTURE[HEART_VALVES[valve].group])}
+            </span>
+          </div>
+        ))}
       </div>
 
       {/* La licencia del modelo es CC BY-SA: la atribución tiene que estar

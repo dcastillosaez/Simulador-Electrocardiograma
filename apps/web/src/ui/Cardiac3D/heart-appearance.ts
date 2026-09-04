@@ -22,9 +22,14 @@ export type Circuit = "systemic" | "pulmonary";
  * acaben pareciendo el mismo. */
 export type StructureKind = "chamber" | "vessel";
 
-/** Grupos conmutables. Son los tres que un docente pide de verdad —"enséñame
- * solo los ventrículos"— y no una lista exhaustiva de nodos. */
-export type HeartGroup = "ventricles" | "atria" | "vessels";
+/** Grupos conmutables. Son los que un docente pide de verdad —"enséñame solo
+ * los ventrículos"— y no una lista exhaustiva de nodos. */
+export type HeartGroup =
+  | "ventricles"
+  | "atria"
+  | "vessels"
+  | "myocardium"
+  | "valves";
 
 export interface Appearance {
   /** Color base en hexadecimal, listo para `THREE.Color`. */
@@ -118,6 +123,16 @@ export const APPEARANCE: Record<HeartNodeName, Appearance> = {
     group: "vessels",
     roughness: 0.42,
   },
+  Myocardium: {
+    // Pardo de musculo, fuera de las dos familias a proposito: no es sangre,
+    // ni izquierda ni derecha. Medido contra las nueve estructuras, el par mas
+    // parecido queda a 33 de distancia perceptual.
+    color: 0x8c6156,
+    circuit: "systemic",
+    kind: "chamber",
+    group: "myocardium",
+    roughness: 0.85,
+  },
   InferiorVenaCava: {
     color: 0x59b8c4,
     circuit: "pulmonary",
@@ -127,7 +142,42 @@ export const APPEARANCE: Record<HeartNodeName, Appearance> = {
   },
 };
 
-export const HEART_GROUPS = ["ventricles", "atria", "vessels"] as const;
+/** Aspecto de las válvulas. Una fila por válvula y no por valva: las tres
+ * sigmoideas de una aórtica son la misma pieza de tejido vistas por tres
+ * sitios, y darles colores distintos sugeriría una diferencia que no existe.
+ *
+ * El color se sale de las dos familias, como el pardo del miocardio y por el
+ * mismo motivo: una valva no es sangre. Es tejido fibroso, y en un corazón
+ * abierto se ve blanco nacarado contra el rojo de todo lo demás — de las pocas
+ * cosas de la anatomía cardíaca que se reconocen por el color antes que por la
+ * forma. Medido contra las diez estructuras, el par más parecido queda a 25 de
+ * distancia perceptual, por encima incluso del peor par adyacente de la tabla
+ * de arriba.
+ *
+ * Las cuatro comparten color a propósito. Cuál es cuál se lee por dónde está y
+ * por el rótulo del panel; teñirlas de cuatro tonos distintos gastaría cuatro
+ * colores en una distinción que la posición ya da, y dejaría la escena sin
+ * margen para las coronarias del día que lleguen. */
+export const VALVE_APPEARANCE: Appearance = {
+  color: 0xf5efe2,
+  circuit: "systemic",
+  kind: "vessel",
+  group: "valves",
+  // Menos mate que una cavidad y menos que un vaso: una valva sana es lisa y
+  // brilla. Ese reflejo es lo que hace legible su movimiento cuando gira
+  // dentro de una cámara translúcida.
+  roughness: 0.28,
+};
+
+/** Los grupos que se pueden aislar. El miocardio queda fuera a proposito:
+ * tiene su propio interruptor porque no es una alternativa a las camaras sino
+ * una capa que las tapa, y porque al ser geometria sintetizada conviene que
+ * encenderla sea un gesto deliberado.
+ *
+ * Las válvulas sí están, y son el grupo que más se usa: en el corazón entero
+ * quedan enterradas dentro de las cavidades, así que aislarlas —lo que deja
+ * las cámaras como fantasmas— es la forma de ver cómo se abren y se cierran. */
+export const HEART_GROUPS = ["ventricles", "atria", "vessels", "valves"] as const;
 
 /** Qué estructuras caen en cada grupo. Se deriva de la tabla en vez de
  * escribirse aparte: dos listas que hay que mantener a la vez se
@@ -142,9 +192,17 @@ export function nodesInGroup(group: HeartGroup): HeartNodeName[] {
  * entre un filtro y un interruptor: quien no ha tocado los conmutadores
  * espera ver el corazón entero, y quien los apaga todos ha vuelto al punto de
  * partida, no a una pantalla negra que parece un fallo de carga. */
+export function groupIsVisible(
+  group: HeartGroup,
+  active: ReadonlySet<HeartGroup>
+): boolean {
+  return active.size === 0 || active.has(group);
+}
+
 export function visibleNodes(active: ReadonlySet<HeartGroup>): Set<HeartNodeName> {
-  if (active.size === 0) return new Set(HEART_NODE_NAMES);
-  return new Set(HEART_NODE_NAMES.filter((name) => active.has(APPEARANCE[name].group)));
+  return new Set(
+    HEART_NODE_NAMES.filter((name) => groupIsVisible(APPEARANCE[name].group, active))
+  );
 }
 
 /** Opacidad efectiva de una estructura.

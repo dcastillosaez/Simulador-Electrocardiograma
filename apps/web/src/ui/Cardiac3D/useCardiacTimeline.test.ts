@@ -27,6 +27,15 @@ const EVENTS: CardiacEventsMessage = {
       index: 0,
     },
   ],
+  valves: [
+    {
+      t_close_av_s: 1.0,
+      t_open_semilunar_s: 1.05,
+      t_close_semilunar_s: 1.4,
+      t_open_av_s: 1.47,
+      index: 0,
+    },
+  ],
 };
 
 const STATE: HeartStateMessage = {
@@ -49,6 +58,7 @@ describe("useCardiacTimeline", () => {
     const { result } = renderHook(() => useCardiacTimeline(runtime));
 
     expect(result.current.timeline.current.size).toBe(0);
+    expect(result.current.valves.current.size).toBe(0);
     expect(result.current.heartState).toBeNull();
   });
 
@@ -59,6 +69,30 @@ describe("useCardiacTimeline", () => {
     act(() => runtime.emit("cardiacEvents", EVENTS));
 
     expect(result.current.timeline.current.size).toBe(1);
+  });
+
+  it("encola la coreografía valvular del mismo mensaje", () => {
+    // Contracciones y válvulas llegan juntas a propósito: si se pudieran
+    // separar, el corazón latiría con las válvulas del latido anterior.
+    const runtime = makeRuntime();
+    const { result } = renderHook(() => useCardiacTimeline(runtime));
+
+    act(() => runtime.emit("cardiacEvents", EVENTS));
+
+    expect(result.current.valves.current.size).toBe(1);
+  });
+
+  it("aguanta un mensaje sin válvulas", () => {
+    // Una sesión guardada antes de que el servidor las publicara se
+    // reproduce sin ellas, no revienta.
+    const runtime = makeRuntime();
+    const { result } = renderHook(() => useCardiacTimeline(runtime));
+    const { valves: _, ...antiguo } = EVENTS;
+
+    act(() => runtime.emit("cardiacEvents", antiguo as CardiacEventsMessage));
+
+    expect(result.current.timeline.current.size).toBe(1);
+    expect(result.current.valves.current.size).toBe(0);
   });
 
   it("guarda el último estado recibido", () => {
@@ -103,6 +137,7 @@ describe("useCardiacTimeline", () => {
     );
 
     expect(result.current.timeline.current.size).toBe(0);
+    expect(result.current.valves.current.size).toBe(0);
   });
 
   it("se desuscribe al desmontar", () => {

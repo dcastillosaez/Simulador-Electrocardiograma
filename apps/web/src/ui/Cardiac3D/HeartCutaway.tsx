@@ -66,6 +66,9 @@ export interface HeartCutawayProps {
   /** Material de tapa por estructura. Los crea y actualiza `HeartModel`, que
    * es quien sabe de opacidad y aislamiento. */
   capMaterials: Record<HeartNodeName, MeshStandardMaterial>;
+  /** Estructuras apagadas. Se saltan también aquí: si no, una malla invisible
+   * seguiría escribiendo su cuenta en el stencil y pintando su tapa. */
+  hidden: ReadonlySet<HeartNodeName>;
 }
 
 /** Hueco de orden de dibujado por estructura. Diez da sitio a la pasada de
@@ -82,7 +85,12 @@ interface CapEntry {
   plane: Plane;
 }
 
-export function HeartCutaway({ nodes, planes, capMaterials }: HeartCutawayProps) {
+export function HeartCutaway({
+  nodes,
+  planes,
+  capMaterials,
+  hidden,
+}: HeartCutawayProps) {
   const stencilMeshes = useRef<Mesh[]>([]);
   const caps = useRef<CapEntry[]>([]);
 
@@ -166,6 +174,7 @@ export function HeartCutaway({ nodes, planes, capMaterials }: HeartCutawayProps)
   return (
     <>
       {HEART_NODE_NAMES.map((name, structure) => {
+        if (hidden.has(name)) return null;
         const node = nodes[name] as unknown as Mesh;
         const geometry = node.geometry as BufferGeometry;
         const { back, front } = stencilMaterials[name];

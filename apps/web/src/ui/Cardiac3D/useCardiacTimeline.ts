@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { CardiacTimeline } from "../../cardiac/cardiac-timeline";
+import { ValveTimeline } from "../../cardiac/valve-timeline";
 import type { SessionRuntime } from "../../simulation-runtime/session-runtime";
 import type {
   CardiacEventsMessage,
@@ -15,6 +16,14 @@ export interface UseCardiacTimelineResult {
    * píxel del árbol, que es exactamente lo que la arquitectura de la fase C
    * excluye del camino caliente. */
   timeline: MutableRefObject<CardiacTimeline>;
+  /** La coreografía valvular, por el mismo motivo y del mismo mensaje.
+   *
+   * Va en su propia cola y no dentro de `CardiacTimeline` porque son dos
+   * preguntas distintas sobre el mismo latido: cuánto se ha contraído una
+   * cámara y cuánto está abierta una válvula no comparten ni curva ni reposo
+   * —una contracción parte de cero, una auriculoventricular parte de abierta—.
+   * Comparten el reloj, que es lo que las mantiene sincronizadas. */
+  valves: MutableRefObject<ValveTimeline>;
   /** En estado sí: cambia cuatro veces por segundo como mucho, y hay
    * interfaz —modo de cada cámara— que depende de él. */
   heartState: HeartStateValues | null;
@@ -22,11 +31,16 @@ export interface UseCardiacTimelineResult {
 
 export function useCardiacTimeline(runtime: SessionRuntime): UseCardiacTimelineResult {
   const timeline = useRef(new CardiacTimeline());
+  const valves = useRef(new ValveTimeline());
   const [heartState, setHeartState] = useState<HeartStateValues | null>(null);
 
   useEffect(() => {
     const onEvents = (message: CardiacEventsMessage) => {
       timeline.current.push(message.events);
+      // `?? []` y no `message.valves` a secas: una sesión guardada antes de
+      // que el servidor publicara válvulas se reproduce sin ellas en vez de
+      // reventar al primer mensaje.
+      valves.current.push(message.valves ?? []);
     };
     const onState = (message: HeartStateMessage) => setHeartState(message.values);
     // Un ritmo nuevo arranca en t=0: sin vaciar, las contracciones del ritmo
@@ -34,6 +48,7 @@ export function useCardiacTimeline(runtime: SessionRuntime): UseCardiacTimelineR
     // recorrer otra vez, y el corazón latiría al ritmo viejo un rato.
     const onStarted = () => {
       timeline.current.clear();
+      valves.current.clear();
       setHeartState(null);
     };
 
@@ -47,5 +62,5 @@ export function useCardiacTimeline(runtime: SessionRuntime): UseCardiacTimelineR
     };
   }, [runtime]);
 
-  return { timeline, heartState };
+  return { timeline, valves, heartState };
 }

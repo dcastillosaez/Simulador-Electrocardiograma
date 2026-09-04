@@ -4,6 +4,8 @@ import {
   APPEARANCE,
   GHOST_OPACITY,
   HEART_GROUPS,
+  VALVE_APPEARANCE,
+  groupIsVisible,
   nodesInGroup,
   opacityFor,
   visibleNodes,
@@ -45,11 +47,51 @@ describe("APPEARANCE", () => {
   });
 });
 
+describe("VALVE_APPEARANCE", () => {
+  it("saca las válvulas de las dos familias de color", () => {
+    // Una valva no es sangre: es tejido fibroso, y en un corazón abierto se ve
+    // blanco nacarado contra el rojo de todo lo demás. Es de las pocas cosas
+    // de la anatomía cardíaca que se reconocen por el color antes que por la
+    // forma, y por eso no lleva ni el rojo del lado izquierdo ni el azul del
+    // derecho.
+    const claridad = (color: number) =>
+      ((color >> 16) & 255) + ((color >> 8) & 255) + (color & 255);
+
+    for (const name of HEART_NODE_NAMES) {
+      expect(VALVE_APPEARANCE.color).not.toBe(APPEARANCE[name].color);
+      expect(claridad(VALVE_APPEARANCE.color)).toBeGreaterThan(
+        claridad(APPEARANCE[name].color)
+      );
+    }
+  });
+
+  it("brilla más que cualquier cavidad", () => {
+    // Una valva sana es lisa. Ese reflejo es lo que hace legible su
+    // movimiento dentro de una cámara translúcida.
+    expect(VALVE_APPEARANCE.roughness).toBeLessThan(APPEARANCE.LeftVentricle.roughness);
+  });
+
+  it("va en el grupo que se puede aislar", () => {
+    expect(VALVE_APPEARANCE.group).toBe("valves");
+    expect(HEART_GROUPS as readonly string[]).toContain("valves");
+  });
+});
+
 describe("nodesInGroup", () => {
-  it("reparte las nueve estructuras entre los tres grupos, sin solapes", () => {
+  it("reparte las estructuras anatómicas entre los grupos, sin solapes", () => {
+    // El miocardio queda fuera: es geometría sintetizada con su propio
+    // interruptor, no una alternativa a las cámaras.
     const all = HEART_GROUPS.flatMap((group) => nodesInGroup(group));
-    expect(all).toHaveLength(HEART_NODE_NAMES.length);
-    expect(new Set(all).size).toBe(HEART_NODE_NAMES.length);
+    const anatomicas = HEART_NODE_NAMES.filter((name) => name !== "Myocardium");
+    expect(all).toHaveLength(anatomicas.length);
+    expect(new Set(all).size).toBe(anatomicas.length);
+    expect(all).not.toContain("Myocardium");
+  });
+
+  it("el miocardio tiene su propio grupo, fuera de los que se aíslan", () => {
+    expect(APPEARANCE.Myocardium.group).toBe("myocardium");
+    expect(HEART_GROUPS as readonly string[]).not.toContain("myocardium");
+    expect(nodesInGroup("myocardium")).toEqual(["Myocardium"]);
   });
 
   it("agrupa los dos ventrículos juntos", () => {
@@ -76,6 +118,29 @@ describe("visibleNodes", () => {
     const visible = visibleNodes(new Set<HeartGroup>(["atria", "ventricles"]));
     expect(visible.size).toBe(4);
     expect(visible.has("Aorta")).toBe(false);
+  });
+
+  it("aislar las válvulas deja todas las estructuras en fantasma", () => {
+    // Es el modo en que se usa este grupo: en el corazón entero las válvulas
+    // quedan enterradas dentro de las cavidades, y con el resto insinuado se
+    // ve exactamente lo que hacen.
+    const visible = visibleNodes(new Set<HeartGroup>(["valves"]));
+
+    expect(visible.size).toBe(0);
+    expect(groupIsVisible("valves", new Set<HeartGroup>(["valves"]))).toBe(true);
+  });
+});
+
+describe("groupIsVisible", () => {
+  it("sin ningún grupo activo todo está visible", () => {
+    // La misma regla que `visibleNodes`, y por eso está escrita una sola vez:
+    // un filtro vacío no filtra nada.
+    expect(groupIsVisible("valves", new Set())).toBe(true);
+    expect(groupIsVisible("ventricles", new Set())).toBe(true);
+  });
+
+  it("con otro grupo activo, no", () => {
+    expect(groupIsVisible("valves", new Set<HeartGroup>(["ventricles"]))).toBe(false);
   });
 });
 

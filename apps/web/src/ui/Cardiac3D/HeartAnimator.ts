@@ -28,6 +28,12 @@ const DEFORMATION: Record<
   PulmonaryVeins: { driver: "atria", longitudinal: 0.002, radial: 0.004 },
   SuperiorVenaCava: { driver: "atria", longitudinal: 0.002, radial: 0.004 },
   InferiorVenaCava: { driver: "atria", longitudinal: 0.002, radial: 0.004 },
+  // El miocardio envuelve las cuatro camaras, asi que no tiene un solo motor.
+  // Se le da el ventricular porque es el movimiento dominante con diferencia:
+  // la sistole auricular apenas mueve la masa del organo. Es una
+  // aproximacion, y la consecuencia es que en la sistole auricular el musculo
+  // no acompana del todo a la auricula que hay debajo.
+  Myocardium: { driver: "ventricles", longitudinal: -0.03, radial: 0.03 },
 };
 
 /** Escala mínima admisible. Con excursiones acotadas a [-1, 1] y factores por

@@ -172,11 +172,35 @@ export interface MechanicalEventPayload {
   index: number;
 }
 
+/** Espejo de `ValveEvent.as_payload()` en `heart-engine`.
+ *
+ * Los cuatro instantes de un ciclo, en orden: se cierran la mitral y la
+ * tricúspide, se abren la aórtica y la pulmonar, se cierran las dos
+ * sigmoideas, y se vuelven a abrir las auriculoventriculares. Entre el primero
+ * y el segundo, y entre el tercero y el cuarto, las cuatro están cerradas: son
+ * la contracción y la relajación isovolumétricas, y son el motivo de que aquí
+ * viajen cuatro números y no dos. */
+export interface ValveEventPayload {
+  t_close_av_s: number;
+  t_open_semilunar_s: number;
+  t_close_semilunar_s: number;
+  t_open_av_s: number;
+  index: number;
+}
+
 export interface CardiacEventsMessage {
   type: "cardiac_events";
   t_start_s: number;
   t_end_s: number;
   events: MechanicalEventPayload[];
+  /** Coreografía valvular de las contracciones ventriculares de esta ventana.
+   *
+   * Viaja con ellas y no en un mensaje propio porque se deriva de ellas: si
+   * llegaran por separado podrían desparejarse, y el corazón latiría con las
+   * válvulas del latido anterior. Va vacía cuando el ventrículo no se contrae
+   * de forma organizada — en una fibrilación ventricular no hay sístole que
+   * cierre nada. */
+  valves: ValveEventPayload[];
 }
 
 export type ContractionModeName =
