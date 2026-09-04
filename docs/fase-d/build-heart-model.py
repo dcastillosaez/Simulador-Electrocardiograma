@@ -53,6 +53,12 @@ OUTPUT = REPO_ROOT / "apps" / "web" / "public" / "models" / "heart.glb"
 # para que ninguna geometría acabe duplicada en dos nodos que se animan por
 # separado.
 #
+# Las valvas no se quedan ahí: `add-heart-valves.py` las saca después a once
+# nodos propios para poder abrirlas y cerrarlas con el ciclo cardíaco, y rehace
+# los dos ventrículos sin ellas. Este script sigue siendo el punto de partida —
+# el otro parte de su salida— pero el modelo que se sirve al navegador es el que
+# deja aquel. Ver `valvulas.md`.
+#
 # `exclude` quita subconceptos completos. Se usa solo para los árboles
 # pulmonares, y ahí es más honesto que cualquier criterio geométrico: la
 # distinción entre la parte extrapulmonar de una arteria pulmonar y la

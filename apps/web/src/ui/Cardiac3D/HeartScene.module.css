@@ -29,3 +29,134 @@
   font-family: var(--font-ui);
   font-size: var(--font-size-xs);
 }
+
+/* Mandos de capas. Abajo a la derecha, en la esquina que no usan ni los
+   presets de vista ni la atribución de licencia. */
+.layers {
+  position: absolute;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-end;
+}
+
+.groups {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.group {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-background);
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: background var(--motion-fast), color var(--motion-fast);
+}
+
+.group:hover {
+  background: var(--panel-hover);
+}
+
+.groupActive {
+  background: var(--panel-hover);
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.group:focus-visible {
+  outline: 2px solid var(--ecg-trace);
+  outline-offset: 1px;
+}
+
+/* Barra de escala. Arriba a la izquierda: la única esquina libre — abajo
+   izquierda está la atribución, y la derecha entera son los mandos. */
+.scale {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;
+}
+
+.scaleBar {
+  height: 4px;
+  min-width: 1px;
+  border: 1px solid var(--text-muted);
+  border-top: none;
+  /* Sin borde superior: se lee como una regla con sus dos topes, no como una
+     caja. */
+}
+
+.scaleLabel {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+/* Estado de las válvulas. Bajo la barra de escala, en la columna izquierda:
+   es lo que se mira a la vez que el trazado del ECG, y el trazado está a la
+   izquierda de la pantalla. */
+.valves {
+  position: absolute;
+  top: calc(var(--space-3) + 34px);
+  left: var(--space-3);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+}
+
+.valvePhase {
+  margin-bottom: var(--space-1);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  /* Alto fijo: el rótulo va de «Eyección» a «Contracción isovolumétrica» y sin
+     esto las cuatro filas darían un salto en cada latido. */
+  min-height: 1.1em;
+}
+
+.valveRow {
+  display: grid;
+  grid-template-columns: 5.5rem 44px 3.75rem;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-muted);
+}
+
+.valveName {
+  text-align: right;
+}
+
+/* El carril y su relleno. La anchura del relleno *es* la apertura: no es una
+   escala de tres estados sino el mismo número que mueve la valva en el modelo,
+   así que la transición se ve aquí igual de suave que allí. */
+.valveTrack {
+  height: 5px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.valveFill {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--text-primary);
+}
+
+.valveState {
+  font-family: var(--font-mono);
+}

@@ -8,5 +8,12 @@ fisiología pura, testeable con listas de dataclasses.
 
 from .events import MechanicalEvent, derive_mechanical_events
 from .heart_state import HeartState
+from .valves import ValveEvent, derive_valve_events
 
-__all__ = ["HeartState", "MechanicalEvent", "derive_mechanical_events"]
+__all__ = [
+    "HeartState",
+    "MechanicalEvent",
+    "ValveEvent",
+    "derive_mechanical_events",
+    "derive_valve_events",
+]

@@ -75,6 +75,20 @@ class MechanicalProfile:
     """Frecuencia del temblor en modo `FLUTTERING` o `FIBRILLATING`. En el
     flutter auricular típico son unas 300 ondas por minuto."""
 
+    isovolumetric_contraction_s: float = 0.05
+    """Contracción isovolumétrica: desde que se cierran las válvulas
+    auriculoventriculares hasta que la presión ventricular supera a la
+    arterial y se abren las sigmoideas. Con las cuatro válvulas cerradas el
+    ventrículo se contrae sin expulsar una gota, y por eso el volumen no
+    cambia. Normal 30-60 ms, prácticamente constante con la frecuencia."""
+
+    isovolumetric_relaxation_s: float = 0.07
+    """Relajación isovolumétrica: desde el cierre de las sigmoideas hasta que
+    la presión ventricular cae por debajo de la auricular y se abren las
+    auriculoventriculares. Otra vez las cuatro cerradas, ahora sin llenado.
+    Normal 50-100 ms. Es lo que impide que la diástole empiece en el mismo
+    instante en que termina la eyección."""
+
 
 NORMAL_PROFILE = MechanicalProfile(
     atrial_mode=ContractionMode.SYNCHRONOUS,

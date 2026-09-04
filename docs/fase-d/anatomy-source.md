@@ -82,6 +82,12 @@ misma geometría acabaría en dos nodos que se animan por separado y se vería e
 solape. Se asignan al ventrículo, porque el plano valvular desciende con la
 sístole ventricular, que es el movimiento dominante.
 
+> Esta decisión la reemplaza después `add-heart-valves.py`, que saca las once
+> valvas de los dos ventrículos a nodos propios para poder abrirlas y cerrarlas
+> con el ciclo cardíaco. El modelo que hay en el repositorio lleva ya ese paso
+> dado: son 21 nodos, no diez. Ver `valvulas.md`. Lo de arriba sigue describiendo
+> lo que hace *este* script, que es de donde parte el otro.
+
 **Los vasos se recortan.** Los conceptos de BodyParts3D son anatómicos, no
 escenográficos: "aorta" incluye la descendente hasta el abdomen, y "arteria
 pulmonar" son 99 elementos que llegan al último subsegmento de ambos
