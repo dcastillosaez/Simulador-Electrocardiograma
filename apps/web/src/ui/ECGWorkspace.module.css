@@ -32,28 +32,31 @@
   overflow: hidden;
 }
 
-/* El corazón se queda con lo que sobre a lo ancho, pero no con todo el alto:
-   se acomoda en un marco cuadrado pegado abajo. Cuadrado porque un corazón es
-   igual de alto que de ancho y estirar su caja solo añade fondo; abajo porque
-   ahí está el pie de la consola y arriba manda el trazado. */
+/* El corazón se queda con el sobrante entero: todo el ancho que no pide el
+   papel y todo el alto de la fila.
+
+   Antes era un cuadrado pegado al borde inferior, y el cuadrado lo fijaba el
+   lado corto — el ancho. En una pantalla de 1600 o 1920 eso son 258 o 285
+   píxeles de marco con medio panel vacío encima, y a ese tamaño los rótulos de
+   la escena no caben ni repartidos por las esquinas: la botonera de vistas se
+   comía la lectura de válvulas. Ocupando el hueco entero el corazón no crece
+   de ancho —eso lo decide el papel— pero gana los 500px de alto que estaban
+   sin usar, que es justo lo que los rótulos necesitaban.
+
+   El precio es que el lienzo deja de ser cuadrado, y con `fov` vertical un
+   lienzo alto recorta el modelo por los costados. Eso no se arregla aquí sino
+   en la cámara: `framingRadius` encuadra por el lado corto. */
 .heartPane {
   flex: 1 1 0;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
 .heartFrame {
-  flex: 0 1 auto;
-  /* Cuadrado mientras quepa; si el hueco es más bajo que ancho, manda el alto
-     y el marco se queda más estrecho en vez de desbordar. */
-  aspect-ratio: 1;
-  width: 100%;
-  max-height: 100%;
-  margin-left: auto;
+  flex: 1 1 auto;
   min-height: 0;
 }
 

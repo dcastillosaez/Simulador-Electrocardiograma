@@ -2,6 +2,11 @@
   /* Fondo ligeramente distinto del panel: la escena es una pantalla dentro
      de la consola, igual que el area de ECG. */
   position: relative;
+  /* Contenedor de consulta: los rótulos se reparten según lo que mide *este*
+     marco, no la ventana. Es la medida que importa — el marco vale entre 258px
+     y 600px según cuánto ancho le deje el papel del ECG, y eso no guarda
+     relación con el ancho de pantalla. */
+  container: heart / size;
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -11,20 +16,58 @@
   overflow: hidden;
 }
 
-.presets {
+/* La rejilla que cubre la escena. Cinco áreas con nombre, y solo el reparto
+   cambia entre el marco ancho y el estrecho. */
+.chrome {
   position: absolute;
-  top: var(--space-3);
-  right: var(--space-3);
+  inset: var(--space-3);
   z-index: 1;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto auto 1fr auto;
+  grid-template-areas:
+    "scale  .  presets"
+    "valves .  ."
+    ".      .  layers"
+    "credit credit credit";
+  gap: var(--space-2);
+  /* La rejilla es transparente al ratón; los mandos, no. Sin esto no se
+     podría orbitar el corazón por ninguna parte del panel. */
+  pointer-events: none;
+}
+
+.chrome :is(fieldset, button, label, input) {
+  pointer-events: auto;
+}
+
+/* Los rótulos que no son mandos van sobre el modelo, no sobre el fondo: en
+   cuanto el marco creció, el corazón dejó de ser una figurita centrada con
+   aire alrededor y se puso justo debajo de la lectura de válvulas. Un velo
+   traslúcido —no una tarjeta opaca, que taparía el modelo— basta para que se
+   lean sobre el músculo rojo tanto como sobre el fondo.
+
+   Los mandos no lo necesitan: cada botón y la botonera de vistas traen su
+   propio fondo. */
+.scale,
+.valves,
+.attribution {
+  justify-self: start;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--panel-background) 78%, transparent);
+}
+
+.presets {
+  grid-area: presets;
   display: flex;
+  justify-content: flex-end;
   gap: var(--space-1);
 }
 
 .attribution {
-  position: absolute;
-  bottom: var(--space-2);
-  left: var(--space-3);
-  z-index: 1;
+  grid-area: credit;
+  align-self: end;
+  margin: 0;
   color: var(--text-muted);
   font-family: var(--font-ui);
   font-size: var(--font-size-xs);
@@ -33,10 +76,8 @@
 /* Mandos de capas. Abajo a la derecha, en la esquina que no usan ni los
    presets de vista ni la atribución de licencia. */
 .layers {
-  position: absolute;
-  right: var(--space-3);
-  bottom: var(--space-3);
-  z-index: 1;
+  grid-area: layers;
+  align-self: end;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -45,6 +86,8 @@
 
 .groups {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--space-1);
 }
 
@@ -76,16 +119,12 @@
 }
 
 /* Barra de escala. Arriba a la izquierda: la única esquina libre — abajo
-   izquierda está la atribución, y la derecha entera son los mandos. */
+   está la atribución, y la derecha entera son los mandos. */
 .scale {
-  position: absolute;
-  top: var(--space-3);
-  left: var(--space-3);
-  z-index: 1;
+  grid-area: scale;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  pointer-events: none;
 }
 
 .scaleBar {
@@ -107,14 +146,10 @@
    es lo que se mira a la vez que el trazado del ECG, y el trazado está a la
    izquierda de la pantalla. */
 .valves {
-  position: absolute;
-  top: calc(var(--space-3) + 34px);
-  left: var(--space-3);
-  z-index: 1;
+  grid-area: valves;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  pointer-events: none;
   font-family: var(--font-ui);
   font-size: var(--font-size-xs);
 }
@@ -159,4 +194,35 @@
 
 .valveState {
   font-family: var(--font-mono);
+}
+
+/* Marco estrecho: el que deja el ECG en una pantalla normal. Las dos columnas
+   de mandos no caben una al lado de otra —la botonera de vistas pide unos
+   280px y la lectura de válvulas 210—, así que dejan de compartir fila: las
+   vistas arriba del todo ocupando el ancho, la lectura debajo, y las capas
+   apiladas contra el borde inferior. Es el reparto que aprovecha que este
+   marco tiene de sobra lo que le falta de ancho: alto. */
+@container heart (max-width: 520px) {
+  .chrome {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto 1fr auto auto;
+    grid-template-areas:
+      "presets"
+      "scale"
+      "valves"
+      "."
+      "layers"
+      "credit";
+  }
+
+  .presets {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  /* La botonera es un `fieldset` de seis opciones en línea: sin permitirle
+     partir, se sale del marco y las tres últimas vistas quedan fuera. */
+  .presets fieldset {
+    flex-wrap: wrap;
+  }
 }

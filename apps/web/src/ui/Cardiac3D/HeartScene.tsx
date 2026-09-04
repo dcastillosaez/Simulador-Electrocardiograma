@@ -1,6 +1,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
+import { Vector3 } from "three";
 import { SegmentedControl, Slider } from "@ui-system";
 import { HEART_GROUPS, type HeartGroup } from "./heart-appearance";
 import {
@@ -19,6 +20,7 @@ import {
   DEFAULT_PRESET,
   MAX_ZOOM_DISTANCE,
   MIN_ZOOM_DISTANCE,
+  presetDistance,
   presetPosition,
   type CameraPreset,
 } from "./HeartCamera";
@@ -70,6 +72,55 @@ function LocalClipping() {
       gl.localClippingEnabled = false;
     };
   }, [gl]);
+  return null;
+}
+
+const SCENE_ORIGIN = new Vector3();
+
+/** Lo mínimo que necesitamos de `OrbitControls` sin importar su tipo. */
+interface OrbitLike {
+  target: Vector3;
+  maxDistance: number;
+  update(): void;
+}
+
+/** Rehace el encuadre cuando cambia la proporción del lienzo.
+ *
+ * Hace falta porque el `camera` del `Canvas` se evalúa antes de que exista
+ * lienzo: sale con proporción 1, que era buena aproximación mientras el panel
+ * fue una franja apaisada y deja de serlo con el marco alto. Sin esto el
+ * corazón se recorta por los costados, y en silencio — no hay error, solo un
+ * modelo cortado que se lee como un modelo mal centrado.
+ *
+ * Se conserva la órbita del usuario, no solo la vista del preset: se reescala
+ * la distancia respecto al objetivo de los controles manteniendo la dirección,
+ * y el factor de zoom relativo se respeta. Recolocar la cámara en el preset
+ * sería más corto, pero desharía la órbita cada vez que se cambia de
+ * derivaciones — que mueve el ancho del ECG y con él el del corazón. */
+function AspectFraming({ preset }: { preset: CameraPreset }) {
+  const camera = useThree((state) => state.camera);
+  const controls = useThree((state) => state.controls) as OrbitLike | null;
+  const width = useThree((state) => state.size.width);
+  const height = useThree((state) => state.size.height);
+  const framedDistance = useRef(presetDistance(preset, 1));
+
+  useEffect(() => {
+    if (width <= 0 || height <= 0) return;
+    const required = presetDistance(preset, width / height);
+    const target = controls?.target ?? SCENE_ORIGIN;
+    const offset = camera.position.clone().sub(target);
+    const zoom = offset.length() / framedDistance.current;
+    framedDistance.current = required;
+    camera.position.copy(target).add(offset.setLength(required * zoom));
+    if (controls) {
+      // El techo del zoom se midió para el marco apaisado. Un marco muy
+      // estrecho puede necesitar más distancia que ese techo, y entonces los
+      // controles recortarían justo el encuadre que acabamos de calcular.
+      if (controls.maxDistance < required) controls.maxDistance = required * 1.5;
+      controls.update();
+    }
+  }, [camera, controls, preset, width, height]);
+
   return null;
 }
 
@@ -150,90 +201,6 @@ export function HeartScene({ runtime }: HeartSceneProps) {
 
   return (
     <section className={styles.scene} aria-label="Corazón 3D">
-      <div className={styles.presets}>
-        <SegmentedControl
-          label="Vista"
-          value={preset}
-          options={PRESET_OPTIONS}
-          onChange={setPreset}
-        />
-      </div>
-
-      {/* Aislamiento y opacidad. Botones de dos estados y no un
-          `SegmentedControl`: los grupos se combinan —ventrículos *y*
-          aurículas— y un radiogroup solo deja elegir uno.
-
-          Ninguno pulsado enseña el corazón entero. Lo que se aparta no
-          desaparece: se queda como un fantasma, porque una cámara aislada
-          flotando en el vacío pierde la referencia de dónde estaba. */}
-      <div className={styles.layers}>
-        <div className={styles.groups} role="group" aria-label="Aislar estructuras">
-          {HEART_GROUPS.map((group) => (
-            <button
-              key={group}
-              type="button"
-              className={`${styles.group} ${isolated.has(group) ? styles.groupActive : ""}`}
-              aria-pressed={isolated.has(group)}
-              onClick={() => toggleGroup(group)}
-            >
-              {GROUP_LABELS[group]}
-            </button>
-          ))}
-        </div>
-        {/* El miocardio aparte de los grupos de aislar: no es una alternativa
-            a las cámaras sino una capa que las envuelve, y encenderla tiene
-            que ser deliberado porque es geometría sintetizada. */}
-        <div className={styles.groups}>
-          <button
-            type="button"
-            className={`${styles.group} ${myocardium ? styles.groupActive : ""}`}
-            aria-pressed={myocardium}
-            onClick={() => setMyocardium((on) => !on)}
-          >
-            Miocardio
-          </button>
-        </div>
-        {/* Los tres planos son combinables, no alternativas: Three.js conserva
-            la geometría que está del lado bueno de todos, así que dos abren
-            una esquina y tres un octante. */}
-        <div className={styles.groups} role="group" aria-label="Planos de corte">
-          {CUT_AXIS_ORDER.map((axis) => (
-            <button
-              key={axis}
-              type="button"
-              className={`${styles.group} ${cuts[axis] !== null ? styles.groupActive : ""}`}
-              aria-pressed={cuts[axis] !== null}
-              onClick={() => toggleCut(axis)}
-            >
-              {CUT_AXIS_LABELS[axis]}
-            </button>
-          ))}
-        </div>
-        {/* `key` en todos: estos aparecen y desaparecen, y sin clave React
-            reutiliza la instancia del hermano al reconciliar. El síntoma es
-            que mover un mando cambia el valor de otro. */}
-        {CUT_AXIS_ORDER.filter((axis) => cuts[axis] !== null).map((axis) => (
-          <Slider
-            key={`cut-${axis}`}
-            label={CUT_AXIS_LABELS[axis]}
-            value={cuts[axis] as number}
-            min={MIN_CUT_POSITION}
-            max={MAX_CUT_POSITION}
-            step={0.01}
-            onChange={(value) => moveCut(axis, value)}
-          />
-        ))}
-        <Slider
-          key="opacity"
-          label="Opacidad"
-          value={opacity}
-          min={0.15}
-          max={1}
-          step={0.05}
-          onChange={setOpacity}
-        />
-      </div>
-
       <Canvas
         // `key`: cambiar de preset reposiciona la cámara. Sin remontar, los
         // OrbitControls conservan su objetivo y la vista nueva sale torcida.
@@ -268,6 +235,7 @@ export function HeartScene({ runtime }: HeartSceneProps) {
             red —hay empaquetado de escritorio—. Un relleno hemisférico da un
             resultado parecido sin salir a Internet. */}
         <LocalClipping />
+        <AspectFraming preset={preset} />
         <ScaleBar barRef={scaleBarRef} labelRef={scaleLabelRef} />
         <ValveReadout
           runtime={runtime}
@@ -297,6 +265,10 @@ export function HeartScene({ runtime }: HeartSceneProps) {
         {/* Nunca autoRotate: el spec lo descarta, y con razón — un modelo que
             gira solo impide fijar la vista para comparar dos latidos. */}
         <OrbitControls
+          // `makeDefault`: sin esto los controles no se publican en el estado
+          // de la escena y `AspectFraming` no puede leer su objetivo ni
+          // avisarles de que ha movido la cámara.
+          makeDefault
           enablePan
           enableZoom
           autoRotate={false}
@@ -305,55 +277,152 @@ export function HeartScene({ runtime }: HeartSceneProps) {
         />
       </Canvas>
 
-      {/* Barra de escala. Un corte sin referencia se mira; con ella se mide,
-          que es lo que distingue una herramienta docente de una ilustración. */}
-      <div className={styles.scale} aria-hidden="true">
-        <div ref={scaleBarRef} className={styles.scaleBar} />
-        <span ref={scaleLabelRef} className={styles.scaleLabel} />
-      </div>
+      {/* Todo lo que no es el modelo vive en esta rejilla, y no suelto en las
+          cuatro esquinas de la escena. La diferencia se nota cuando el marco
+          es estrecho: con esquinas, la botonera de vistas y la lectura de
+          válvulas se pisan en cuanto el panel baja de unos 520px, que es
+          justo lo que mide el sobrante que le deja el ECG en una pantalla
+          normal. Con rejilla, la misma declaración de áreas sirve para el
+          marco ancho y para el alto — solo cambia el reparto.
 
-      {/* Estado de las cuatro válvulas y fase del ciclo. En el corazón entero
-          las válvulas quedan dentro de las cavidades y no se ven; esto deja
-          leer desde el primer momento que la mitral se cierra con el QRS, y
-          el botón «Válvulas» sirve para comprobarlo en el modelo.
+          `pointer-events` apagado en la rejilla y encendido solo en los
+          mandos: la rejilla cubre la escena entera, y si capturase el ratón
+          no se podría orbitar el corazón por ninguna parte. */}
+      <div className={styles.chrome}>
+        {/* Barra de escala. Un corte sin referencia se mira; con ella se mide,
+            que es lo que distingue una herramienta docente de una ilustración. */}
+        <div className={styles.scale} aria-hidden="true">
+          <div ref={scaleBarRef} className={styles.scaleBar} />
+          <span ref={scaleLabelRef} className={styles.scaleLabel} />
+        </div>
 
-          `aria-hidden`, como la barra de escala y por el mismo motivo: un
-          valor que cambia sesenta veces por segundo no se puede leer en voz
-          alta, y anunciarlo dejaría el lector de pantalla inservible. */}
-      <div className={styles.valves} aria-hidden="true">
-        {/* El contenido inicial es la posición de reposo, no un hueco: antes
-            del primer latido las válvulas están donde las deja la presión, y
-            un panel en blanco se lee como un fallo de carga. React no vuelve a
-            tocarlo —el literal no cambia entre renderizados— así que lo que
-            escriba `ValveReadout` después se queda. */}
-        <span ref={phaseRef} className={styles.valvePhase}>
-          {NO_CYCLE_LABEL}
-        </span>
-        {VALVE_ORDER.map((valve) => (
-          <div key={valve} className={styles.valveRow}>
-            <span className={styles.valveName}>{HEART_VALVES[valve].label}</span>
-            <span className={styles.valveTrack}>
-              <span
-                ref={registerValve[valve].fill}
-                className={styles.valveFill}
-                style={{
-                  width: `${RESTING_APERTURE[HEART_VALVES[valve].group] * 100}%`,
-                }}
-              />
-            </span>
-            <span ref={registerValve[valve].state} className={styles.valveState}>
-              {apertureLabel(RESTING_APERTURE[HEART_VALVES[valve].group])}
-            </span>
+        <div className={styles.presets}>
+          <SegmentedControl
+            label="Vista"
+            value={preset}
+            options={PRESET_OPTIONS}
+            onChange={setPreset}
+          />
+        </div>
+
+        {/* Estado de las cuatro válvulas y fase del ciclo. En el corazón entero
+            las válvulas quedan dentro de las cavidades y no se ven; esto deja
+            leer desde el primer momento que la mitral se cierra con el QRS, y
+            el botón «Válvulas» sirve para comprobarlo en el modelo.
+
+            `aria-hidden`, como la barra de escala y por el mismo motivo: un
+            valor que cambia sesenta veces por segundo no se puede leer en voz
+            alta, y anunciarlo dejaría el lector de pantalla inservible. */}
+        <div className={styles.valves} aria-hidden="true">
+          {/* El contenido inicial es la posición de reposo, no un hueco: antes
+              del primer latido las válvulas están donde las deja la presión, y
+              un panel en blanco se lee como un fallo de carga. React no vuelve a
+              tocarlo —el literal no cambia entre renderizados— así que lo que
+              escriba `ValveReadout` después se queda. */}
+          <span ref={phaseRef} className={styles.valvePhase}>
+            {NO_CYCLE_LABEL}
+          </span>
+          {VALVE_ORDER.map((valve) => (
+            <div key={valve} className={styles.valveRow}>
+              <span className={styles.valveName}>{HEART_VALVES[valve].label}</span>
+              <span className={styles.valveTrack}>
+                <span
+                  ref={registerValve[valve].fill}
+                  className={styles.valveFill}
+                  style={{
+                    width: `${RESTING_APERTURE[HEART_VALVES[valve].group] * 100}%`,
+                  }}
+                />
+              </span>
+              <span ref={registerValve[valve].state} className={styles.valveState}>
+                {apertureLabel(RESTING_APERTURE[HEART_VALVES[valve].group])}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* Aislamiento y opacidad. Botones de dos estados y no un
+            `SegmentedControl`: los grupos se combinan —ventrículos *y*
+            aurículas— y un radiogroup solo deja elegir uno.
+
+            Ninguno pulsado enseña el corazón entero. Lo que se aparta no
+            desaparece: se queda como un fantasma, porque una cámara aislada
+            flotando en el vacío pierde la referencia de dónde estaba. */}
+        <div className={styles.layers}>
+          <div className={styles.groups} role="group" aria-label="Aislar estructuras">
+            {HEART_GROUPS.map((group) => (
+              <button
+                key={group}
+                type="button"
+                className={`${styles.group} ${isolated.has(group) ? styles.groupActive : ""}`}
+                aria-pressed={isolated.has(group)}
+                onClick={() => toggleGroup(group)}
+              >
+                {GROUP_LABELS[group]}
+              </button>
+            ))}
           </div>
-        ))}
-      </div>
+          {/* El miocardio aparte de los grupos de aislar: no es una alternativa
+              a las cámaras sino una capa que las envuelve, y encenderla tiene
+              que ser deliberado porque es geometría sintetizada. */}
+          <div className={styles.groups}>
+            <button
+              type="button"
+              className={`${styles.group} ${myocardium ? styles.groupActive : ""}`}
+              aria-pressed={myocardium}
+              onClick={() => setMyocardium((on) => !on)}
+            >
+              Miocardio
+            </button>
+          </div>
+          {/* Los tres planos son combinables, no alternativas: Three.js conserva
+              la geometría que está del lado bueno de todos, así que dos abren
+              una esquina y tres un octante. */}
+          <div className={styles.groups} role="group" aria-label="Planos de corte">
+            {CUT_AXIS_ORDER.map((axis) => (
+              <button
+                key={axis}
+                type="button"
+                className={`${styles.group} ${cuts[axis] !== null ? styles.groupActive : ""}`}
+                aria-pressed={cuts[axis] !== null}
+                onClick={() => toggleCut(axis)}
+              >
+                {CUT_AXIS_LABELS[axis]}
+              </button>
+            ))}
+          </div>
+          {/* `key` en todos: estos aparecen y desaparecen, y sin clave React
+              reutiliza la instancia del hermano al reconciliar. El síntoma es
+              que mover un mando cambia el valor de otro. */}
+          {CUT_AXIS_ORDER.filter((axis) => cuts[axis] !== null).map((axis) => (
+            <Slider
+              key={`cut-${axis}`}
+              label={CUT_AXIS_LABELS[axis]}
+              value={cuts[axis] as number}
+              min={MIN_CUT_POSITION}
+              max={MAX_CUT_POSITION}
+              step={0.01}
+              onChange={(value) => moveCut(axis, value)}
+            />
+          ))}
+          <Slider
+            key="opacity"
+            label="Opacidad"
+            value={opacity}
+            min={0.15}
+            max={1}
+            step={0.05}
+            onChange={setOpacity}
+          />
+        </div>
 
-      {/* La licencia del modelo es CC BY-SA: la atribución tiene que estar
-          donde se ve el modelo, no solo en el repositorio. El texto es el que
-          la licencia exige literalmente, abreviado a lo que cabe. */}
-      <p className={styles.attribution}>
-        Modelo: BodyParts3D © The Database Center for Life Science (CC BY-SA 2.1 JP)
-      </p>
+        {/* La licencia del modelo es CC BY-SA: la atribución tiene que estar
+            donde se ve el modelo, no solo en el repositorio. El texto es el que
+            la licencia exige literalmente, abreviado a lo que cabe. */}
+        <p className={styles.attribution}>
+          Modelo: BodyParts3D © The Database Center for Life Science (CC BY-SA 2.1 JP)
+        </p>
+      </div>
     </section>
   );
 }

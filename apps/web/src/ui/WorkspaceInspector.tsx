@@ -238,8 +238,13 @@ export function WorkspaceInspector({
           </Section>
         )}
         <Section title="Ritmo">
+          {/* Fuera de la rejilla, y no como su primera casilla: el nombre del
+              ritmo no es una medida —no se mide sobre la señal, es la etiqueta
+              de lo que se pidió— y en media columna se partía en tres líneas,
+              que estiraban la fila entera y con ella el panel. A todo lo ancho
+              cabe de una. */}
+          <Metric label="Ritmo" value={rhythmName ?? ""} unavailable={rhythmName === null} />
           <MetricGrid>
-            <Metric label="Ritmo" value={rhythmName ?? ""} unavailable={rhythmName === null} />
             {/* Dos frecuencias y no una, salvo en los sinusales. En un
                 bloqueo AV completo la aurícula va a 75 y el ventrículo a 40, y
                 «la FC» es un número que no describe a nadie; en un ritmo
@@ -268,13 +273,14 @@ export function WorkspaceInspector({
                 dos cifras—, porque dos frecuencias iguales por casualidad no
                 son una conducción 1:1. */}
             <Metric label="Cond. AV" {...avConduction()} />
+            {/* El ángulo es el valor y la zona su apellido, en el hueco de la
+                unidad: juntos en el valor sumaban catorce caracteres de
+                monoespaciada y no cabían en media columna. Separados se lee
+                igual —«50° eje normal»— y ocupa una línea en vez de dos. */}
             <Metric
               label="Eje"
-              value={
-                axisDeg === null
-                  ? ""
-                  : `${Math.round(axisDeg)}° ${ZONE_LABEL[zoneFor(Math.round(axisDeg))]}`
-              }
+              value={axisDeg === null ? "" : `${Math.round(axisDeg)}°`}
+              unit={axisDeg === null ? undefined : ZONE_LABEL[zoneFor(Math.round(axisDeg))]}
               unavailable={axisDeg === null}
             />
             {/* Los intervalos los mide el servidor sobre la señal realmente
