@@ -10,13 +10,21 @@ function nodes(): ValveNodes {
   return Object.fromEntries(
     VALVE_LEAFLET_NAMES.map((name): [string, MorphableLike] => [
       name,
-      { name, children: [], scale: { x: 1, y: 1, z: 1 }, morphTargetInfluences: [0] },
+      {
+        name,
+        children: [],
+        scale: { x: 1, y: 1, z: 1 },
+        morphTargetInfluences: [0, 0],
+      },
     ])
   ) as ValveNodes;
 }
 
 const influence = (target: ValveNodes, name: string) =>
   (target as Record<string, MorphableLike>)[name].morphTargetInfluences?.[0];
+
+const bulge = (target: ValveNodes, name: string) =>
+  (target as Record<string, MorphableLike>)[name].morphTargetInfluences?.[1];
 
 describe("applyAperture", () => {
   it("abre las auriculoventriculares y cierra las sigmoideas en diástole", () => {
@@ -70,5 +78,36 @@ describe("applyAperture", () => {
 
     expect(influence(target, "MitralAnterior")).toBe(1);
     expect(influence(target, "AorticLeft")).toBe(0);
+  });
+
+  it("comba el recorrido por el medio y nada en los extremos", () => {
+    // La GPU interpola en línea recta entre las dos poses, y la cuerda de un
+    // arco de cien grados se mete un 38% por dentro: sin esto el velo se
+    // acorta a media apertura y se ve encogerse en cada latido. La comba tiene
+    // que valer cero justo donde las poses son exactas —cerrada y abierta— o
+    // desplazaría también los extremos.
+    const target = nodes();
+
+    applyAperture(target, { atrioventricular: 0, semilunar: 1 });
+    expect(bulge(target, "MitralAnterior")).toBe(0);
+    expect(bulge(target, "AorticLeft")).toBe(0);
+
+    applyAperture(target, { atrioventricular: 0.5, semilunar: 0.25 });
+    expect(bulge(target, "MitralAnterior")).toBe(1);
+    expect(bulge(target, "AorticLeft")).toBeCloseTo(0.75, 10);
+  });
+
+  it("no falla si el modelo trae una sola pose alternativa", () => {
+    // Un `.glb` anterior a la comba sigue cargando: se anima con el recorrido
+    // y sin corregir la cuerda, que es exactamente lo que hacía antes.
+    const target = nodes();
+    for (const name of VALVE_LEAFLET_NAMES) {
+      (target as Record<string, MorphableLike>)[name].morphTargetInfluences = [0];
+    }
+
+    applyAperture(target, { atrioventricular: 0.5, semilunar: 0.5 });
+
+    expect(influence(target, "MitralAnterior")).toBe(0.5);
+    expect(bulge(target, "MitralAnterior")).toBeUndefined();
   });
 });

@@ -63,30 +63,85 @@ animarlas hace falta lo contrario, y de eso se encarga
 `docs/fase-d/add-heart-valves.py`: las saca a once nodos propios y rehace los
 dos ventrículos sin ellas.
 
-**La pose cerrada es la de la fuente, sin tocar.** Lo único sintetizado es la
-pose abierta. Se calcula girando cada valva sobre el anillo de su válvula, y el
-anillo no se elige a ojo: es la superficie donde se tocan el molde de la cámara
-de aguas arriba y el de aguas abajo. Un molde de sangre auricular termina donde
-empieza el ventricular, y esa frontera *es* el plano fibroso al que se insertan
-los velos. Sale con una desviación del plano de un milímetro sobre radios de 8 a
-17 mm, que es lo que uno esperaría de un anillo de verdad; el script valida que
-los cuatro radios caigan en su rango anatómico y no escribe nada si alguno se
-sale.
+**Las dos poses son sintetizadas, y ninguna es la de la fuente.** BodyParts3D
+modela los velos en una posición neutra que no es ninguna de las dos del ciclo:
+entreabierta. Tratarla como la pose cerrada —que es lo que se hacía— dejaba
+pasar el 22% del orificio mitral con la válvula supuestamente cerrada, y por ahí
+se veía a través. Así que se gira en los dos sentidos: hacia dentro hasta que
+sella, hacia fuera hasta donde se pueda abrir sin asomar.
 
-En las auriculoventriculares el giro **no es rígido**. La malla de una valva
-mitral o tricúspide de BodyParts3D no es solo el velo: lleva pegada la cuerda
-tendinosa hasta el músculo papilar, cuarenta y tantos milímetros más abajo.
-Girarlo todo en bloque saca la punta fuera del ventrículo —se comprobó, y se
-sale por bastante—, así que el giro va a plena amplitud hasta el borde libre del
-velo y se apaga suavemente hasta anularse en el papilar. El papilar no se mueve,
-y esa es exactamente la razón de que la cuerda tendinosa exista. Las sigmoideas
-son compactas y giran rígidas.
+El anillo sobre el que se gira no se elige a ojo: es la superficie donde se
+tocan el molde de la cámara de aguas arriba y el de aguas abajo. Un molde de
+sangre auricular termina donde empieza el ventricular, y esa frontera *es* el
+plano fibroso al que se insertan los velos. Sale con una desviación del plano de
+un milímetro sobre radios de 8 a 17 mm, que es lo que uno esperaría de un anillo
+de verdad; el script valida que los cuatro radios caigan en su rango anatómico y
+no escribe nada si alguno se sale.
 
-Las dos poses viajan en el `.glb` como *morph target* de glTF. El cliente anima
-una válvula escribiendo un número entre 0 y 1 en `morphTargetInfluences[0]` y la
-interpolación la hace la GPU: ni un vértice tocado por fotograma ni un material
-duplicado. Van también las normales, y no como lujo: sin ellas la valva se
-movería con la iluminación de la pose cerrada y una membrana que gira sesenta
+### Una valva está sujeta por la base, y ahí no gira
+
+Es la corrección de fondo, y de ella salen las demás. El giro **nunca** es
+rígido: cada vértice lleva su propio peso, de cero en el anclaje a uno en el
+borde libre. Girar la valva entera en bloque despega la inserción de la pared y
+la mete a través de ella, y el resultado se ve desde fuera del corazón — que es
+justo lo que no puede pasar.
+
+Dónde está el anclaje depende del tipo:
+
+- En las **auriculoventriculares** es el anillo. El peso sube de 0 a 1 en los
+  cuatro primeros milímetros, se mantiene por el cuerpo del velo y baja otra vez
+  a 0 en el músculo papilar. Hacía falta ya por el otro extremo: la malla de una
+  valva mitral o tricúspide no es solo el velo, lleva pegada la cuerda tendinosa
+  cuarenta y tantos milímetros más abajo, y arrastrarla entera saca la punta
+  fuera del ventrículo. El papilar no se mueve, y esa es exactamente la razón de
+  que la cuerda tendinosa exista.
+- En las **sigmoideas** el anclaje no es un plano sino la línea en U con la que
+  la valva se inserta en la pared del vaso, así que el peso no se mide en
+  profundidad sino en distancia a esa pared: cero sobre ella, uno en el borde
+  libre. Con esto, una sigmoidea al abrirse se pliega **contra** la pared en vez
+  de atravesarla. Antes giraban rígidas, y la pulmonar izquierda asomaba 3,8 mm
+  por fuera del tronco: desde fuera se le veía la válvula al corazón en un 37% de
+  su superficie.
+
+### Los ángulos no se escriben, se buscan
+
+Los dos ángulos de cada válvula son el resultado de una búsqueda contra dos
+propiedades que sí se pueden comprobar, y no un número elegido a ojo:
+
+| Válvula | Cierre | Apertura | Fuga cerrada | Orificio libre abierta |
+|---|---|---|---|---|
+| Tricúspide | 58° | 36,9° | 21% → 2,1% | 29% |
+| Mitral | 61° | 43,6° | 22% → 2,6% | 29% |
+| Aórtica | 4° | 58,1° | 2,7% → 1,0% | 65% |
+| Pulmonar | 4° | 50,0° | 0,7% → 0,0% | 33% |
+
+La apertura baja desde su tope en escalones hasta el primer ángulo con el que
+ninguna valva se ve desde fuera, y de ese ángulo se usa el 90%: la prueba de
+visibilidad es binaria —o escapa un rayo o no— y el margen tiene que salir del
+ángulo, no de ella. El cierre sube hasta que el orificio deja de dejar pasar, y
+luego cuatro grados más, porque coaptar es solaparse y un cierre al límite se
+abre con cualquier redondeo.
+
+Las dos sigmoideas se cierran solo cuatro grados porque en la fuente ya coaptan:
+lo suyo era la apertura. Las dos auriculoventriculares necesitan sesenta, que es
+lo que separa la posición neutra de la malla de una válvula de verdad cerrada.
+
+### Tres poses en el `.glb`, no dos
+
+La cerrada es la base y viajan dos *morph targets*: la abierta y una **comba**.
+La comba no es un adorno. La GPU interpola en línea recta entre las poses que se
+le den, y una valva mitral recorre unos cien grados entre cerrada y abierta: la
+cuerda de un arco de cien grados se mete un 38% por dentro, así que a media
+apertura el velo se acortaba esa barbaridad y se veía encogerse y volver a
+crecer en cada latido. El segundo objetivo devuelve la trayectoria al arco.
+
+El cliente sigue animándolas con un solo número —la apertura—, que reparte en
+los dos pesos: `a` en el recorrido y `4a(1−a)` en la comba, que vale cero justo
+en los dos extremos, donde las poses son exactas. Ni un vértice tocado por
+fotograma ni un material duplicado.
+
+Van también las normales de cada pose, y no como lujo: sin ellas la valva se
+movería con la iluminación de la pose cerrada, y una membrana que gira sesenta
 grados con la luz pegada al sitio de donde salió se ve plana justo cuando más se
 mira.
 
@@ -98,9 +153,23 @@ mira.
 - Que las nueve estructuras anatómicas salen igual que estaban, quitando las
   valvas.
 - Que el radio de cada anillo cae en su rango anatómico.
-- Que ninguna valva abierta asoma más de 4 mm por fuera de la envolvente
-  convexa del corazón. Es el fallo que un ángulo demasiado generoso produce y
-  el que una proyección de puntos disimula.
+- **Que ninguna valva se ve desde fuera del corazón, ni cerrada ni abierta.**
+  Desde cada vértice salen rayos en cuarenta y dos direcciones contra el
+  miocardio, los vasos y las aurículas; si alguno escapa, ese punto se ve. Es la
+  pregunta que hace quien mira la escena, no una aproximación suya.
+
+  Antes se medía contra la envolvente convexa de las diez estructuras con cuatro
+  milímetros de tolerancia, y por eso pasó una sigmoidea pulmonar que asomaba de
+  verdad: estaba por fuera del tronco pero por dentro del casco, que no entra en
+  los entrantes del órgano. La envolvente no era una prueba estricta con margen,
+  era una prueba distinta.
+- **Que la válvula cerrada no deja pasar.** Rayos a lo largo del eje del flujo
+  por el 70% interior del disco del anillo. El 30% de fuera no es orificio: es la
+  inserción misma y, en las sigmoideas, los senos de Valsalva, que quedan detrás
+  de la valva — un rayo que pasa por ahí la roza, no la atraviesa. Se admite
+  hasta un 3% por una razón del dato y no de la anatomía: las cuerdas tendinosas
+  son un encaje de tiras y entre tira y tira pasan rayos que en un corazón de
+  verdad no pasan por ninguna parte.
 - Que el `.glb` escrito expone los 21 nombres de nodo, que las once valvas
   llevan su pose abierta con posición y normal, y que **todas** las mallas
   llevan normales. Esto último pasó: trimesh solo escribe el atributo `NORMAL`
@@ -119,7 +188,9 @@ tocar ningún mando: es lo que permite comprobar que la mitral se cierra con el
 QRS.
 
 El botón **Válvulas** las aísla, lo que deja el resto del corazón como
-fantasma. Es la vista en la que se ve el movimiento entero: los velos
+fantasma. Es la única forma de verlas: con el corazón opaco no asoma ni un
+vértice de ninguna de las once, en ninguna de las dos poses, y eso está
+comprobado en el script que escribe el modelo. Es la vista en la que se ve el movimiento entero: los velos
 separándose, la cuerda tendinosa abriéndose en abanico, las sigmoideas
 plegándose contra la pared del vaso. También se ven bajando el mando de
 opacidad, con las cámaras translúcidas alrededor.
@@ -133,9 +204,15 @@ costaría veintidós pasadas de stencil para producir artefactos.
 ## Reconstruir el modelo
 
 ```bash
-uv run --with trimesh --with numpy --with scipy --with networkx \
+uv run --with trimesh --with numpy --with scipy --with networkx --with embreex \
     python docs/fase-d/add-heart-valves.py
 ```
+
+`embreex` no es opcional: las dos comprobaciones que deciden los ángulos —que la
+valva no se vea y que cerrada no deje pasar— son trazado de rayos. Sirve también
+`rtree`, que es lo que usa el motor en Python puro de trimesh, pero tarda horas
+donde embree tarda segundos. Sin ninguno de los dos el script para al principio y
+lo dice.
 
 Parte del `heart.glb` que ya existe —del que conserva el miocardio sintetizado,
 que no sale de BodyParts3D— y rehace todo lo demás desde la fuente. Se puede
