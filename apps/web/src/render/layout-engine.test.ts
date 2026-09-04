@@ -11,6 +11,9 @@ import {
   STRIP_MAX_PX,
   STRIP_MIN_PX,
   computeLayoutMetrics,
+  stripCeilingPx,
+  MIN_SCALE_PX_PER_MM,
+  STANDARD_STRIP_HEIGHT_MM,
 } from "./layout-engine";
 
 const SPEED = 25;
@@ -46,6 +49,13 @@ function heightFor(stripPx: number, leadCount: number): number {
   return stripPx * leadCount + STRIP_GAP_PX * (leadCount - 1);
 }
 
+/** Alto que deja a cada tira lo que ocupa el rango clinico a ganancia
+ * estandar y escala de referencia: con esto la escala la manda el ancho, que
+ * es el caso de partida de casi todas las pruebas. */
+function roomyHeight(rowCount: number): number {
+  return heightFor(stripCeilingPx(PX_PER_MM), rowCount);
+}
+
 /** Alto de tira justo para representar `marginMv` a cada lado de la línea
  * base con la ganancia dada, a escala real. */
 function heightForGain(gainMmPerMv: number, marginMv = STRIP_MARGIN_MV): number {
@@ -60,7 +70,20 @@ describe("reparto de altura", () => {
 
   it("nunca pasa del maximo, aunque sobre alto", () => {
     const metrics = metricsFor(heightFor(400, 3), 3, "auto");
-    expect(metrics.stripHeightPx).toBe(STRIP_MAX_PX);
+    expect(metrics.stripHeightPx).toBeCloseTo(stripCeilingPx(PX_PER_MM));
+  });
+
+  it("el tope crece con la escala, porque son 40mm y no 152px", () => {
+    // El defecto que esto arregla: el tope era una constante en pixeles de
+    // 96dpi mientras la escala sale del ancho disponible. En un area ancha el
+    // milimetro mide mas, el rango clinico a ganancia estandar ya no cabia en
+    // 152px, y la vista se quedaba en media ganancia con toda la altura de la
+    // ventana libre.
+    const ancha = metricsFor(2000, 1, "auto", { availableWidthPx: WIDTH * 2 });
+    expect(ancha.viewportScalePxPerMm).toBeCloseTo(PX_PER_MM * 2);
+    expect(ancha.stripHeightPx).toBeCloseTo(stripCeilingPx(PX_PER_MM * 2));
+    expect(ancha.clinicalGainMmPerMv).toBe(10);
+    expect(ancha.gainFits).toBe(true);
   });
 
   it("el minimo es blando: por debajo de 52px sigue comprimiendo, no recorta", () => {
@@ -84,7 +107,9 @@ describe("reparto de altura", () => {
   });
 
   it("una sola derivacion no descuenta huecos", () => {
-    expect(metricsFor(300, 1, "auto").stripHeightPx).toBe(STRIP_MAX_PX);
+    expect(metricsFor(300, 1, "auto").stripHeightPx).toBeCloseTo(
+      stripCeilingPx(PX_PER_MM)
+    );
   });
 });
 
@@ -95,10 +120,17 @@ describe("cuadricula cuadrada", () => {
     // vertical: daba 6,25 cuadros grandes por segundo en vez de 5, un 25% de
     // error al medir un RR sobre el papel. Ahora el milimetro es el milimetro
     // y lo que se adapta es la ganancia.
+    // Que la escala pueda encoger con el alto no rompe el invariante: sea
+    // cual sea, es UNA sola y gobierna los dos ejes.
     for (const stripPx of [16, 46, 70, 121, 140]) {
       const metrics = metricsFor(heightFor(stripPx, 6), 6, "auto");
-      expect(metrics.viewportScalePxPerMm, `${stripPx}px`).toBeCloseTo(PX_PER_MM);
+      expect(metrics.pixelsPerSecond, `${stripPx}px`).toBeCloseTo(
+        SPEED * metrics.viewportScalePxPerMm
+      );
     }
+    expect(metricsFor(roomyHeight(6), 6, "auto").viewportScalePxPerMm).toBeCloseTo(
+      PX_PER_MM
+    );
   });
 
   it("a 25mm/s un segundo son exactamente cinco cuadros grandes", () => {
@@ -114,11 +146,23 @@ describe("cuadricula cuadrada", () => {
     expect(smallSquareS).toBeCloseTo(0.04);
   });
 
-  it("el eje horizontal no depende del alto de tira ni de la ganancia", () => {
-    const alta = metricsFor(heightFor(140, 3), 3, "auto");
+  it("el eje horizontal no depende de la ganancia", () => {
+    const normal = metricsFor(roomyHeight(6), 6, 10);
+    const doble = metricsFor(roomyHeight(6), 6, 20);
+    expect(doble.pixelsPerSecond).toBeCloseTo(normal.pixelsPerSecond);
+    expect(normal.pixelsPerSecond).toBeCloseTo(SPEED * PX_PER_MM);
+  });
+
+  it("con poco alto encoge el papel entero, no solo el trazo", () => {
+    // El precio de conservar la ganancia estandar: cuando el alto no da, el
+    // milimetro mide menos y el papel se dibuja mas pequeno. Los dos ejes
+    // encogen a la vez, que es lo que mantiene la cuadricula cuadrada; lo que
+    // NO cambia es cuanto papel se ve: siguen siendo 250mm.
     const baja = metricsFor(heightFor(46, 12), 12, "auto");
-    expect(baja.pixelsPerSecond).toBeCloseTo(alta.pixelsPerSecond);
-    expect(alta.pixelsPerSecond).toBeCloseTo(SPEED * PX_PER_MM);
+    const holgada = metricsFor(roomyHeight(12), 12, "auto");
+    expect(baja.viewportScalePxPerMm).toBeLessThan(holgada.viewportScalePxPerMm);
+    expect(baja.pixelsPerSecond).toBeLessThan(holgada.pixelsPerSecond);
+    expect(baja.stripWidthPx / baja.pixelsPerSecond).toBeCloseTo(SCREEN_SECONDS);
   });
 });
 
@@ -132,17 +176,25 @@ describe("ganancia automatica", () => {
     expect(holgada.clinicalGainMmPerMv).toBe(10);
     expect(STRIP_MAX_PX).toBeGreaterThanOrEqual(heightForGain(10));
 
+    // Con la tira mas estrecha ya no se baja la ganancia: se encoge el papel.
+    // La ganancia estandar es la que se lee en cualquier equipo y es lo
+    // ultimo que se sacrifica.
     const justa = metricsFor(heightFor(80, 6), 6, "auto");
-    expect(justa.clinicalGainMmPerMv).toBe(5);
+    expect(justa.clinicalGainMmPerMv).toBe(10);
+    expect(justa.viewportScalePxPerMm).toBeLessThan(PX_PER_MM);
   });
 
-  it("baja escalon a escalon segun se estrecha la tira", () => {
+  it("solo baja la ganancia cuando el papel ya no puede encoger mas", () => {
     const gainAt = (stripPx: number) =>
       metricsFor(heightFor(stripPx, 6), 6, "auto").clinicalGainMmPerMv;
+    // El punto de ruptura: por debajo de este alto, ni al minimo de escala
+    // caben los 40mm de tira.
+    const floorPx = MIN_SCALE_PX_PER_MM * STANDARD_STRIP_HEIGHT_MM;
 
     expect(gainAt(1000)).toBe(10); // el tope de tira impide llegar a 20
-    expect(gainAt(90)).toBe(5);
-    expect(gainAt(40)).toBe(2.5);
+    expect(gainAt(Math.ceil(floorPx) + 1)).toBe(10);
+    expect(gainAt(Math.floor(floorPx) - 5)).toBe(5);
+    expect(gainAt(30)).toBe(2.5);
   });
 
   it("nunca baja del escalon mas pequeno, aunque no quepa", () => {
@@ -175,7 +227,9 @@ describe("ganancia manual", () => {
     const metrics = metricsFor(heightFor(50, 12), 12, 20);
     expect(metrics.clinicalGainMmPerMv).toBe(20);
     expect(metrics.gainFits).toBe(false);
-    expect(metrics.pixelsPerSecond).toBeCloseTo(SPEED * PX_PER_MM);
+    expect(metrics.pixelsPerSecond).toBeCloseTo(
+      SPEED * metrics.viewportScalePxPerMm
+    );
   });
 
   it("la ganancia manual no toca la cuadricula", () => {
@@ -217,8 +271,25 @@ describe("segundos por pantalla", () => {
   });
 
   it("las dos columnas se reparten el ancho descontando el hueco", () => {
-    const metrics = metricsFor(600, 6, "auto", { columnCount: 2 });
+    const metrics = metricsFor(roomyHeight(6), 6, "auto", { columnCount: 2 });
     expect(metrics.stripWidthPx).toBeCloseTo((WIDTH - COLUMN_GAP_PX) / 2);
+  });
+
+  it("lo que el ECG no necesita a lo ancho no se rellena estirando", () => {
+    // Es lo que hace sitio al corazon: con el alto justo, el papel encoge y
+    // el ECG ocupa menos de lo disponible. Antes se estiraba hasta el borde y
+    // ese ancho de mas era exactamente lo que impedia la ganancia estandar.
+    const metrics = metricsFor(heightFor(80, 6), 6, "auto");
+    expect(metrics.ecgWidthPx).toBeLessThan(WIDTH);
+    expect(metrics.ecgWidthPx).toBeCloseTo(metrics.stripWidthPx);
+    expect(metrics.clinicalGainMmPerMv).toBe(10);
+  });
+
+  it("el ancho ocupado cuenta las columnas y sus huecos", () => {
+    const metrics = metricsFor(roomyHeight(6), 6, "auto", { columnCount: 2 });
+    expect(metrics.ecgWidthPx).toBeCloseTo(
+      metrics.stripWidthPx * 2 + COLUMN_GAP_PX
+    );
   });
 
   it("el formato partido NO comprime: la escala es la misma", () => {
@@ -240,7 +311,9 @@ describe("segundos por pantalla", () => {
   it("la escala sale del ancho, no de una suposicion de 96dpi", () => {
     // Con un area el doble de ancha, el milimetro vale el doble de pixeles y
     // se siguen viendo exactamente diez segundos.
-    const ancha = metricsFor(600, 6, "auto", { availableWidthPx: WIDTH * 2 });
+    const ancha = metricsFor(roomyHeight(6) * 2, 6, "auto", {
+      availableWidthPx: WIDTH * 2,
+    });
     expect(ancha.viewportScalePxPerMm).toBeCloseTo(PX_PER_MM * 2);
     expect(ancha.stripWidthPx / ancha.pixelsPerSecond).toBeCloseTo(SCREEN_SECONDS);
   });

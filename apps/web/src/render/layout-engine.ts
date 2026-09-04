@@ -13,19 +13,46 @@ export const STRIP_MARGIN_MV = 2;
 /** Ganancia estándar de un electrocardiógrafo. */
 const STANDARD_GAIN_MM_PER_MV = 10;
 
-/** Tope duro de altura de tira.
+/** Tope de altura de tira: lo que ocupa el rango clínico completo
+ * (`STRIP_MARGIN_MV` a cada lado) a ganancia estándar **en la escala
+ * vigente**. Por encima de eso la tira solo añade papel en blanco.
  *
- * No es un número redondo elegido a ojo: es exactamente lo que ocupa el rango
- * clínico completo (`STRIP_MARGIN_MV` a cada lado) a ganancia estándar y
- * escala real. Por encima de eso la tira solo añade papel en blanco.
+ * Que dependa de la escala no es un refinamiento: es la corrección de un
+ * defecto. El tope era una constante en píxeles de 96dpi —152px— mientras la
+ * escala del trazado sale del ancho disponible y sube con él. En cuanto el
+ * área del ECG pasaba de unos 950px de ancho, un milímetro medía más de esos
+ * 96dpi y el rango clínico a 10mm/mV ya no cabía en 152px: la ganancia
+ * estándar quedaba fuera de alcance para siempre, con una sola derivación y
+ * con la ventana entera disponible. El síntoma era doble —el automático se
+ * quedaba en media ganancia y fijar 10 a mano avisaba de recorte— y ninguno
+ * de los dos tenía un motivo clínico detrás, solo una unidad equivocada.
  *
- * El valor anterior, 140px, era arbitrario y tenía una consecuencia que nadie
- * había mirado: como 10mm/mV necesita 152px, ninguna tira llegaba nunca a la
- * ganancia estándar. La vista se habría quedado permanentemente en media
- * ganancia sin que hubiera un motivo clínico para ello. */
-export const STRIP_MAX_PX = Math.ceil(
-  2 * STRIP_MARGIN_MV * STANDARD_GAIN_MM_PER_MV * PX_PER_MM
-);
+ * El tope sigue siendo el mismo hecho de siempre: 40mm de papel, que es lo
+ * que ocupan 4mV a ganancia estándar. Lo que cambia es que ahora se mide en
+ * la escala en la que se está dibujando. */
+export function stripCeilingPx(scalePxPerMm: number): number {
+  return STANDARD_STRIP_HEIGHT_MM * scalePxPerMm;
+}
+
+/** Alto de papel que ocupa una tira a ganancia estándar: 40mm, los 4mV del
+ * rango clínico. Es la medida de la que cuelga todo el reparto vertical. */
+export const STANDARD_STRIP_HEIGHT_MM =
+  2 * STRIP_MARGIN_MV * STANDARD_GAIN_MM_PER_MV;
+
+/** Escala por debajo de la cual el papel deja de ser legible: medio milímetro
+ * físico por milímetro de papel.
+ *
+ * Es el suelo de la negociación. Cuando ni encogiendo el papel hasta aquí
+ * caben los 40mm por tira —doce derivaciones en una ventana baja—, se deja de
+ * encoger y se baja la ganancia, que es lo que hace un electrocardiógrafo.
+ * Preferir un trazado microscópico a media ganancia sería cambiar un problema
+ * clínico honesto por uno de vista cansada. */
+export const MIN_SCALE_PX_PER_MM = PX_PER_MM / 2;
+
+/** El tope a la escala física de referencia (96dpi). Ya no gobierna el
+ * reparto —eso lo hace `stripCeilingPx` con la escala real—; se conserva
+ * porque es la cifra con la que se razona en documentación y pruebas. */
+export const STRIP_MAX_PX = Math.ceil(stripCeilingPx(PX_PER_MM));
 /** Hueco entre tiras. Es `--space-1`. */
 export const STRIP_GAP_PX = 4;
 /** Suelo absoluto de seguridad: por debajo el canvas deja de ser dibujable. */
@@ -86,6 +113,10 @@ export interface LayoutMetrics {
   /** `false` cuando la ganancia elegida a mano no cabe en la tira y el trazo
    * se va a recortar. La interfaz lo avisa; no se corrige por detrás. */
   gainFits: boolean;
+  /** Ancho total que ocupa el ECG: las columnas más sus huecos. Puede ser
+   * menor que el disponible cuando manda la altura, y lo que sobra no es una
+   * franja vacía: es el hueco donde se acopla el corazón. */
+  ecgWidthPx: number;
   /** Píxeles por milímetro de papel. **El mismo en los dos ejes**: es lo que
    * hace que la cuadrícula sea cuadrada y que medir sobre ella sea correcto. */
   viewportScalePxPerMm: number;
@@ -162,14 +193,7 @@ export function computeLayoutMetrics({
   const rows = Math.max(1, Math.floor(rowCount));
   const columns = Math.max(1, Math.floor(columnCount));
 
-  const gapsPx = STRIP_GAP_PX * (rows - 1);
-  const perStripPx = (availableHeightPx - gapsPx) / rows;
-  const stripHeightPx = Math.max(
-    STRIP_FLOOR_PX,
-    Math.min(STRIP_MAX_PX, perStripPx)
-  );
-
-  const stripWidthPx = Math.max(
+  const widthBudgetPx = Math.max(
     1,
     (availableWidthPx - COLUMN_GAP_PX * (columns - 1)) / columns
   );
@@ -188,8 +212,37 @@ export function computeLayoutMetrics({
   // Como el ancho de columna y el ancho de papel se dividen los dos entre el
   // número de columnas, la escala es la MISMA en una columna que en dos: el
   // formato partido no comprime el trazado, solo enseña menos tiempo.
-  const viewportScalePxPerMm = stripWidthPx / viewportWidthMm;
+  const gapsPx = STRIP_GAP_PX * (rows - 1);
+  const perStripPx = Math.max(1, (availableHeightPx - gapsPx) / rows);
+
+  // La escala la negocian las dos dimensiones, y no solo el ancho.
+  //
+  // Antes salía del ancho a secas: la pantalla estiraba el milímetro hasta
+  // llenar el área y luego se comprobaba si el rango clínico cabía de alto.
+  // En una ventana apaisada nunca cabía, así que la ganancia estándar —la de
+  // cualquier electrocardiógrafo— quedaba descartada de oficio y el
+  // automático vivía en media ganancia. Y era al revés de lo que parecía: a
+  // más ancha la ventana, más grande el milímetro y MENOS milivoltios por
+  // tira.
+  //
+  // Ahora el papel se encoge hasta que los 40mm de tira caben en el alto
+  // disponible, con la cuadrícula igual de cuadrada —la escala sigue siendo
+  // una sola para los dos ejes— y los mismos 250mm de papel a lo ancho. Lo
+  // que sobra a los lados no se rellena estirando: se lo queda quien vaya al
+  // lado del ECG.
+  const scaleFromWidth = widthBudgetPx / viewportWidthMm;
+  const scaleFromHeight = perStripPx / STANDARD_STRIP_HEIGHT_MM;
+  const viewportScalePxPerMm = Math.min(
+    scaleFromWidth,
+    Math.max(MIN_SCALE_PX_PER_MM, scaleFromHeight)
+  );
+
+  const stripWidthPx = viewportScalePxPerMm * viewportWidthMm;
   const stripSeconds = viewportWidthMm / paperSpeedMmS;
+  const stripHeightPx = Math.max(
+    STRIP_FLOOR_PX,
+    Math.min(stripCeilingPx(viewportScalePxPerMm), perStripPx)
+  );
 
   const gainIsAuto = gain === "auto";
   const clinicalGainMmPerMv = gainIsAuto
@@ -206,6 +259,7 @@ export function computeLayoutMetrics({
     gainFits:
       halfRangeMv(stripHeightPx, clinicalGainMmPerMv, viewportScalePxPerMm) >=
       STRIP_MARGIN_MV,
+    ecgWidthPx: stripWidthPx * columns + COLUMN_GAP_PX * (columns - 1),
     viewportScalePxPerMm,
     pixelsPerMillivolt: clinicalGainMmPerMv * viewportScalePxPerMm,
     pixelsPerSecond: paperSpeedMmS * viewportScalePxPerMm,
