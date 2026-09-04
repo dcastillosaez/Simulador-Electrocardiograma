@@ -7,8 +7,10 @@ import {
   MIN_ZOOM_DISTANCE,
   MODEL_BOUNDING_RADIUS,
   MODEL_HALF_EXTENTS,
+  framingRadius,
   presetDistance,
   presetPosition,
+  silhouetteHalfExtents,
   silhouetteRadius,
   viewDepth,
   type CameraPreset,
@@ -20,6 +22,17 @@ const HALF_FOV = (CAMERA_FOV_DEG / 2) * (Math.PI / 180);
 function distanceFromOrigin(preset: CameraPreset): number {
   const [x, y, z] = presetPosition(preset);
   return Math.hypot(x, y, z);
+}
+
+/** Lo que se ve de alto y de ancho a la distancia de la cara de delante, que
+ * es la que decide el encuadre. */
+function visibleHalfExtents(
+  preset: CameraPreset,
+  aspect: number
+): { up: number; right: number } {
+  const toNearFace = presetDistance(preset, aspect) - viewDepth(preset);
+  const up = toNearFace * Math.tan(HALF_FOV);
+  return { up, right: up * aspect };
 }
 
 describe("silueta por vista", () => {
@@ -102,5 +115,46 @@ describe("encuadre de la cámara", () => {
       );
       expect(cross).toBeGreaterThan(0.5);
     }
+  });
+});
+
+describe("encuadre en un marco más alto que ancho", () => {
+  // El corazón dejó de vivir en una franja apaisada: ocupa el sobrante que le
+  // deja el papel del ECG, que es una columna estrecha y alta —258×787 en una
+  // pantalla de 1600×900—. Con el `fov` vertical de una cámara en perspectiva,
+  // el campo horizontal se estrecha con la proporción, y encuadrar por la
+  // vertical recortaba el modelo por los costados sin dar ningún error.
+  const TALL = 258 / 787;
+
+  it("no cambia nada mientras el marco sea al menos tan ancho como alto", () => {
+    for (const preset of PRESETS) {
+      expect(framingRadius(preset, 1)).toBeCloseTo(silhouetteRadius(preset), 12);
+      expect(framingRadius(preset, 2.5)).toBeCloseTo(silhouetteRadius(preset), 12);
+      expect(presetDistance(preset, 1)).toBeCloseTo(presetDistance(preset), 12);
+    }
+  });
+
+  it("aleja la cámara cuando el marco se estrecha", () => {
+    for (const preset of PRESETS) {
+      expect(presetDistance(preset, TALL)).toBeGreaterThan(presetDistance(preset, 1));
+    }
+  });
+
+  it("mantiene el modelo entero dentro del encuadre en las seis vistas", () => {
+    for (const preset of PRESETS) {
+      const silhouette = silhouetteHalfExtents(preset);
+      const visible = visibleHalfExtents(preset, TALL);
+      expect(visible.up).toBeGreaterThan(silhouette.up);
+      // Esta es la que fallaba: en la vista superior el corazón mide 0,317 de
+      // semiancho y solo 0,278 de semialto, así que el costado es lo primero
+      // que se sale en cuanto el marco deja de ser apaisado.
+      expect(visible.right).toBeGreaterThan(silhouette.right);
+    }
+  });
+
+  it("con la vista superior en un marco estrecho manda el ancho, no el alto", () => {
+    const { up, right } = silhouetteHalfExtents("superior");
+    expect(right).toBeGreaterThan(up);
+    expect(framingRadius("superior", TALL)).toBeCloseTo(right / TALL, 12);
   });
 });
