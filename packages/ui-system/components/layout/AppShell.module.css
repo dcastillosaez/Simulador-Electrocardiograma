@@ -7,18 +7,69 @@
   padding: var(--space-2);
   background: var(--surface-background);
   grid-template-areas:
-    "header  header    header"
-    "sidebar ecg       inspector"
-    "status  status    status";
-  grid-template-columns: 280px 1fr 320px;
+    "header header"
+    "aside  ecg"
+    "status status";
+  /* 320 y no los 280 de cuando esta columna era solo el escenario: ahora
+     carga tambien con el inspector, cuya rejilla de medidas se penso para
+     ese ancho. Aun asi se ahorran 280px respecto a las dos columnas de
+     antes, y van enteros al centro. */
+  grid-template-columns: 320px 1fr;
   grid-template-rows: auto 1fr auto;
   box-sizing: border-box;
 }
 
 .header { grid-area: header; }
-.sidebar { grid-area: sidebar; }
-.inspector { grid-area: inspector; }
 .status { grid-area: status; }
+
+/* La columna izquierda: escenario arriba, inspector debajo.
+
+   Entre los dos piden unos 1400px de alto y ninguna pantalla los da, asi que
+   la pregunta no es si habra scroll sino donde. Y no es indiferente: los
+   mandos del paciente se tocan una vez y se olvidan, pero las medidas cambian
+   con cada latido y se miran a la vez que el trazado. Por eso el inspector
+   pide primero su alto natural y el escenario scrollea con lo que quede — al
+   reves, o dejando scrollear la columna entera, las constantes hemodinamicas
+   quedaban fuera de pantalla nada mas cargar. */
+.aside {
+  grid-area: aside;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+  min-width: 0;
+}
+
+.sidebar {
+  flex: 1 1 auto;
+}
+
+/* `0 0 auto`: se planta en su alto y no encoge para hacerle sitio al
+   escenario. El tope no es una proporcion sino lo que hace falta para que al
+   escenario le queden 220px —el selector de ritmo, la frecuencia y algo de
+   la senal, con el resto a un golpe de rueda—: solo por debajo de eso empieza
+   a scrollear tambien el inspector.
+
+   La cuenta sale a 486px de inspector en su estado normal y 533 con los
+   ritmos de dos frecuencias, asi que en 900 de pantalla —569 de tope— cabe
+   entero, que es lo que se buscaba al comprimirlo. */
+.inspector {
+  flex: 0 0 auto;
+  max-height: calc(100% - 220px);
+}
+
+/* `min-height: 0` tambien aqui, y no solo en `.ecg`: ni una fila `1fr` ni un
+   item flexible bajan del tamano de su contenido mientras conserven el
+   `min-height: auto` que traen de fabrica. Con la barra lateral entera abierta
+   —paciente, eje y farmacologia— eso son unos 850px, asi que en una pantalla
+   de 768 el grid crecia por debajo del `100dvh` y se llevaba fuera de cuadro
+   el pie y el panel del corazon. Los componentes de dentro ya scrollean
+   solos; lo que faltaba era permitirles ser mas bajos que su contenido. */
+.sidebar,
+.inspector {
+  min-height: 0;
+  min-width: 0;
+}
 
 .ecg {
   grid-area: ecg;
@@ -38,8 +89,7 @@
     grid-template-areas:
       "header"
       "ecg"
-      "sidebar"
-      "inspector"
+      "aside"
       "status";
     grid-template-columns: 1fr;
     /* La fila del ECG lleva una altura DEFINIDA, no `1fr`.
@@ -48,8 +98,12 @@
        medida de este mismo contenedor. Es una dependencia circular: las tiras
        colapsarian al suelo de 16px o oscilarian entre dos tamanos. En
        escritorio no ocurre porque `100dvh` acota el grid entero. */
-    grid-template-rows: auto minmax(0, 50dvh) auto auto auto;
+    grid-template-rows: auto minmax(0, 50dvh) auto auto;
     height: auto;
     min-height: 100dvh;
   }
+
+  /* Apilados no hay altura que repartir —la fila es `auto` y la pagina entera
+     scrollea—, asi que cada panel se muestra tan alto como pida. El `flex` de
+     escritorio no estorba: sin altura que exceder, nadie encoge. */
 }

@@ -15,8 +15,10 @@ import type { Object3DLike } from "./heart-nodes";
  * nombres son el contrato con `docs/fase-d/add-heart-valves.py`, y si el
  * modelo deja de traer uno la carga falla diciendo cuál.
  *
- * Las valvas salen de BodyParts3D como conceptos propios; lo único
- * sintetizado es la pose abierta, que viaja en el `.glb` como *morph target*.
+ * Las valvas salen de BodyParts3D como conceptos propios, pero ninguna de las
+ * dos poses del ciclo: la fuente las modela entreabiertas, en una posición
+ * neutra que no es ni la cerrada ni la abierta. Las dos se sintetizan girando
+ * cada valva sobre su anillo, y viajan en el `.glb` como *morph targets*.
  * Ver `docs/fase-d/valvulas.md`. */
 export const HEART_VALVES = {
   Mitral: {
@@ -70,8 +72,9 @@ export const VALVE_OF_LEAFLET = Object.fromEntries(
 /** Lo mínimo que el animador necesita de una valva.
  *
  * `morphTargetInfluences` es lo único que la mueve: el `.glb` trae la pose
- * abierta como diferencia de vértices, así que animar una válvula es escribir
- * un número entre 0 y 1 y dejar que la interpolación la haga la GPU. Ni una
+ * abierta —y la comba que hace del recorrido un arco y no una cuerda— como
+ * diferencias de vértices, así que animar una válvula es escribir dos números
+ * que salen de uno solo y dejar que la interpolación la haga la GPU. Ni una
  * matriz que componer ni un vértice que tocar por fotograma.
  *
  * Tiparlo así en vez de contra `THREE.Mesh` mantiene este módulo y su animador

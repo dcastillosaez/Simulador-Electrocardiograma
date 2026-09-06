@@ -152,28 +152,95 @@ RING_PERCENTILE = 3.0
 abajo. Con el 3% más cercano, el anillo sale con una desviación del plano de
 1 mm sobre un radio de 8 a 17 mm: es un anillo plano de verdad, no una nube."""
 
-# Cuánto se abre cada válvula y hasta dónde arrastra lo que cuelga de ella.
+# Cuánto puede girar cada válvula y qué parte de cada valva gira.
 #
-# El ángulo es de presentación, como la curva de contracción del cliente: la
-# fuente da una pose y una sola, y cuánto se separa de ella una válvula abierta
-# no está en el dato. Se eligen ángulos que dejan el orificio abierto casi hasta
-# el anillo, que es lo que hay que ver.
+# Los dos ángulos son TOPES, no valores. El que se usa lo busca el script para
+# cada válvula, contra dos propiedades que sí se pueden comprobar: que la valva
+# abierta no se vea desde fuera y que la cerrada no deje pasar. Fijarlos a ojo
+# es lo que había antes, y producía las dos cosas que un ángulo a ojo produce —
+# la sigmoidea pulmonar izquierda asomaba por fuera del tronco al abrirse y el
+# orificio aórtico se quedaba abierto un 15% al cerrarse.
 #
-# `drag_full_mm` y `drag_zero_mm` solo pintan en las auriculoventriculares. La
-# malla de una valva mitral o tricúspide de BodyParts3D no es solo el velo:
-# lleva pegada la cuerda tendinosa hasta el músculo papilar, cuarenta y tantos
-# milímetros más abajo. Girarlo todo en bloque saca la punta fuera del
-# ventrículo — comprobado—, así que el giro va a plena amplitud hasta
-# `drag_full_mm` por debajo del anillo, que es donde acaba el velo, y se apaga
-# suavemente hasta anularse en `drag_zero_mm`, que es donde está el papilar.
-# El papilar no se mueve, y esa es exactamente la razón de que la cuerda
-# tendinosa exista.
-OPENING = {
-    "Tricuspid": {"angle_deg": 62.0, "drag_full_mm": 8.0, "drag_zero_mm": 34.0},
-    "Mitral": {"angle_deg": 62.0, "drag_full_mm": 9.0, "drag_zero_mm": 36.0},
-    "Aortic": {"angle_deg": 58.0, "drag_full_mm": None, "drag_zero_mm": None},
-    "Pulmonary": {"angle_deg": 58.0, "drag_full_mm": None, "drag_zero_mm": None},
+# `hinge_mm`, `free_mm` y `papillary_mm` describen QUÉ se mueve, y son la
+# corrección de fondo: **una valva está anclada por su base y ahí no gira**.
+# Antes el giro era pleno desde el anillo, así que la inserción se despegaba de
+# la pared y la atravesaba. Ahora el peso del giro sale de cero en el anclaje.
+#
+# En las auriculoventriculares el anclaje es el anillo y el peso sube de 0 a 1
+# en los `hinge_mm` primeros milímetros; se mantiene en 1 por el cuerpo del
+# velo hasta `free_mm`, que es donde acaba, y baja otra vez a 0 en
+# `papillary_mm`, que es donde está el músculo papilar. La malla de BodyParts3D
+# no es solo el velo: lleva pegada la cuerda tendinosa cuarenta y tantos
+# milímetros más abajo, y el papilar no se mueve — que es exactamente la razón
+# de que la cuerda tendinosa exista.
+#
+# En las sigmoideas el anclaje no es un plano sino la línea en U con la que la
+# valva se inserta en la pared del vaso, así que el peso no se mide en
+# profundidad sino en distancia a esa pared: cero sobre ella, uno en el borde
+# libre. `base_fraction` dice a qué parte de la anchura de la valva se alcanza
+# el giro pleno.
+MOTION = {
+    "Tricuspid": {
+        "open_deg": 62.0,
+        "close_deg": 70.0,
+        "hinge_mm": 4.0,
+        "free_mm": 8.0,
+        "papillary_mm": 34.0,
+    },
+    "Mitral": {
+        "open_deg": 62.0,
+        "close_deg": 70.0,
+        "hinge_mm": 4.0,
+        "free_mm": 9.0,
+        "papillary_mm": 36.0,
+    },
+    "Aortic": {"open_deg": 75.0, "close_deg": 40.0, "base_fraction": 0.55},
+    "Pulmonary": {"open_deg": 75.0, "close_deg": 40.0, "base_fraction": 0.55},
 }
+
+OPEN_SAFETY = 0.90
+"""Del ángulo máximo que aún deja la valva escondida se usa el 90%.
+
+La prueba de visibilidad es binaria —o escapa un rayo o no—, así que el margen
+no puede salir de ella. Sale del ángulo: quedarse un 10% por debajo del punto
+en el que la valva empieza a asomar deja sitio para que el cliente interpole
+entre las dos poses sin que ningún fotograma intermedio se salga."""
+
+CLOSE_MARGIN_DEG = 4.0
+"""Lo que se cierra de más una vez sellado el orificio.
+
+Coaptar es que los velos se solapen, no que se toquen justo: un cierre al
+límite se abre con cualquier redondeo, y el solapamiento es lo que hace
+hermética una válvula de verdad."""
+
+ESCAPE_DIRECTIONS = 42
+"""Direcciones de la esfera por las que se intenta escapar desde cada vértice.
+
+Cuarenta y dos repartidas por Fibonacci: separadas unos 25°, que para una valva
+de 10 mm a 30 mm de la pared es de sobra para encontrar el hueco por el que se
+la ve. Subirlo no cambia el veredicto de ninguna valva; se comprobó con 162."""
+
+ORIFICE_SAMPLES = 24
+"""Celdas por radio de la rejilla con la que se mide la fuga del orificio."""
+
+ORIFICE_FRACTION = 0.70
+"""Qué parte del disco del anillo es orificio de verdad.
+
+El anillo de contacto sale de dónde se tocan dos moldes de sangre, y su borde
+no es el borde del agujero que la válvula tiene que tapar: es la inserción
+misma, y en las sigmoideas, además, los senos de Valsalva, que quedan DETRÁS
+de la valva. Un rayo que pasa por ahí no atraviesa la válvula, la roza. Medir
+el disco entero daba un 15% de fuga a una válvula aórtica que en el centro
+estaba sellada al 0,3%; con el 70% interior, la cifra dice lo que se ve."""
+
+MAX_CLOSED_LEAK = 0.03
+"""Fuga que se admite con la válvula cerrada.
+
+No es cero por una razón del dato y no de la anatomía: la malla de una valva
+auriculoventricular de BodyParts3D lleva las cuerdas tendinosas como un encaje
+de tiras, y entre tira y tira pasan rayos que en el corazón de verdad no pasan
+por ninguna parte — las cuerdas están detrás del velo, no en el orificio.
+Perseguir el cero sería perseguir el ruido de una malla, no cerrar nada."""
 
 ANNULUS_RADIUS_RANGE_MM = {
     # Rangos anatómicos de referencia para el radio del anillo. No son un
@@ -185,15 +252,19 @@ ANNULUS_RADIUS_RANGE_MM = {
     "Pulmonary": (7.0, 15.0),
 }
 
-MAX_STRAY_MM = 4.0
-"""Cuánto puede asomar una valva abierta por fuera del corazón.
-
-Una válvula que al abrirse se sale del órgano es el fallo que un ángulo
-demasiado generoso produce, y es un fallo que una proyección de puntos disimula.
-Se mide contra la envolvente convexa de las diez estructuras: por dentro de ella
-una valva está dentro del corazón, y lo que sobresalga se cuenta en milímetros.
-La envolvente es generosa por definición —no entra en los entrantes del
-órgano—, así que lo que se sale de ella se sale de verdad."""
+# Lo que se ve del corazón desde fuera. Los dos ventrículos no están: viven
+# dentro del miocardio, que sí. Una valva escondida dentro de cualquiera de
+# estas superficies no se ve, y esa es toda la prueba.
+SKIN = (
+    "Myocardium",
+    "Aorta",
+    "PulmonaryArtery",
+    "LeftAtrium",
+    "RightAtrium",
+    "PulmonaryVeins",
+    "SuperiorVenaCava",
+    "InferiorVenaCava",
+)
 
 
 # ---------------------------------------------------------------- fuente ----
@@ -341,19 +412,90 @@ def valve_frame(
     return centre, normal, radius, count
 
 
-def hull_excess(points: np.ndarray):
-    """Devuelve una función que mide cuánto sobresale un punto de la
-    envolvente convexa de `points`. Negativo o cero significa dentro."""
-    hull = trimesh.convex.convex_hull(points)
-    normals = np.asarray(hull.face_normals)
-    offsets = np.einsum(
-        "ij,ij->i", normals, np.asarray(hull.vertices)[hull.faces[:, 0]]
+def dense_points(mesh: trimesh.Trimesh) -> np.ndarray:
+    """Vértices, centros de cara y puntos medios de arista.
+
+    Densifica una malla sin muestreo aleatorio, que en un script cuyo resultado
+    se versiona no vale: dos ejecuciones tienen que dar el mismo `.glb`. Sirve
+    para medir distancias a una superficie con un árbol de puntos, sin arrastrar
+    `rtree` solo para eso — el molde de la aorta trae 610 vértices para toda su
+    superficie y a pelo sesgaría la medida un par de milímetros."""
+    v = np.asarray(mesh.vertices)
+    f = np.asarray(mesh.faces)
+    centres = v[f].mean(axis=1)
+    edges = np.vstack([f[:, [0, 1]], f[:, [1, 2]], f[:, [2, 0]]])
+    mids = v[edges].mean(axis=1)
+    return np.vstack([v, centres, mids])
+
+
+def escape_directions(count: int) -> np.ndarray:
+    """Direcciones repartidas por la esfera con la espiral de Fibonacci."""
+    i = np.arange(count) + 0.5
+    polar = np.arccos(1.0 - 2.0 * i / count)
+    azimuth = np.pi * (1.0 + 5.0 ** 0.5) * i
+    return np.column_stack(
+        [np.cos(azimuth) * np.sin(polar), np.sin(azimuth) * np.sin(polar), np.cos(polar)]
     )
 
-    def excess(query: np.ndarray) -> np.ndarray:
-        return (np.asarray(query) @ normals.T - offsets).max(axis=1)
 
-    return excess
+def visible_from_outside(points: np.ndarray, skin: trimesh.Trimesh) -> np.ndarray:
+    """Qué puntos se ven desde fuera del corazón, uno a uno.
+
+    Desde cada punto salen rayos en todas direcciones contra la piel del
+    órgano. Si alguno escapa sin chocar, ese punto se ve. Es la pregunta que
+    hace el usuario del simulador —«¿se le ve la válvula al corazón?»— y no una
+    aproximación suya: no depende de que los moldes sean sólidos cerrados (no lo
+    son, están cortados por donde acaban los vasos) ni de envolventes convexas,
+    que dan por dentro todo lo que quede en un entrante del órgano.
+
+    Antes esto se medía contra la envolvente convexa de las diez estructuras, y
+    por eso pasó una sigmoidea pulmonar que asomaba de verdad: por fuera del
+    tronco pero por dentro del casco."""
+    directions = escape_directions(ESCAPE_DIRECTIONS)
+    origins = np.repeat(points, len(directions), axis=0)
+    rays = np.tile(directions, (len(points), 1))
+    # Un pelo hacia el rayo para no chocar con la propia superficie de salida.
+    blocked = skin.ray.intersects_any(origins + rays * 1e-5, rays)
+    return (~blocked.reshape(len(points), len(directions))).any(axis=1)
+
+
+def orifice_leak(
+    posed: dict[str, np.ndarray],
+    faces: dict[str, np.ndarray],
+    centre: np.ndarray,
+    normal: np.ndarray,
+    radius: float,
+) -> float:
+    """Qué parte del orificio deja pasar la válvula, de 0 a 1.
+
+    Rayos a lo largo del eje del flujo por el orificio. Los que atraviesan sin
+    tocar valva son la fuga. Con la válvula cerrada tiene que ser casi cero:
+    una válvula que coapta no es una que se toca en algún punto suelto, es una
+    por la que no se ve a través."""
+    mesh = trimesh.util.concatenate(
+        [
+            trimesh.Trimesh(vertices=posed[name], faces=faces[name], process=False)
+            for name in posed
+        ]
+    )
+    basis = np.cross(normal, [1.0, 0.0, 0.0])
+    if np.linalg.norm(basis) < 1e-6:
+        basis = np.cross(normal, [0.0, 1.0, 0.0])
+    basis /= np.linalg.norm(basis)
+    other = np.cross(normal, basis)
+    orifice = radius * ORIFICE_FRACTION
+    step = orifice / ORIFICE_SAMPLES
+    grid = np.arange(-orifice, orifice + step, step)
+    x, y = np.meshgrid(grid, grid)
+    inside = x ** 2 + y ** 2 <= orifice ** 2
+    offsets = np.column_stack([x[inside], y[inside]])
+    origins = (
+        centre
+        + offsets[:, :1] * basis
+        + offsets[:, 1:2] * other
+        - normal * (radius * 2.0)
+    )
+    return float((~mesh.ray.intersects_any(origins, np.tile(normal, (len(origins), 1)))).mean())
 
 
 def leaflet_hinge(
@@ -389,69 +531,146 @@ def rotate_about(
     )
 
 
-def opening_angles(
+def attachment_weights(
     points: np.ndarray,
+    kind: str,
+    motion: dict,
     centre: np.ndarray,
     normal: np.ndarray,
-    angle_rad: float,
-    drag_full_mm: float | None,
-    drag_zero_mm: float | None,
+    wall: cKDTree | None,
     mm_per_unit: float,
 ) -> np.ndarray:
-    if drag_full_mm is None:
-        return np.full(len(points), angle_rad)
+    """Cuánto gira cada vértice, de 0 en el anclaje a 1 en el borde libre.
+
+    Es la pieza que hace que una valva se comporte como una membrana sujeta por
+    la base y no como una tapa con bisagra. Girar la valva entera en bloque
+    despega la inserción de la pared y la mete a través de ella; el resultado se
+    ve desde fuera del corazón, que es justo lo que no puede pasar."""
+    if kind == "semilunar":
+        assert wall is not None
+        distance = wall.query(points)[0] * mm_per_unit
+        # La anchura de esta valva concreta y no un número fijo: la sigmoidea
+        # pulmonar izquierda mide el doble que cualquier aórtica, y el borde
+        # libre de cada una está donde está.
+        span = float(np.percentile(distance, 95.0))
+        if span <= 0.0:
+            return np.ones(len(points))
+        return smoothstep(distance / max(span * motion["base_fraction"], 1e-6))
+
     depth = ((points - centre) @ normal) * mm_per_unit
-    weight = 1.0 - smoothstep((depth - drag_full_mm) / (drag_zero_mm - drag_full_mm))
-    return angle_rad * weight
+    anchored = smoothstep(depth / motion["hinge_mm"])
+    trailing = 1.0 - smoothstep(
+        (depth - motion["free_mm"]) / (motion["papillary_mm"] - motion["free_mm"])
+    )
+    return anchored * trailing
 
 
-def open_pose(
-    mesh: trimesh.Trimesh,
+def opening_sign(
+    points: np.ndarray,
+    origin: np.ndarray,
+    axis: np.ndarray,
+    weights: np.ndarray,
     centre: np.ndarray,
     normal: np.ndarray,
-    radius: float,
-    opening: dict,
-    mm_per_unit: float,
-) -> tuple[np.ndarray, float]:
-    """Vértices de la valva abierta y el signo de giro que la abre.
+) -> float:
+    """Cuál de los dos sentidos de giro abre la valva.
 
-    El signo no se escribe a mano: se prueban los dos y se queda el que aleja
-    la valva del eje de la válvula, que es lo que significa abrirse. Escribirlo
-    a mano son once decisiones que hay que revisar cada vez que se toca la
-    geometría; así es una propiedad que se comprueba sola."""
-    points = np.asarray(mesh.vertices)
-    origin, axis = leaflet_hinge(mesh, centre, normal, radius)
-    angles = opening_angles(
-        points,
-        centre,
-        normal,
-        np.deg2rad(opening["angle_deg"]),
-        opening["drag_full_mm"],
-        opening["drag_zero_mm"],
-        mm_per_unit,
-    )
-    moving = angles > angles.max() * 0.5
+    No se escribe a mano: se prueban los dos y se queda el que aleja del eje de
+    la válvula lo que de verdad se mueve. Escribirlo serían once decisiones que
+    revisar cada vez que se toca la geometría; así es una propiedad que se
+    comprueba sola."""
+    moving = weights >= 0.5 * weights.max()
 
     def mean_radius(sign: float) -> float:
-        posed = rotate_about(points, origin, axis * sign, angles)[moving]
+        posed = rotate_about(points, origin, axis * sign, weights)[moving]
+        relative = posed - centre
         return float(
             np.mean(
-                np.linalg.norm(
-                    (posed - centre) - np.outer((posed - centre) @ normal, normal),
-                    axis=1,
-                )
+                np.linalg.norm(relative - np.outer(relative @ normal, normal), axis=1)
             )
         )
 
-    sign = 1.0 if mean_radius(1.0) > mean_radius(-1.0) else -1.0
-    return rotate_about(points, origin, axis * sign, angles), sign
+    return 1.0 if mean_radius(1.0) > mean_radius(-1.0) else -1.0
+
+
+def posed_leaflets(
+    leaflets: dict[str, dict],
+    angle_deg: float,
+    direction: float,
+) -> dict[str, np.ndarray]:
+    """Las valvas de una válvula giradas ese ángulo. `direction` +1 abre."""
+    return {
+        name: rotate_about(
+            data["points"],
+            data["origin"],
+            data["axis"] * data["sign"] * direction,
+            np.deg2rad(angle_deg) * data["weights"],
+        )
+        for name, data in leaflets.items()
+    }
+
+
+def largest_hidden_angle(
+    leaflets: dict[str, dict],
+    skin: trimesh.Trimesh,
+    ceiling_deg: float,
+    step_deg: float = 1.5,
+) -> tuple[float, int]:
+    """El mayor ángulo de apertura con el que ninguna valva se ve desde fuera.
+
+    Se baja desde el tope en escalones en vez de bisecar: la visibilidad no es
+    monótona con el ángulo —una valva puede salir por un hueco y volver a
+    esconderse—, y una bisección sobre una condición no monótona devuelve
+    cualquier cosa. Bajando se coge el primer ángulo bueno por debajo del tope,
+    que es el que se quiere."""
+    angle = ceiling_deg
+    while angle > 0.0:
+        posed = posed_leaflets(leaflets, angle, +1.0)
+        exposed = sum(
+            int(visible_from_outside(points, skin).sum()) for points in posed.values()
+        )
+        if exposed == 0:
+            return angle, 0
+        angle = round(angle - step_deg, 3)
+    return 0.0, 1
+
+
+def smallest_sealing_angle(
+    leaflets: dict[str, dict],
+    faces: dict[str, np.ndarray],
+    centre: np.ndarray,
+    normal: np.ndarray,
+    radius: float,
+    ceiling_deg: float,
+    step_deg: float = 1.5,
+) -> tuple[float, float]:
+    """El menor ángulo de cierre que deja el orificio sin fuga.
+
+    Cero es la pose de BodyParts3D, que no es una válvula cerrada: la fuente
+    modela los velos entreabiertos, en una posición neutra que no es ninguna de
+    las dos del ciclo. Por el orificio mitral se veía pasar la mitad del disco.
+    Se cierra desde ahí hasta que deja de pasar, y luego un poco más — coaptar
+    es solaparse."""
+    angle = 0.0
+    while angle <= ceiling_deg:
+        leak = orifice_leak(
+            posed_leaflets(leaflets, angle, -1.0), faces, centre, normal, radius
+        )
+        if leak <= MAX_CLOSED_LEAK:
+            return min(angle + CLOSE_MARGIN_DEG, ceiling_deg), leak
+        angle = round(angle + step_deg, 3)
+    return ceiling_deg, orifice_leak(
+        posed_leaflets(leaflets, ceiling_deg, -1.0), faces, centre, normal, radius
+    )
 
 
 # ------------------------------------------------------------------ glTF ----
 
 
-def add_morph_targets(raw: bytes, targets: dict[str, dict[str, np.ndarray]]) -> bytes:
-    """Mete una pose alternativa por malla en un GLB ya escrito.
+def add_morph_targets(
+    raw: bytes, targets: dict[str, list[dict[str, np.ndarray]]]
+) -> bytes:
+    """Mete las poses alternativas de cada malla en un GLB ya escrito.
 
     trimesh no sabe exportar *morph targets*, y son justo lo que hace falta:
     con ellos el cliente anima una válvula con un número y la interpolación la
@@ -460,10 +679,18 @@ def add_morph_targets(raw: bytes, targets: dict[str, dict[str, np.ndarray]]) -> 
     formato es abierto y esto son cuarenta líneas — bastante menos que la
     alternativa de escribir el GLB entero a mano.
 
-    `targets` lleva, por nombre de malla, la diferencia entre la pose cerrada y
-    la abierta: en `POSITION` la de cada vértice y en `NORMAL` la de su normal.
-    glTF guarda los *morph targets* como diferencias, no como valores
-    absolutos.
+    `targets` lleva, por nombre de malla, DOS objetivos y no uno: el primero es
+    la diferencia entre la pose cerrada y la abierta, y el segundo la comba que
+    hace falta para que el camino entre las dos sea un arco y no una cuerda. En
+    `POSITION` va la diferencia de cada vértice y en `NORMAL` la de su normal;
+    glTF guarda los *morph targets* como diferencias, no como valores absolutos.
+
+    Lo de la comba merece una línea: una valva mitral recorre unos cien grados
+    entre cerrada y abierta, y la GPU interpola en línea recta entre las poses
+    que se le den. La recta entre los extremos de un arco de cien grados se mete
+    un 38% por dentro, así que a mitad de camino el velo se acortaba esa
+    barbaridad — se veía encogerse y volver a crecer en cada latido. El
+    segundo objetivo lo devuelve al arco.
 
     Las normales van también, y no son un lujo: sin ellas la valva se movería
     con la iluminación de la pose cerrada, y una membrana que gira sesenta
@@ -508,13 +735,16 @@ def add_morph_targets(raw: bytes, targets: dict[str, dict[str, np.ndarray]]) -> 
         target = targets.get(mesh.get("name", ""))
         if target is None:
             continue
-        attributes = {name: add_accessor(deltas) for name, deltas in target.items()}
+        written = [
+            {name: add_accessor(deltas) for name, deltas in pose.items()}
+            for pose in target
+        ]
         for primitive in mesh["primitives"]:
-            primitive["targets"] = [attributes]
-        # El peso inicial: la válvula arranca cerrada, que es la pose de la
-        # fuente. El cliente lo sobrescribe en cuanto llega el primer latido.
-        mesh["weights"] = [0.0]
-        mesh.setdefault("extras", {})["targetNames"] = ["open"]
+            primitive["targets"] = written
+        # Los pesos iniciales: la válvula arranca cerrada y sin comba. El
+        # cliente los sobrescribe en cuanto llega el primer latido.
+        mesh["weights"] = [0.0] * len(written)
+        mesh.setdefault("extras", {})["targetNames"] = ["open", "bulge"]
 
     document["buffers"][0]["byteLength"] = len(binary)
 
@@ -560,8 +790,12 @@ def write_preview(
     views = [("Frontal", 0, 1), ("Lateral", 2, 1), ("Superior", 0, 2)]
     colours = plt.get_cmap("tab20")
     figure, axes = plt.subplots(2, 3, figsize=(21, 14))
+    # Sin apellido de fase: las cuatro válvulas no se cierran a la vez. Las
+    # auriculoventriculares están cerradas en sístole y las sigmoideas en
+    # diástole, así que rotular la fila entera con una fase es falso para la
+    # mitad de lo que se ve en ella.
     for row, (poses, title) in enumerate(
-        [(closed, "CERRADAS (sístole)"), (opened, "ABIERTAS (diástole)")]
+        [(closed, "CERRADAS"), (opened, "ABIERTAS")]
     ):
         for axis, (view, i, j) in zip(axes[row], views):
             for mesh in chambers.values():
@@ -610,6 +844,20 @@ def main() -> int:
 
     if not MODEL.exists():
         print(f"MAL: no existe {MODEL}. Ejecuta antes build-heart-model.py.")
+        return 1
+    # Las dos comprobaciones que deciden la geometría —que la valva no se vea
+    # desde fuera y que cerrada no deje pasar— son trazado de rayos, y sin un
+    # motor detrás trimesh no puede hacerlas. Se avisa aquí y no a los cinco
+    # minutos de leer el archivo de mallas.
+    probe = trimesh.creation.box()
+    try:
+        probe.ray.intersects_any(np.zeros((1, 3)), np.array([[0.0, 0.0, 1.0]]))
+    except Exception as error:  # noqa: BLE001 — da igual cuál: falta el motor
+        print(
+            "MAL: no hay motor de trazado de rayos "
+            f"({type(error).__name__}: {error}).\n"
+            "     Añade `--with embreex` (o `--with rtree`) al comando."
+        )
         return 1
     for name in (MESH_ARCHIVE, *ELEMENT_MAPS):
         if not (args.cache / name).exists():
@@ -686,8 +934,16 @@ def main() -> int:
         )
 
     print("\nVálvulas")
+    # Lo que tapa el corazón por fuera, en una sola malla: es contra esto —y no
+    # contra una envolvente convexa— contra lo que se comprueba que una valva no
+    # se ve.
+    skin = trimesh.util.concatenate(
+        [chambers[name] for name in SKIN if name in chambers]
+        + [existing[name] for name in SKIN if name in existing]
+    )
     closed: dict[str, np.ndarray] = {}
     opened: dict[str, np.ndarray] = {}
+    bulged: dict[str, np.ndarray] = {}
     leaflet_meshes: dict[str, trimesh.Trimesh] = {}
     for valve, spec in VALVES.items():
         meshes = {
@@ -703,31 +959,110 @@ def main() -> int:
             f"  {status} {valve:10} anillo: {ring:4} puntos, radio {radius_mm:5.1f} mm "
             f"(esperado {floor:.0f}-{ceiling:.0f}), normal {np.round(normal, 3)}"
         )
-        for name, mesh in meshes.items():
-            posed, sign = open_pose(
-                mesh, centre, normal, radius, OPENING[valve], mm_per_unit
+
+        motion = MOTION[valve]
+        wall = None
+        if spec["kind"] == "semilunar":
+            # La pared en la que se inserta la valva: el vaso de aguas abajo y
+            # el ventrículo de aguas arriba, que en la raíz son el mismo tubo.
+            wall = cKDTree(
+                np.vstack(
+                    [
+                        dense_points(chambers[spec["upstream"]]),
+                        dense_points(chambers[spec["downstream"]]),
+                    ]
+                )
             )
+
+        leaflets: dict[str, dict] = {}
+        faces: dict[str, np.ndarray] = {}
+        for name, mesh in meshes.items():
+            points = np.asarray(mesh.vertices)
+            weights = attachment_weights(
+                points, spec["kind"], motion, centre, normal, wall, mm_per_unit
+            )
+            origin, axis = leaflet_hinge(mesh, centre, normal, radius)
+            sign = opening_sign(points, origin, axis, weights, centre, normal)
+            leaflets[name] = {
+                "points": points,
+                "origin": origin,
+                "axis": axis,
+                "sign": sign,
+                "weights": weights,
+            }
+            faces[name] = np.asarray(mesh.faces)
             leaflet_meshes[name] = mesh
-            closed[name] = np.asarray(mesh.vertices)
-            opened[name] = posed
-            travel = np.linalg.norm(posed - mesh.vertices, axis=1) * mm_per_unit
+
+        source_leak = orifice_leak(
+            {n: d["points"] for n, d in leaflets.items()}, faces, centre, normal, radius
+        )
+        close_deg, _ = smallest_sealing_angle(
+            leaflets, faces, centre, normal, radius, motion["close_deg"]
+        )
+        closed_pose = posed_leaflets(leaflets, close_deg, -1.0)
+        closed_leak = orifice_leak(closed_pose, faces, centre, normal, radius)
+        status = "OK " if closed_leak <= MAX_CLOSED_LEAK else "MAL"
+        if status == "MAL":
+            failures += 1
+        print(
+            f"      {status} cierre {close_deg:5.1f}° hacia dentro — "
+            f"fuga del orificio {100 * source_leak:5.1f}% en la fuente "
+            f"→ {100 * closed_leak:4.1f}%"
+        )
+
+        # La apertura se busca desde la pose de la fuente y no desde la cerrada:
+        # el ángulo de cierre corrige la fuente, no forma parte del recorrido
+        # que se quiere enseñar.
+        limit, missed = largest_hidden_angle(leaflets, skin, motion["open_deg"])
+        failures += missed
+        open_deg = limit * OPEN_SAFETY
+        open_pose = posed_leaflets(leaflets, open_deg, +1.0)
+        open_leak = orifice_leak(open_pose, faces, centre, normal, radius)
+        print(
+            f"      {'MAL' if missed else 'OK '} apertura {open_deg:5.1f}° "
+            f"(último ángulo escondido {limit:4.1f}° de {motion['open_deg']:.0f}°) — "
+            f"orificio libre {100 * open_leak:5.1f}%"
+        )
+
+        # La pose intermedia, y no por capricho: el cliente interpola en línea
+        # recta entre las dos poses, y una recta entre dos puntos de un arco de
+        # cien grados se mete muy por dentro del arco — la valva se acorta un
+        # tercio a mitad de camino y se ve encogerse y volver a crecer. Con una
+        # tercera pose en el medio, la trayectoria vuelve a pasar por el arco.
+        halfway = (open_deg - close_deg) / 2.0
+        middle = posed_leaflets(
+            leaflets, abs(halfway), +1.0 if halfway >= 0.0 else -1.0
+        )
+
+        for name in leaflets:
+            closed[name] = closed_pose[name]
+            opened[name] = open_pose[name]
+            bulged[name] = middle[name] - 0.5 * (closed_pose[name] + open_pose[name])
+            travel = (
+                np.linalg.norm(open_pose[name] - closed_pose[name], axis=1) * mm_per_unit
+            )
+            free = leaflets[name]["weights"] >= 0.5
             print(
-                f"      {name:20} {spec['leaflets'][name]} "
-                f"vértices={len(mesh.vertices):5} giro={sign:+.0f} "
+                f"        {name:20} {spec['leaflets'][name]} "
+                f"vértices={len(leaflets[name]['points']):5} "
+                f"giro={leaflets[name]['sign']:+.0f} "
+                f"libres={100 * free.mean():3.0f}% "
                 f"recorrido medio={travel.mean():5.1f} mm máximo={travel.max():5.1f} mm"
             )
 
-    print("\nLa válvula abierta se queda dentro del corazón")
-    outside = hull_excess(
-        np.vstack([np.asarray(mesh.vertices) for mesh in chambers.values()]
-                  + [np.asarray(existing[CARRIED_OVER].vertices)])
-    )
-    for name, posed in opened.items():
-        stray = float(outside(posed).max()) * mm_per_unit
-        status = "OK " if stray <= MAX_STRAY_MM else "MAL"
+    print("\nNi cerradas ni abiertas se ven desde fuera del corazón")
+    for name in closed:
+        seen = {
+            pose: int(visible_from_outside(points, skin).sum())
+            for pose, points in (("cerrada", closed[name]), ("abierta", opened[name]))
+        }
+        status = "OK " if not any(seen.values()) else "MAL"
         if status == "MAL":
             failures += 1
-        print(f"  {status} {name:20} asoma como mucho {stray:5.1f} mm")
+        print(
+            f"  {status} {name:20} vértices a la vista: "
+            f"cerrada {seen['cerrada']:5}  abierta {seen['abierta']:5}"
+        )
 
     if args.preview:
         write_preview(chambers, closed, opened, args.preview)
@@ -747,9 +1082,16 @@ def main() -> int:
         (CARRIED_OVER, existing[CARRIED_OVER]),
         *((name, leaflet_meshes[name]) for name in closed),
     ]
-    deltas: dict[str, dict[str, np.ndarray]] = {}
+    deltas: dict[str, list[dict[str, np.ndarray]]] = {}
     for name, mesh in order:
         mesh = mesh.copy()
+        if name in closed:
+            # La pose base del `.glb` es la válvula CERRADA, y ya no es la de la
+            # fuente: la fuente modela los velos entreabiertos y por ahí se veía
+            # a través del orificio. El cliente sigue escribiendo 0 para cerrada
+            # y 1 para abierta, así que el contrato con `ValveAnimator` no se
+            # mueve ni un ápice.
+            mesh.vertices = closed[name]
         # Tocar las normales antes de exportar no es un efecto secundario
         # accidental: el exportador de trimesh solo escribe el atributo NORMAL
         # de las mallas que ya lo tienen calculado, y sin él el visor ilumina
@@ -766,15 +1108,31 @@ def main() -> int:
         transform[:3, 3] = local
         scene.add_geometry(mesh, node_name=name, geom_name=name, transform=transform)
         if name in opened:
-            posed = trimesh.Trimesh(
-                vertices=opened[name] - local, faces=mesh.faces, process=False
-            )
-            deltas[name] = {
-                "POSITION": (opened[name] - closed[name]).astype("<f4"),
-                "NORMAL": (
-                    np.asarray(posed.vertex_normals) - np.asarray(mesh.vertex_normals)
-                ).astype("<f4"),
-            }
+            base_normals = np.asarray(mesh.vertex_normals)
+
+            def normals_of(vertices: np.ndarray) -> np.ndarray:
+                return np.asarray(
+                    trimesh.Trimesh(
+                        vertices=vertices - local, faces=mesh.faces, process=False
+                    ).vertex_normals
+                )
+
+            middle = 0.5 * (closed[name] + opened[name]) + bulged[name]
+            deltas[name] = [
+                {
+                    "POSITION": (opened[name] - closed[name]).astype("<f4"),
+                    "NORMAL": (normals_of(opened[name]) - base_normals).astype("<f4"),
+                },
+                {
+                    # La comba se mide contra el punto medio de la recta, que es
+                    # justo lo que la GPU daría a media apertura sin ella.
+                    "POSITION": bulged[name].astype("<f4"),
+                    "NORMAL": (
+                        normals_of(middle)
+                        - 0.5 * (base_normals + normals_of(opened[name]))
+                    ).astype("<f4"),
+                },
+            ]
 
     MODEL.write_bytes(
         add_morph_targets(scene.export(file_type="glb", include_normals=True), deltas)
@@ -796,7 +1154,8 @@ def main() -> int:
         for mesh in document["meshes"]
         if mesh.get("name") in closed
         and not all(
-            {"POSITION", "NORMAL"} <= set(p.get("targets", [{}])[0])
+            len(p.get("targets", [])) == 2
+            and all({"POSITION", "NORMAL"} <= set(t) for t in p["targets"])
             for p in mesh["primitives"]
         )
     ]

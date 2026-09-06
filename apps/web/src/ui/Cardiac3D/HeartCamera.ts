@@ -73,33 +73,62 @@ export const FRAMING_MARGIN = 1.08;
 
 const HALF_FOV_RAD = (CAMERA_FOV_DEG / 2) * (Math.PI / 180);
 
-/** Mitad de la silueta que presenta el modelo en una vista, en unidades de
- * escena.
+/** Mitad de la silueta que presenta el modelo en una vista, separada en sus
+ * dos ejes de pantalla, en unidades de escena.
  *
  * Las seis vistas miran por un eje, así que la silueta es la cara de la caja
  * perpendicular a ese eje y no hace falta proyectar nada: mirando de frente se
  * ve el alzado (0,317 × 0,5) y desde arriba la planta (0,317 × 0,278), que es
  * bastante más pequeña.
  *
- * Se coge la mayor de las dos semiextensiones, no la vertical: el campo de
- * visión es vertical, pero el ancho también tiene que caber, y en la vista
- * superior el corazón es más ancho que alto. Con la mayor de las dos, el
- * encuadre aguanta cualquier panel que no sea más alto que ancho — y este es
- * una franja apaisada.
+ * Vertical y horizontal van por separado porque el encuadre las trata
+ * distinto: el `fov` de una cámara en perspectiva es el vertical, y el
+ * horizontal sale de multiplicarlo por la proporción del lienzo. Mientras el
+ * panel fue una franja apaisada bastaba con la mayor de las dos —el ancho
+ * sobraba siempre—; con el marco alto que ocupa el sobrante del ECG ya no.
  *
  * Esto solo vale porque `CAMERA_UP` alinea los ejes de pantalla con los del
  * modelo. Con una orientación cualquiera la silueta sale girada y llega a
  * ocupar su diagonal, que es bastante más. */
-export function silhouetteRadius(preset: CameraPreset): number {
+export function silhouetteHalfExtents(preset: CameraPreset): {
+  up: number;
+  right: number;
+} {
   const { x: hx, y: hy, z: hz } = MODEL_HALF_EXTENTS;
   switch (viewAxis(preset)) {
+    // Vistas superior e inferior: `CAMERA_UP` pone el frente del paciente
+    // hacia arriba, así que la pantalla es Z arriba y X a la derecha.
     case "y":
-      return Math.max(hx, hz);
+      return { up: hz, right: hx };
     case "x":
-      return Math.max(hy, hz);
+      return { up: hy, right: hz };
     default:
-      return Math.max(hx, hy);
+      return { up: hy, right: hx };
   }
+}
+
+/** La mayor de las dos semiextensiones de la silueta. Sigue siendo lo que
+ * encuadra un panel al menos tan ancho como alto. */
+export function silhouetteRadius(preset: CameraPreset): number {
+  const { up, right } = silhouetteHalfExtents(preset);
+  return Math.max(up, right);
+}
+
+/** Radio que de verdad hay que encuadrar en un lienzo de esa proporción.
+ *
+ * `aspect` es ancho/alto. Por encima de 1 manda la vertical y esto devuelve lo
+ * mismo que `silhouetteRadius`: es el caso que ya había. Por debajo de 1 —un
+ * marco más alto que ancho— el campo horizontal se estrecha en esa misma
+ * proporción, y encuadrar por la vertical recorta el corazón por los costados
+ * sin avisar. Dividir la semiextensión horizontal por la proporción es
+ * exactamente lo que hace falta para que quepan las dos.
+ *
+ * Se acota `aspect` a 1 por arriba a propósito: en un panel apaisado el ancho
+ * sobra, pero reducir el radio por eso acercaría la cámara hasta que la
+ * silueta tocara el borde superior. El aire del 8% se mantiene. */
+export function framingRadius(preset: CameraPreset, aspect: number): number {
+  const { up, right } = silhouetteHalfExtents(preset);
+  return Math.max(up, right / Math.min(aspect, 1));
 }
 
 /** Eje del modelo por el que mira esa vista. */
@@ -142,10 +171,10 @@ export function viewDepth(preset: CameraPreset): number {
  * El precio de encuadrar ajustado: orbitando lejos del preset el modelo puede
  * salirse por los bordes. Se arregla con la rueda, y a cambio las seis vistas
  * nombradas —que es como se usa esto— llenan el panel. */
-export function presetDistance(preset: CameraPreset): number {
+export function presetDistance(preset: CameraPreset, aspect = 1): number {
   return (
     viewDepth(preset) +
-    (silhouetteRadius(preset) * FRAMING_MARGIN) / Math.tan(HALF_FOV_RAD)
+    (framingRadius(preset, aspect) * FRAMING_MARGIN) / Math.tan(HALF_FOV_RAD)
   );
 }
 
@@ -160,9 +189,12 @@ export const MAX_ZOOM_DISTANCE =
 
 /** Posición de la cámara para esa vista. La dirección se normaliza antes de
  * escalarla, para que la distancia sea exactamente la calculada. */
-export function presetPosition(preset: CameraPreset): [number, number, number] {
+export function presetPosition(
+  preset: CameraPreset,
+  aspect = 1
+): [number, number, number] {
   const [x, y, z] = CAMERA_PRESETS[preset];
   const length = Math.hypot(x, y, z);
-  const distance = presetDistance(preset) / length;
+  const distance = presetDistance(preset, aspect) / length;
   return [x * distance, y * distance, z * distance];
 }

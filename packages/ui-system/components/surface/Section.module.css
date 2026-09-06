@@ -3,7 +3,10 @@
   flex-direction: column;
   gap: var(--space-3);
   min-width: 0;
-  padding: var(--space-3);
+  /* El apartado va siempre dentro de un panel, que ya pone sus 16px por
+     fuera: lo que este relleno tiene que hacer es separar el contenido de su
+     propio borde, y para eso bastan 8. */
+  padding: var(--space-2);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-sm);
   background: var(--panel-inset);
