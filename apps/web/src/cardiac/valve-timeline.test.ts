@@ -55,15 +55,75 @@ describe("ValveTimeline", () => {
     const timeline = new ValveTimeline();
     timeline.push([CYCLE]);
 
-    expect(timeline.apertureAt("semilunar", EJECTING)).toBe(1);
+    expect(timeline.apertureAt("semilunar", EJECTING, 1)).toBeGreaterThan(0.9);
+  });
+
+  it("una sigmoidea sigue al caudal, no al reloj", () => {
+    // Una válvula no sabe cuánto lleva abierta: lo que la mantiene separada es
+    // la sangre que pasa. Con el mismo instante y distinto caudal tiene que dar
+    // distinta apertura — si diera lo mismo, estaría colgada del reloj.
+    const timeline = new ValveTimeline();
+    timeline.push([CYCLE]);
+
+    const conChorro = timeline.apertureAt("semilunar", EJECTING, 1);
+    const decelerando = timeline.apertureAt("semilunar", EJECTING, 0.1);
+
+    expect(conChorro).toBeGreaterThan(decelerando);
+  });
+
+  it("una sigmoidea no se cierra sola aunque se agote el caudal", () => {
+    // Quien la cierra es el instante que manda el servidor, no la falta de
+    // chorro. El suelo impide que las dos cosas se peleen y la valva se cierre
+    // antes de tiempo.
+    const timeline = new ValveTimeline();
+    timeline.push([CYCLE]);
+
+    expect(timeline.apertureAt("semilunar", EJECTING, 0)).toBeGreaterThan(0.5);
   });
 
   it("vuelve a abrir las auriculoventriculares en el llenado", () => {
     const timeline = new ValveTimeline();
     timeline.push([CYCLE]);
 
-    expect(timeline.apertureAt("atrioventricular", FILLING)).toBe(1);
+    expect(timeline.apertureAt("atrioventricular", FILLING)).toBeGreaterThan(0.2);
     expect(timeline.apertureAt("semilunar", FILLING)).toBe(0);
+  });
+
+  it("la mitral dibuja la curva en M y no una meseta", () => {
+    // Pico de llenado rápido, caída a la diastasis y segundo pico con la
+    // patada auricular. Una válvula abierta de par en par toda la diástole es
+    // lo que hace que la animación se vea de dos estados: media vuelta del
+    // ciclo congelada.
+    const timeline = new ValveTimeline();
+    timeline.push([CYCLE]);
+    const pico = CYCLE.t_open_av_s + VALVE_TRANSITION_S;
+    const diastasis = CYCLE.t_open_av_s + 0.35;
+
+    const enPico = timeline.apertureAt("atrioventricular", pico);
+    const enDiastasis = timeline.apertureAt("atrioventricular", diastasis);
+    const conPatada = timeline.apertureAt("atrioventricular", diastasis, 1);
+
+    expect(enPico).toBeGreaterThan(0.9);
+    // Desciende, pero sigue siendo una válvula abierta: la sangre está
+    // pasando. Un velo que cayera a la mitad haría un viaje de ida y vuelta
+    // que llama más la atención que estarse quieto.
+    expect(enDiastasis).toBeLessThan(enPico);
+    expect(enDiastasis).toBeGreaterThan(0.55);
+    // La onda A levanta el velo otra vez, pero es un retoque sobre una válvula
+    // ya abierta y no una segunda apertura.
+    expect(conPatada).toBeGreaterThan(enDiastasis);
+    expect(conPatada).toBeLessThan(enPico);
+    expect(conPatada - enDiastasis).toBeLessThan(enPico - enDiastasis);
+  });
+
+  it("la patada auricular no abre una válvula que la sístole tiene cerrada", () => {
+    // La sístole auricular ocurre con la válvula ya abierta. Si llegara
+    // durante la ventricular —una disociación— no puede reabrirla: el
+    // ventrículo tiene más presión.
+    const timeline = new ValveTimeline();
+    timeline.push([CYCLE]);
+
+    expect(timeline.apertureAt("atrioventricular", EJECTING, 1)).toBe(0);
   });
 
   it("deja las cuatro cerradas en la contracción isovolumétrica", () => {

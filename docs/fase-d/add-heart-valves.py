@@ -28,9 +28,16 @@ origen de cada nodo del orden de una diezmilmillonésima de milímetro.
 Uso:
 
     uv run --with trimesh --with numpy --with scipy --with networkx \\
+        --with rtree --with embreex \\
         python docs/fase-d/add-heart-valves.py
     ... --validate-only
     ... --preview docs/fase-d/valves.png
+
+`embreex` no es opcional en la práctica. La búsqueda de ángulos lanza millones
+de rayos contra la piel del órgano, y el trazador en Python puro de trimesh los
+despacha a unos pocos miles por segundo: la ejecución pasa de minutos a horas.
+Con embree van a casi un millón por segundo. Si no está, el script funciona
+igual — y tarda lo que tarda.
 
 Fuente: BodyParts3D, Copyright(c) The Database Center for Life Science
 licensed by CC Attribution-Share Alike 2.1 Japan. Ver `attribution.md`.
@@ -46,6 +53,7 @@ import sys
 import zipfile
 from collections import defaultdict
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
 import trimesh
@@ -252,10 +260,21 @@ ANNULUS_RADIUS_RANGE_MM = {
     "Pulmonary": (7.0, 15.0),
 }
 
-# Lo que se ve del corazón desde fuera. Los dos ventrículos no están: viven
-# dentro del miocardio, que sí. Una valva escondida dentro de cualquiera de
-# estas superficies no se ve, y esa es toda la prueba.
-SKIN = (
+# Lo que tapa la valva, y son DOS pieles porque hay dos vistas.
+#
+# La primera es el órgano entero, con su miocardio. La segunda es lo que el
+# usuario ve **por defecto**, y ahí no hay miocardio: en la interfaz viene
+# apagado —es geometría sintetizada y hay que encenderla a propósito—, así que
+# lo que hace de superficie exterior en la región valvular son los moldes de
+# las dos cavidades.
+#
+# Esta segunda piel es la corrección de fondo de esta tanda. Antes se validaba
+# solo contra la primera, y una valva escondida dentro del miocardio pasaba la
+# prueba aunque estuviera fuera del molde del ventrículo. Al usuario, que mira
+# el corazón con el miocardio apagado, le asomaba por el ventrículo una valva
+# que el script daba por escondida. La condición ahora es estar escondida en
+# las dos vistas.
+SKIN_ORGAN = (
     "Myocardium",
     "Aorta",
     "PulmonaryArtery",
@@ -265,6 +284,32 @@ SKIN = (
     "SuperiorVenaCava",
     "InferiorVenaCava",
 )
+
+SKIN_DEFAULT_VIEW = (
+    "LeftVentricle",
+    "RightVentricle",
+    "Aorta",
+    "PulmonaryArtery",
+    "LeftAtrium",
+    "RightAtrium",
+    "PulmonaryVeins",
+    "SuperiorVenaCava",
+    "InferiorVenaCava",
+)
+
+TRAJECTORY_SAMPLES = 7
+"""En cuántos puntos del recorrido se comprueba que la valva no asoma.
+
+El otro fallo de la validación anterior, y del mismo tipo: se comprobaban las
+dos poses extremas y se daba por bueno todo lo de en medio. Con una
+interpolación recta habría sido defendible —la cuerda entre dos puntos de una
+región convexa se queda dentro—, pero es que la trayectoria **no** es recta: la
+comba la empuja a propósito hacia fuera de esa cuerda, hasta un 38% de su
+flecha. Justo por donde nadie miraba.
+
+Siete puntos bastan porque lo que se está muestreando es un arco suave y sin
+inflexiones: el máximo alejamiento cae en el centro, que es una de las
+muestras."""
 
 
 # ---------------------------------------------------------------- fuente ----
@@ -610,26 +655,125 @@ def posed_leaflets(
     }
 
 
+def gpu_pose(
+    closed: np.ndarray, opened: np.ndarray, bulge: np.ndarray, aperture: float
+) -> np.ndarray:
+    """La geometría que la GPU compone para una apertura dada.
+
+    Es la misma cuenta que hace `ValveAnimator` en el cliente, y por eso está
+    escrita aquí igual: los dos pesos salen de un solo número, el primero
+    lineal y el segundo `4a(1−a)`. Reproducirla es lo único que permite validar
+    lo que se ve en vez de lo que se exporta."""
+    return (
+        closed
+        + aperture * (opened - closed)
+        + 4.0 * aperture * (1.0 - aperture) * bulge
+    )
+
+
+def trajectory_apertures() -> list[float]:
+    """Las aperturas que se muestrean, de la más arriesgada a la más segura.
+
+    El orden no es cosmético: la búsqueda para en cuanto encuentra un vértice a
+    la vista, así que preguntar primero por donde más probablemente asome
+    ahorra la mayor parte de los rayos. El criterio es objetivo — cuánto se
+    aleja la pose de la cerrada, `a + 4a(1−a)`, que es la suma de los dos pesos
+    y tiene su máximo hacia dos tercios de camino, no en el extremo abierto."""
+    values = list(np.linspace(0.0, 1.0, TRAJECTORY_SAMPLES))
+    return sorted(values, key=lambda a: -(a + 4.0 * a * (1.0 - a)))
+
+
+def trajectory_poses(
+    leaflets: dict[str, dict], close_deg: float, open_deg: float
+) -> dict[str, list[np.ndarray]]:
+    """Las poses por las que pasa cada valva a lo largo del recorrido."""
+    closed = posed_leaflets(leaflets, close_deg, -1.0)
+    opened = posed_leaflets(leaflets, open_deg, +1.0)
+    halfway = (open_deg - close_deg) / 2.0
+    middle = posed_leaflets(leaflets, abs(halfway), +1.0 if halfway >= 0.0 else -1.0)
+    out: dict[str, list[np.ndarray]] = {}
+    for name in leaflets:
+        bulge = middle[name] - 0.5 * (closed[name] + opened[name])
+        out[name] = [
+            gpu_pose(closed[name], opened[name], bulge, a)
+            for a in trajectory_apertures()
+        ]
+    return out
+
+
+def closed_exposure(
+    leaflets: dict[str, dict], skin: trimesh.Trimesh, close_deg: float
+) -> dict[str, int]:
+    """Cuántos vértices se le ven a cada valva ya cerrada.
+
+    Es el suelo de la prueba de la vista por defecto, y no es cero por una
+    razón de construcción del modelo: al sacar las valvas de los ventrículos
+    queda un hueco anular entre el molde de la aurícula y el del ventrículo, y
+    la válvula vive precisamente ahí. Sin miocardio nadie tapa ese hueco, así
+    que **la válvula se ve en su propio anillo por diseño**, incluso cerrada.
+    Exigir cero sería exigir lo imposible: la búsqueda bajaría el ángulo hasta
+    cero y la válvula no se abriría nunca."""
+    closed = posed_leaflets(leaflets, close_deg, -1.0)
+    return {
+        name: int(visible_from_outside(points, skin).sum())
+        for name, points in closed.items()
+    }
+
+
+def opening_is_safe(
+    leaflets: dict[str, dict],
+    organ: trimesh.Trimesh,
+    default_view: trimesh.Trimesh,
+    baseline: dict[str, int],
+    close_deg: float,
+    open_deg: float,
+) -> bool:
+    """Si con ese ángulo la válvula no asoma en ningún punto del recorrido.
+
+    Son dos condiciones distintas porque son dos preguntas distintas:
+
+    - Contra el **órgano entero**, con su miocardio: cero. Que se le vea una
+      valva al corazón por fuera no tiene defensa.
+    - Contra la **vista por defecto**, sin miocardio: no más que cerrada. Ese
+      es el sentido exacto de la queja que originó todo esto — no que la
+      válvula se vea, que en su anillo se ve siempre, sino que **abrirse la
+      saque del ventrículo**. Cerrada se le ven los vértices del anillo;
+      abierta no puede vérsele ni uno más.
+
+    Y las dos se comprueban en los siete puntos del recorrido, no en los
+    extremos: la comba empuja la trayectoria hacia fuera de la cuerda que une
+    las dos poses, hasta un 38% de su flecha, y ahí es donde no miraba nadie.
+    """
+    for name, poses in trajectory_poses(leaflets, close_deg, open_deg).items():
+        for points in poses:
+            if int(visible_from_outside(points, default_view).sum()) > baseline[name]:
+                return False
+            if int(visible_from_outside(points, organ).sum()) > 0:
+                return False
+    return True
+
+
 def largest_hidden_angle(
     leaflets: dict[str, dict],
-    skin: trimesh.Trimesh,
+    organ: trimesh.Trimesh,
+    default_view: trimesh.Trimesh,
+    close_deg: float,
     ceiling_deg: float,
     step_deg: float = 1.5,
 ) -> tuple[float, int]:
-    """El mayor ángulo de apertura con el que ninguna valva se ve desde fuera.
+    """El mayor ángulo de apertura con el que la valva no asoma en todo el viaje.
 
     Se baja desde el tope en escalones en vez de bisecar: la visibilidad no es
     monótona con el ángulo —una valva puede salir por un hueco y volver a
     esconderse—, y una bisección sobre una condición no monótona devuelve
     cualquier cosa. Bajando se coge el primer ángulo bueno por debajo del tope,
     que es el que se quiere."""
+    baseline = closed_exposure(leaflets, default_view, close_deg)
     angle = ceiling_deg
     while angle > 0.0:
-        posed = posed_leaflets(leaflets, angle, +1.0)
-        exposed = sum(
-            int(visible_from_outside(points, skin).sum()) for points in posed.values()
-        )
-        if exposed == 0:
+        if opening_is_safe(
+            leaflets, organ, default_view, baseline, close_deg, angle
+        ):
             return angle, 0
         angle = round(angle - step_deg, 3)
     return 0.0, 1
@@ -937,10 +1081,14 @@ def main() -> int:
     # Lo que tapa el corazón por fuera, en una sola malla: es contra esto —y no
     # contra una envolvente convexa— contra lo que se comprueba que una valva no
     # se ve.
-    skin = trimesh.util.concatenate(
-        [chambers[name] for name in SKIN if name in chambers]
-        + [existing[name] for name in SKIN if name in existing]
-    )
+    def build_skin(names: tuple[str, ...]) -> trimesh.Trimesh:
+        return trimesh.util.concatenate(
+            [chambers[name] for name in names if name in chambers]
+            + [existing[name] for name in names if name in existing]
+        )
+
+    organ_skin = build_skin(SKIN_ORGAN)
+    default_skin = build_skin(SKIN_DEFAULT_VIEW)
     closed: dict[str, np.ndarray] = {}
     opened: dict[str, np.ndarray] = {}
     bulged: dict[str, np.ndarray] = {}
@@ -1013,7 +1161,9 @@ def main() -> int:
         # La apertura se busca desde la pose de la fuente y no desde la cerrada:
         # el ángulo de cierre corrige la fuente, no forma parte del recorrido
         # que se quiere enseñar.
-        limit, missed = largest_hidden_angle(leaflets, skin, motion["open_deg"])
+        limit, missed = largest_hidden_angle(
+            leaflets, organ_skin, default_skin, close_deg, motion["open_deg"]
+        )
         failures += missed
         open_deg = limit * OPEN_SAFETY
         open_pose = posed_leaflets(leaflets, open_deg, +1.0)
@@ -1050,18 +1200,27 @@ def main() -> int:
                 f"recorrido medio={travel.mean():5.1f} mm máximo={travel.max():5.1f} mm"
             )
 
-    print("\nNi cerradas ni abiertas se ven desde fuera del corazón")
+    print("\nAbrirse no saca ninguna valva del sitio en el que ya estaba")
     for name in closed:
-        seen = {
-            pose: int(visible_from_outside(points, skin).sum())
-            for pose, points in (("cerrada", closed[name]), ("abierta", opened[name]))
-        }
-        status = "OK " if not any(seen.values()) else "MAL"
+        floor = int(visible_from_outside(closed[name], default_skin).sum())
+        worst_default = 0
+        worst_organ = 0
+        for index in range(TRAJECTORY_SAMPLES):
+            aperture = index / (TRAJECTORY_SAMPLES - 1)
+            points = gpu_pose(closed[name], opened[name], bulged[name], aperture)
+            worst_default = max(
+                worst_default, int(visible_from_outside(points, default_skin).sum())
+            )
+            worst_organ = max(
+                worst_organ, int(visible_from_outside(points, organ_skin).sum())
+            )
+        status = "OK " if worst_organ == 0 and worst_default <= floor else "MAL"
         if status == "MAL":
             failures += 1
         print(
-            f"  {status} {name:20} vértices a la vista: "
-            f"cerrada {seen['cerrada']:5}  abierta {seen['abierta']:5}"
+            f"  {status} {name:20} por fuera del corazón {worst_organ:4} | "
+            f"en su anillo {floor:4} cerrada → {worst_default:4} en el peor "
+            f"punto del recorrido"
         )
 
     if args.preview:

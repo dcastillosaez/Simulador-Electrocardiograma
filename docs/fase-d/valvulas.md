@@ -40,9 +40,59 @@ Los 50 y los 70 milisegundos viven en `MechanicalProfile`, junto al resto del
 perfil mecánico del ritmo, y no en el cliente 3D: son fisiología, del mismo
 material que `pr_is_measurable`, y el día que un fármaco alargue la contracción
 isovolumétrica se cambian ahí. Lo que sí es del cliente es **cómo** transcurre
-el movimiento entre esos instantes: un coseno alzado de 30 ms
-(`apps/web/src/cardiac/valve-curve.ts`), que es el mismo reparto de
-responsabilidades que ya tenían las contracciones.
+el movimiento entre esos instantes (`apps/web/src/cardiac/valve-curve.ts`), que
+es el mismo reparto de responsabilidades que ya tenían las contracciones.
+
+## Abierta no es un estado
+
+Los cuatro instantes dicen cuándo se abre y cuándo se cierra cada pareja. Si el
+cliente se limitara a eso —cerrada entre dos instantes, abierta de par en par
+entre los otros dos— la animación tendría dos estados y media vuelta del ciclo
+congelada en cada uno. Es exactamente lo que delata una animación hecha desde el
+programa y no desde el corazón, porque una válvula de verdad no se queda quieta
+nunca.
+
+**La mitral y la tricúspide dibujan una M.** Se abren de golpe cuando el
+ventrículo se relaja y la presión auricular la supera: es el pico de llenado
+rápido. En cuanto ese gradiente se agota los velos empiezan a acercarse —la
+diastasis, el valle de la M— y ahí se quedarían si no llegara la sístole
+auricular, que los levanta otra vez y menos que la primera. Después sí, el
+ventrículo se contrae y se cierran. En el cliente son un decaimiento
+exponencial de 180 ms hacia el 60% de apertura y una reapertura que llega al
+45% de lo que queda.
+
+La primera versión de esta curva se pasó de largo: con la diastasis en el 35% y
+la patada en el 80%, el velo hacía un viaje de ida y vuelta enorme en cada
+diástole y parecía abrirse dos veces por latido. Una válvula que oscila así
+llama más la atención que una quieta. La apertura tiene que alcanzarse deprisa
+y **mantenerse** durante la mayor parte del llenado: el valle es un descenso,
+no un cierre a medias, y la onda A un retoque sobre una válvula ya abierta.
+
+Cuándo ocurre esa reapertura no lo decide el cliente, y esa es la línea: **la
+patada auricular es la sístole auricular**, la misma que encoge las aurículas en
+la escena, calculada por el servidor y leída de la misma línea temporal. El
+cliente decide cuánto levanta el velo, no cuándo. Por eso una fibrilación
+auricular se lleva por delante la onda A sin que haya que programar el caso: no
+hay contracción auricular que leer, y la M se queda sin su segundo pico — que es
+lo que pasa en un paciente en fibrilación auricular.
+
+**La aórtica y la pulmonar siguen al caudal, no al reloj.** Se abren de golpe
+al empezar la eyección y, conforme el flujo decelera, las valvas van cayendo
+hacia el centro antes del cierre. Y es el caudal y no la fracción de eyección
+transcurrida por un motivo que se ve en pantalla: una válvula no sabe cuánto
+lleva abierta. Lo único que la mantiene separada es la sangre que pasa.
+
+El caudal tampoco se inventa: es la **derivada** de la contracción ventricular
+que calcula el servidor. Por eso la válvula está más abierta a mitad de la
+subida, cuando el ventrículo se contrae más deprisa, y no cuando ya está
+contraído del todo. Debajo del 62% no baja aunque el chorro se agote: quien la
+cierra es el instante que manda el servidor, y el suelo impide que las dos
+cosas se peleen y la valva se cierre antes de tiempo.
+
+A frecuencias altas la diástole se acorta y la mitral no llega a caer del todo
+antes de la sístole auricular: la E y la A se juntan. No hay nada en el código
+que lo haga a propósito — sale solo de que la constante de tiempo es fija y el
+intervalo se encoge, que es también el motivo por el que ocurre en un paciente.
 
 ## De dónde sale la geometría
 
@@ -153,16 +203,34 @@ mira.
 - Que las nueve estructuras anatómicas salen igual que estaban, quitando las
   valvas.
 - Que el radio de cada anillo cae en su rango anatómico.
-- **Que ninguna valva se ve desde fuera del corazón, ni cerrada ni abierta.**
-  Desde cada vértice salen rayos en cuarenta y dos direcciones contra el
-  miocardio, los vasos y las aurículas; si alguno escapa, ese punto se ve. Es la
-  pregunta que hace quien mira la escena, no una aproximación suya.
+- **Que ninguna valva se ve desde fuera, en ningún punto del recorrido y en
+  ninguna de las dos vistas.** Desde cada vértice salen rayos en cuarenta y dos
+  direcciones contra la superficie exterior; si alguno escapa, ese punto se ve.
+  Es la pregunta que hace quien mira la escena, no una aproximación suya.
 
-  Antes se medía contra la envolvente convexa de las diez estructuras con cuatro
-  milímetros de tolerancia, y por eso pasó una sigmoidea pulmonar que asomaba de
-  verdad: estaba por fuera del tronco pero por dentro del casco, que no entra en
-  los entrantes del órgano. La envolvente no era una prueba estricta con margen,
-  era una prueba distinta.
+  Esta prueba ha fallado dos veces, y las dos por preguntar lo que no era.
+
+  Primero se medía contra la envolvente convexa de las diez estructuras con
+  cuatro milímetros de tolerancia, y por ahí pasó una sigmoidea pulmonar que
+  asomaba de verdad: estaba por fuera del tronco pero por dentro del casco, que
+  no entra en los entrantes del órgano. La envolvente no era una prueba estricta
+  con margen, era una prueba distinta.
+
+  Después se midió con rayos, pero contra **una sola piel y en las dos poses
+  extremas**, y las dos cosas estaban mal. La piel incluía el miocardio, que en
+  la interfaz viene apagado: una valva metida dentro del miocardio pasaba la
+  prueba aunque estuviera fuera del molde del ventrículo, y al usuario —que mira
+  el corazón sin miocardio— se le veía asomar por el ventrículo. Y comprobar
+  solo los extremos habría sido defendible con una interpolación recta, porque
+  la cuerda entre dos puntos de una región convexa se queda dentro; pero la
+  trayectoria no es recta. La comba la empuja a propósito hacia fuera de esa
+  cuerda, hasta un 38% de su flecha, y justo por ahí no miraba nadie.
+
+  Ahora son **dos pieles y siete puntos del recorrido**. Las pieles son el
+  órgano entero con su miocardio y lo que se ve por defecto sin él, donde la
+  superficie exterior en la región valvular son los moldes de las cavidades. Y
+  los siete puntos se componen con la misma cuenta que hace la GPU, los dos
+  pesos incluidos: se valida lo que se ve, no lo que se exporta.
 - **Que la válvula cerrada no deja pasar.** Rayos a lo largo del eje del flujo
   por el 70% interior del disco del anillo. El 30% de fuera no es orificio: es la
   inserción misma y, en las sigmoideas, los senos de Valsalva, que quedan detrás

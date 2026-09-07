@@ -7,6 +7,9 @@ import {
 } from "./heart-valves";
 import type { ValvePhase, ValveTimeline } from "../../cardiac/valve-timeline";
 import type { SessionRuntime } from "../../simulation-runtime/session-runtime";
+import type { CardiacTimeline } from "../../cardiac/cardiac-timeline";
+import type { HeartStateValues } from "./useCardiacTimeline";
+import { excursionFor, ventricularFlow } from "./chamber-excursion";
 
 /** Los dos elementos que hay que escribir por válvula. */
 export interface ValveHandle {
@@ -28,16 +31,26 @@ export const PHASE_LABELS: Record<ValvePhase, string> = {
  * con una palabra de manual. */
 export const NO_CYCLE_LABEL = "Sin ciclo mecánico";
 
-/** La palabra que acompaña a la barra. El umbral está en la mitad porque la
- * transición dura treinta milisegundos: durante el viaje la barra es lo que
- * informa, y la palabra dice hacia dónde va. */
+/** La palabra que acompaña a la barra.
+ *
+ * El umbral está bajo a propósito. Una auriculoventricular no pasa la diástole
+ * abierta de par en par: se abre de golpe, cae casi hasta cerrarse en la
+ * diastasis y vuelve a levantarse con la patada auricular. Con el umbral en la
+ * mitad, el panel diría «cerrada» justo en el tramo del ciclo en que la sangre
+ * está pasando, que es lo contrario de lo que hay que enseñar. Cerrada es
+ * cerrada: sin paso. Lo que la barra dice y la palabra no es cuánto. */
 export function apertureLabel(aperture: number): string {
-  return aperture >= 0.5 ? "abierta" : "cerrada";
+  return aperture >= 0.15 ? "abierta" : "cerrada";
 }
 
 export interface ValveReadoutProps {
   runtime: SessionRuntime;
   valves: MutableRefObject<ValveTimeline>;
+  /** Las contracciones, para leer de ellas la sístole auricular. La onda A de
+   * la mitral sale de ahí, así que el panel la necesita por el mismo motivo
+   * que el modelo: para no decir una cosa mientras la escena enseña otra. */
+  timeline: MutableRefObject<CardiacTimeline>;
+  heartState: HeartStateValues | null;
   phaseRef: RefObject<HTMLElement | null>;
   handles: MutableRefObject<ValveHandles>;
 }
@@ -61,6 +74,8 @@ export interface ValveReadoutProps {
 export function ValveReadout({
   runtime,
   valves,
+  timeline,
+  heartState,
   phaseRef,
   handles,
 }: ValveReadoutProps) {
@@ -75,9 +90,14 @@ export function ValveReadout({
       phaseNode.textContent = phaseLabel;
     }
 
+    const atria = excursionFor("atria", tS, timeline.current, heartState);
     const aperture = {
-      atrioventricular: valves.current.apertureAt("atrioventricular", tS),
-      semilunar: valves.current.apertureAt("semilunar", tS),
+      atrioventricular: valves.current.apertureAt("atrioventricular", tS, atria),
+      semilunar: valves.current.apertureAt(
+        "semilunar",
+        tS,
+        ventricularFlow(tS, timeline.current, heartState)
+      ),
     };
 
     for (const valve of VALVE_ORDER) {

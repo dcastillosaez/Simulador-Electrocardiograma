@@ -1,4 +1,9 @@
-import { VALVE_TRANSITION_S, valvePulse } from "./valve-curve";
+import {
+  VALVE_TRANSITION_S,
+  ejectionAperture,
+  fillingAperture,
+  valvePulse,
+} from "./valve-curve";
 import type { ValveEventPayload } from "../types/ws-messages";
 
 /** Las dos familias de válvulas, que se mueven en contrafase.
@@ -79,7 +84,7 @@ export class ValveTimeline {
    * relajación isovolumétrica de un latido cae dentro de la sístole del
    * siguiente, y sumar daría un valor mayor que uno justo donde la válvula
    * está más quieta. Con el máximo, dos ventanas contiguas se funden en una. */
-  apertureAt(group: ValveGroup, tS: number): number {
+  apertureAt(group: ValveGroup, tS: number, drive = 0): number {
     let pulse = 0;
     for (const event of this.events) {
       pulse = Math.max(
@@ -92,7 +97,43 @@ export class ValveTimeline {
           : valvePulse(tS, event.t_open_semilunar_s, event.t_close_semilunar_s)
       );
     }
-    return group === "atrioventricular" ? 1 - pulse : pulse;
+    // Ni abierta ni cerrada son un estado plano, y por eso la apertura no es
+    // el pulso a secas. Una válvula abierta de par en par toda su mitad del
+    // ciclo es lo que hace que una animación se vea de dos estados: en el
+    // corazón de verdad las dos parejas empiezan a cerrarse solas en cuanto
+    // decae el gradiente que las abrió.
+    // `drive` significa una cosa distinta para cada pareja, y las dos vienen
+    // del servidor: para las auriculoventriculares es la sístole auricular que
+    // levanta la onda A; para las sigmoideas, el caudal que las mantiene
+    // separadas. Ninguna de las dos se inventa aquí.
+    if (group !== "atrioventricular") {
+      return pulse * ejectionAperture(drive);
+    }
+    // La transición se descuenta porque el llenado no empieza a decaer hasta
+    // que la válvula termina de abrirse: contarlo desde el flanco dejaría el
+    // pico E recortado un quinto y la curva en M sin su punta.
+    //
+    // Sin ninguna apertura por detrás no hay curva de llenado que seguir: o no
+    // ha latido todavía, o el ritmo no produce ciclos. Ahí la válvula se queda
+    // abierta, que es donde la deja la presión cuando nada la mueve.
+    const since = this.sinceOpenAt(tS) - VALVE_TRANSITION_S;
+    const filling = Number.isFinite(since) ? fillingAperture(since, drive) : 1;
+    return (1 - pulse) * filling;
+  }
+
+  /** Segundos desde que las auriculoventriculares se abrieron por última vez.
+   *
+   * Infinito cuando no hay ninguna apertura por detrás: ni ha latido todavía
+   * ni el ritmo produce ciclos, así que no hay curva de llenado que seguir y
+   * quien pregunta se queda con la posición de reposo. */
+  sinceOpenAt(tS: number): number {
+    let latest = -Infinity;
+    for (const event of this.events) {
+      if (event.t_open_av_s <= tS && event.t_open_av_s > latest) {
+        latest = event.t_open_av_s;
+      }
+    }
+    return latest === -Infinity ? Infinity : tS - latest;
   }
 
   /** En qué fase del ciclo cardíaco cae `tS`.

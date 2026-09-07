@@ -240,6 +240,8 @@ export function HeartScene({ runtime }: HeartSceneProps) {
         <ValveReadout
           runtime={runtime}
           valves={valves}
+          timeline={timeline}
+          heartState={heartState}
           phaseRef={phaseRef}
           handles={valveHandles}
         />

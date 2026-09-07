@@ -15,6 +15,7 @@ import {
 } from "./heart-appearance";
 import { VALVE_LEAFLET_NAMES, bindValveNodes } from "./heart-valves";
 import { applyAperture } from "./ValveAnimator";
+import { excursionFor, ventricularFlow } from "./chamber-excursion";
 import {
   CUT_AXES,
   CUT_AXIS_ORDER,
@@ -27,9 +28,8 @@ import {
   HeartCutaway,
   createCapMaterial,
 } from "./HeartCutaway";
-import type { CardiacTimeline, ChamberName } from "../../cardiac/cardiac-timeline";
+import type { CardiacTimeline } from "../../cardiac/cardiac-timeline";
 import type { ValveTimeline } from "../../cardiac/valve-timeline";
-import { tremorExcursion } from "../../cardiac/tremor";
 import type { HeartStateValues } from "./useCardiacTimeline";
 import type { SessionRuntime } from "../../simulation-runtime/session-runtime";
 
@@ -298,8 +298,9 @@ export function HeartModel({
       valves.current.prune(tS - PRUNE_MARGIN_S);
     }
 
+    const atria = excursionFor("atria", tS, timeline.current, heartState);
     applyExcursion(nodes, {
-      atria: excursionFor("atria", tS, timeline.current, heartState),
+      atria,
       ventricles: excursionFor("ventricles", tS, timeline.current, heartState),
     });
 
@@ -307,9 +308,17 @@ export function HeartModel({
     // detalle de implementación: es lo único que garantiza que la mitral se
     // cierre en el fotograma en que el ventrículo empieza a contraerse, y que
     // las dos cosas coincidan con el QRS que el trazado está pintando.
+    // La misma excursión auricular que acaba de encoger las aurículas levanta
+    // la onda A de la mitral y la tricúspide. No se recalcula ni se aproxima:
+    // la patada auricular *es* la sístole auricular, y quién decide cuándo
+    // ocurre es el servidor.
     applyAperture(valveNodes, {
-      atrioventricular: valves.current.apertureAt("atrioventricular", tS),
-      semilunar: valves.current.apertureAt("semilunar", tS),
+      atrioventricular: valves.current.apertureAt("atrioventricular", tS, atria),
+      semilunar: valves.current.apertureAt(
+        "semilunar",
+        tS,
+        ventricularFlow(tS, timeline.current, heartState)
+      ),
     });
   });
 
@@ -326,39 +335,6 @@ export function HeartModel({
       )}
     </>
   );
-}
-
-/** Contracción organizada y temblor son excluyentes por cámara, y quien
- * decide cuál toca es el servidor: una cámara que fibrila no manda eventos,
- * así que consultar la timeline devolvería cero y el corazón se quedaría
- * quieto en una FV. Nótese que aquí no se pregunta por el ritmo, solo por el
- * modo — es lo que mantiene el cliente libre de casos especiales. */
-function excursionFor(
-  chamber: ChamberName,
-  tS: number,
-  timeline: CardiacTimeline,
-  heartState: HeartStateValues | null
-): number {
-  // Sin estado todavía: lo único razonable es reproducir los eventos que
-  // hayan llegado. El estado llega como muy tarde 250 ms después del primero.
-  if (heartState === null) return timeline.excursionAt(chamber, tS);
-
-  const mode =
-    chamber === "atria" ? heartState.atrial_mode : heartState.ventricular_mode;
-  const amplitude =
-    chamber === "atria"
-      ? heartState.atrial_amplitude
-      : heartState.ventricular_amplitude;
-
-  switch (mode) {
-    case "synchronous":
-      return timeline.excursionAt(chamber, tS);
-    case "fluttering":
-    case "fibrillating":
-      return tremorExcursion(tS, heartState.flutter_hz, amplitude);
-    case "absent":
-      return 0;
-  }
 }
 
 useGLTF.preload(HEART_MODEL_URL);
