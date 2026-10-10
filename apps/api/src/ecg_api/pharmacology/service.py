@@ -45,16 +45,28 @@ class PharmacologySession:
 
     # --- ciclo de vida ------------------------------------------------------
 
-    def rebase(self, params: EngineParams, vitals: PatientVitals | None = None) -> None:
+    def rebase(
+        self,
+        params: EngineParams,
+        vitals: PatientVitals | None = None,
+        profile: MechanicalProfile | None = None,
+    ) -> None:
         """Reencuadra el basal cuando el usuario mueve los mandos.
 
         Los fármacos a bordo no se tocan: su efecto se recalcula sobre el
         paciente nuevo. Subir la frecuencia con una amiodarona puesta no
         retira la amiodarona.
+
+        El perfil mecánico también se reencuadra: a un paciente inventado se
+        le puede quitar la aurícula y el escape en caliente, y eso es una
+        asistolia. Conservar el del arranque seguía publicando tensión y
+        gasto sobre un corazón que el 3D ya enseñaba parado.
         """
         self._params = params
         if vitals is not None:
             self._vitals = vitals
+        if profile is not None:
+            self._profile = profile
         self._engine.set_baseline(baseline_from_params(params, self._vitals))
 
     @property

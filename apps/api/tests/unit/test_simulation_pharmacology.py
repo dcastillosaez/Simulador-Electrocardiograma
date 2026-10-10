@@ -6,7 +6,7 @@ import pytest
 
 from ecg_api.errors import InvalidParamsError
 from ecg_api.simulation import CHUNK_SAMPLES, SimulationManager
-from ecg_engine import EngineParams
+from ecg_engine import EngineParams, PatientSpec
 
 SAMPLES_PER_SECOND = 500
 
@@ -223,3 +223,21 @@ def test_un_farmaco_no_devuelve_el_ritmo_a_sus_valores_de_catalogo(
     assert not m.pharmacology._engine.effect_at(m.duration_s).is_neutral()
     assert dict(m._engine.params.rhythm) == pytest.approx(rhythm)
     assert m._engine.params.heart_rate_hz == pytest.approx(pulse_before)
+
+
+def test_un_paciente_inventado_que_entra_en_asistolia_publica_una_parada() -> None:
+    """Quitarle aurícula y escape en caliente lo deja sin latidos. El panel
+    tiene que decirlo igual que el 3D: el perfil mecánico se recalculaba al
+    arrancar y no al editar, y seguía publicando 120/75 sobre una asistolia."""
+    m = SimulationManager()
+    m.start("custom_patient", EngineParams(patient=PatientSpec()), seed=7)
+    assert m.pharmacology_payload()["physiology"]["systolic_bp_mmhg"] > 0.0
+
+    m.update(EngineParams(patient=PatientSpec(atrial_rate_bpm=0.0, escape_rate_bpm=0.0)))
+    physiology = m.pharmacology_payload()["physiology"]
+    assert physiology["systolic_bp_mmhg"] == 0.0
+    assert physiology["stroke_volume_ml"] == 0.0
+
+    # Y al devolverle el ritmo vuelve a bombear.
+    m.update(EngineParams(patient=PatientSpec()))
+    assert m.pharmacology_payload()["physiology"]["systolic_bp_mmhg"] > 0.0

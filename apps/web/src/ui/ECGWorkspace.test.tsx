@@ -279,6 +279,44 @@ describe("ECGWorkspace", () => {
     });
   });
 
+  it("tras un cierre del servidor, «Reconectar» vuelve a arrancar el mismo ritmo", async () => {
+    // El servidor cierra por inactividad, por un fallo o al reiniciarse, y
+    // antes nada reabría la conexión: elegir el ritmo lanzaba sin capturar y
+    // elegir el mismo ni siquiera llegaba a llamar a nadie.
+    stubRhythmFetch();
+    const sockets: FakeWebSocket[] = [];
+    render(
+      <ECGWorkspace
+        wsUrl="ws://test"
+        apiBaseUrl="http://api.test"
+        webSocketFactory={() => {
+          const socket = new FakeWebSocket();
+          sockets.push(socket);
+          return socket as unknown as WebSocket;
+        }}
+      />
+    );
+
+    await waitFor(() => screen.getByText("Sinusal normal"));
+    act(() => sockets[0].dispatch("open", {}));
+    await userEvent.selectOptions(screen.getByLabelText("Seleccionar ritmo"), "sinus_normal");
+    await waitFor(() => expect(sockets[0].sentMessages.length).toBeGreaterThan(0));
+
+    act(() => {
+      sockets[0].readyState = 3;
+      sockets[0].dispatch("close", { code: 1000, reason: "sin actividad" });
+    });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Reconectar" }));
+    expect(sockets).toHaveLength(2);
+
+    act(() => sockets[1].dispatch("open", {}));
+    expect(JSON.parse(sockets[1].sentMessages[0])).toMatchObject({
+      type: "start",
+      rhythm_id: "sinus_normal",
+    });
+  });
+
   it("un frame nuevo produce dibujo incremental en el canvas de la derivacion", async () => {
     stubRhythmFetch();
     render(
