@@ -7,6 +7,7 @@ demas. En servidor no existe y nada de esto se activa.
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from ecg_api.config import Settings, get_settings
 from ecg_api.desktop_auth import token_matches
@@ -98,3 +99,40 @@ class TestMiddleware:
         # y en ese momento todavia no le ha entregado el token a nadie.
         with TestClient(app) as client:
             assert client.get("/api/health").status_code == 200
+
+
+class TestWebSocket:
+    """El token del WebSocket viaja como subprotocolo, y un navegador que
+    ofrece uno exige recibirlo de vuelta: si la respuesta del handshake no
+    lo lleva, Chromium —el motor de WebView2, la ventana del escritorio en
+    Windows— aborta la conexión aunque el servidor la haya aceptado."""
+
+    def test_con_token_el_subprotocolo_vuelve_en_la_respuesta(
+        self, modo_escritorio
+    ):
+        protocolo = f"ecg-token.{modo_escritorio}"
+        with (
+            TestClient(app) as client,
+            client.websocket_connect("/ws/simulation", subprotocols=[protocolo]) as ws,
+        ):
+            assert ws.accepted_subprotocol == protocolo
+
+    def test_con_token_incorrecto_se_rechaza(self, modo_escritorio):
+        with (
+            TestClient(app) as client,
+            pytest.raises(WebSocketDisconnect) as exc,
+            client.websocket_connect(
+                "/ws/simulation", subprotocols=["ecg-token.otro"]
+            ),
+        ):
+            pass
+        assert exc.value.code == 1008
+
+    def test_sin_token_configurado_no_se_elige_subprotocolo(self):
+        # En servidor no hay token: aceptar un subprotocolo que el cliente no
+        # ha negociado con nosotros sería inventarse un contrato.
+        with (
+            TestClient(app) as client,
+            client.websocket_connect("/ws/simulation") as ws,
+        ):
+            assert ws.accepted_subprotocol is None

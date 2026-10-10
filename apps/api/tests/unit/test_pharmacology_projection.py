@@ -117,3 +117,12 @@ class TestCirculacionEfectiva:
         )
         assert adjusted.contractility == pytest.approx(1.8)
         assert adjusted.qt_interval_ms == pytest.approx(380.0)
+
+
+def test_la_proyeccion_conserva_los_mandos_del_ritmo() -> None:
+    """Los mandos de un flutter o de un bloqueo completo describen el ritmo,
+    no la farmacología: un mapa vacío el motor lo lee como «valores de
+    catálogo» y reconstruye la fuente con ellos."""
+    params = EngineParams(rhythm={"atrial_rate_hz": 250 / 60, "conduction_ratio": 4.0})
+    projected = project(params, PhysiologyState(heart_rate_bpm=60.0))
+    assert dict(projected.rhythm) == dict(params.rhythm)
