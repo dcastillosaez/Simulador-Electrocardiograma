@@ -201,14 +201,26 @@ async def simulation_ws(websocket: WebSocket) -> None:
     # El token del modo escritorio viaja como subprotocolo: el navegador no
     # deja poner cabeceras en `new WebSocket(url)`, y en la query string
     # acabaría en los logs. En servidor no hay token y esto no hace nada.
+    #
+    # El subprotocolo aceptado hay que devolverlo en la respuesta: un
+    # navegador que ofrece uno y no recibe ninguno de vuelta aborta el
+    # handshake ("Sent non-empty 'Sec-WebSocket-Protocol' header but no
+    # response was received"), así que validar el token y aceptar sin él
+    # dejaba la ventana del escritorio sin conexión.
+    subprotocol: str | None = None
     if settings.desktop_token:
-        presentado = next(
+        subprotocol = next(
             (
-                p.removeprefix(TOKEN_SUBPROTOCOL_PREFIX)
+                p
                 for p in websocket.scope.get("subprotocols", [])
                 if p.startswith(TOKEN_SUBPROTOCOL_PREFIX)
             ),
             None,
+        )
+        presentado = (
+            subprotocol.removeprefix(TOKEN_SUBPROTOCOL_PREFIX)
+            if subprotocol is not None
+            else None
         )
         if not token_matches(settings.desktop_token, presentado):
             logger.warning("handshake rechazado: token ausente o incorrecto")
@@ -230,13 +242,15 @@ async def simulation_ws(websocket: WebSocket) -> None:
         return
 
     try:
-        await _run_session(websocket, settings, session_factory)
+        await _run_session(websocket, settings, session_factory, subprotocol)
     finally:
         limiter.release(client)
 
 
-async def _run_session(websocket: WebSocket, settings, session_factory) -> None:
-    await websocket.accept()
+async def _run_session(
+    websocket: WebSocket, settings, session_factory, subprotocol: str | None = None
+) -> None:
+    await websocket.accept(subprotocol=subprotocol)
 
     manager = SimulationManager()
     outbox = FrameOutbox(maxsize=OUTBOX_MAXSIZE)

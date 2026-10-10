@@ -93,6 +93,10 @@ export interface WorkspaceInspectorProps {
   measureSession: MeasurementSession | null;
   onToolChange: (tool: ToolId) => void;
   onSnapChange: (mode: SnapMode) => void;
+  /** Vuelve a conectar y arranca el ritmo que había. Sin él (no hay ritmo
+   * que retomar) no se ofrece el botón: elegir uno en el selector ya
+   * reconecta. */
+  onReconnect?: () => void;
 }
 
 /** El panel de información del puesto de simulación: estado de la sesión y
@@ -116,6 +120,7 @@ export function WorkspaceInspector({
   measureSession,
   onToolChange,
   onSnapChange,
+  onReconnect,
 }: WorkspaceInspectorProps) {
   /** Una medida del servidor, lista para pasar a `Metric`.
    *
@@ -209,6 +214,17 @@ export function WorkspaceInspector({
             {disconnectReason
               ? `Desconectado: ${disconnectReason}`
               : "Desconectado"}
+            {/* El ritmo sigue elegido en el selector, y elegirlo otra vez no
+                dispara nada: sin este botón, retomar el mismo ritmo exigía
+                pasar por otro o recargar la página. */}
+            {onReconnect && (
+              <>
+                {" "}
+                <button type="button" onClick={onReconnect}>
+                  Reconectar
+                </button>
+              </>
+            )}
           </p>
         )}
         {/* Solo mientras corre: en pausa el buffer se vacía a propósito, y

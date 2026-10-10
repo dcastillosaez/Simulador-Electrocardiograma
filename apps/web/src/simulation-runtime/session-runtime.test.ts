@@ -292,3 +292,106 @@ describe("SessionRuntime", () => {
     });
   });
 });
+
+describe("SessionRuntime sin conexión abierta", () => {
+  /** Un socket que nace conectando, como uno de verdad. */
+  function connectingSocket(): FakeWebSocket {
+    const fake = new FakeWebSocket();
+    fake.readyState = 0;
+    return fake;
+  }
+
+  function open(fake: FakeWebSocket): void {
+    fake.readyState = FakeWebSocket.OPEN;
+    fake.dispatch("open", {});
+  }
+
+  function closeFromServer(fake: FakeWebSocket, code = 1000, reason = ""): void {
+    fake.readyState = 3;
+    fake.dispatch("close", { code, reason });
+  }
+
+  it("un start pedido mientras conecta sale en cuanto abre", () => {
+    const fake = connectingSocket();
+    const runtime = new SessionRuntime("ws://test", () => fake as unknown as WebSocket);
+    runtime.connect();
+
+    expect(() => runtime.start("sinus_normal")).not.toThrow();
+    expect(fake.sentMessages).toHaveLength(0);
+
+    open(fake);
+    expect(fake.lastSentMessage()).toMatchObject({ type: "start", rhythm_id: "sinus_normal" });
+  });
+
+  it("tras un cierre del servidor, elegir un ritmo reconecta y arranca", () => {
+    const sockets: FakeWebSocket[] = [];
+    const runtime = new SessionRuntime("ws://test", () => {
+      const fake = connectingSocket();
+      sockets.push(fake);
+      return fake as unknown as WebSocket;
+    });
+    runtime.connect();
+    open(sockets[0]);
+    closeFromServer(sockets[0], 1000, "sin actividad: cierre por inactividad");
+    expect(runtime.state).toBe("idle");
+
+    expect(() => runtime.start("atrial_flutter")).not.toThrow();
+    expect(sockets).toHaveLength(2);
+    expect(runtime.state).toBe("connecting");
+
+    open(sockets[1]);
+    expect(sockets[1].lastSentMessage()).toMatchObject({
+      type: "start",
+      rhythm_id: "atrial_flutter",
+    });
+  });
+
+  it("dos starts seguidos mientras conecta abren una sola conexión y mandan el último", () => {
+    const sockets: FakeWebSocket[] = [];
+    const runtime = new SessionRuntime("ws://test", () => {
+      const fake = connectingSocket();
+      sockets.push(fake);
+      return fake as unknown as WebSocket;
+    });
+
+    runtime.start("sinus_normal");
+    runtime.start("svt");
+    expect(sockets).toHaveLength(1);
+
+    open(sockets[0]);
+    expect(sockets[0].sentMessages).toHaveLength(1);
+    expect(sockets[0].lastSentMessage()).toMatchObject({ rhythm_id: "svt" });
+  });
+
+  it("un start pendiente se descarta si la conexión no llega a abrir", () => {
+    const sockets: FakeWebSocket[] = [];
+    const runtime = new SessionRuntime("ws://test", () => {
+      const fake = connectingSocket();
+      sockets.push(fake);
+      return fake as unknown as WebSocket;
+    });
+    runtime.start("sinus_normal");
+    closeFromServer(sockets[0], 1006);
+
+    runtime.connect();
+    open(sockets[1]);
+    expect(sockets[1].sentMessages).toHaveLength(0);
+  });
+
+  it("mover un mando sin conexión avisa en vez de lanzar", () => {
+    const fake = connectingSocket();
+    const runtime = new SessionRuntime("ws://test", () => fake as unknown as WebSocket);
+    const onError = vi.fn();
+    runtime.on("error", onError);
+    runtime.connect();
+    open(fake);
+    closeFromServer(fake);
+
+    expect(() => runtime.update({} as never)).not.toThrow();
+    expect(() => runtime.administer("atropine", 1)).not.toThrow();
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "error", code: "NOT_CONNECTED" })
+    );
+    expect(fake.sentMessages).toHaveLength(0);
+  });
+});
