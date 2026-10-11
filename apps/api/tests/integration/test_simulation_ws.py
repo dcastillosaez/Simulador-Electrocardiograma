@@ -1,5 +1,6 @@
 """Requiere Postgres real: `docker compose up -d db` antes de ejecutar."""
 
+import threading
 import time
 
 import pytest
@@ -133,6 +134,40 @@ def test_sequence_number_is_monotonic_across_several_frames():
 
             ws.send_json({"type": "stop"})
             receive_json_of_type(ws, "stopped")
+
+
+def test_a_start_with_an_unknown_rhythm_keeps_the_running_session():
+    """Un `start` con un ritmo inexistente no toca la sesión en marcha.
+
+    Antes se paraban sus tareas de fondo y solo después fallaba el arranque:
+    el socket quedaba con un `session_id` vivo, sin un solo frame más."""
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/simulation") as ws:
+            ws.send_json({"type": "start", "rhythm_id": "sinus_normal", "seed": 1})
+            started = receive_json_of_type(ws, "started")
+            decode_frame(receive_frame_bytes(ws))
+
+            ws.send_json({"type": "start", "rhythm_id": "no_existe"})
+            error = receive_json_of_type(ws, "error")
+            assert error["code"] == "NOT_FOUND"
+
+            # Siguen llegando frames, y de la misma sesión. Los que ya
+            # estuvieran en cola no prueban nada: se leen más de los que
+            # caben en el outbox. Sin streaming, `receive` no vuelve nunca,
+            # así que se lee en un hilo con plazo: la regresión tiene que
+            # fallar, no colgar la suite.
+            frames: list = []
+
+            def _read() -> None:
+                frames.extend(
+                    decode_frame(receive_frame_bytes(ws)) for _ in range(25)
+                )
+
+            reader = threading.Thread(target=_read, daemon=True)
+            reader.start()
+            reader.join(timeout=10.0)
+            assert len(frames) == 25, "la sesión en marcha dejó de emitir frames"
+            assert {str(f.session_id) for f in frames} == {started["session_id"]}
 
 
 def test_second_start_replaces_the_first_session_cleanly():

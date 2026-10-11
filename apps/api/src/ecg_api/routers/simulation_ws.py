@@ -41,7 +41,7 @@ from ..schemas import (
     stopped_message,
     updated_message,
 )
-from ..simulation import SimulationManager
+from ..simulation import SimulationManager, ensure_rhythm_exists
 from ..streaming import (
     stream_cardiac,
     stream_chunks,
@@ -344,6 +344,18 @@ async def _run_session(
                 continue
 
             if isinstance(message, StartMessage):
+                # El ritmo se comprueba antes de tocar la sesión en marcha. Un
+                # `start` con un ritmo inexistente paraba las tareas de fondo
+                # y persistía la sesión saliente, y solo entonces fallaba:
+                # quedaba un `session_id` vivo sin streaming que aceptaba
+                # `update` y `pause`, y el `finally` la volvía a persistir.
+                try:
+                    ensure_rhythm_exists(message.rhythm_id)
+                except SimulationError as exc:
+                    await websocket.send_json(
+                        error_message(code=exc.code, detail=str(exc))
+                    )
+                    continue
                 if manager.session_id is not None:
                     # Un `start` sobre un socket con una sesión ya activa
                     # reemplaza esa sesión. Sin este bloque, el par de tareas
@@ -353,14 +365,13 @@ async def _run_session(
                     # sesión saliente, aunque cumpliera el umbral de
                     # persistencia, se pierde en silencio en cuanto
                     # `manager.start` reinicie el motor y sobrescriba
-                    # `session_id`. Se para, se persiste si corresponde, y
-                    # se libera `persisted` para el ciclo de vida de la
-                    # sesión nueva.
+                    # `session_id`. Se para y se persiste si corresponde;
+                    # `persisted` se libera más abajo, cuando la sesión nueva
+                    # ya ha arrancado.
                     await _stop_background_tasks(background_tasks)
                     background_tasks = []
                     outbox.clear()
                     await _maybe_persist()
-                    persisted = False
 
                 try:
                     session_id = manager.start(
@@ -383,6 +394,9 @@ async def _run_session(
                         error_message(code=exc.code, detail=str(exc))
                     )
                     continue
+                # Solo con la sesión nueva ya en pie: liberarlo antes dejaba
+                # que un arranque fallido volviera a persistir la saliente.
+                persisted = False
                 await websocket.send_json(
                     started_message(
                         session_id=session_id,

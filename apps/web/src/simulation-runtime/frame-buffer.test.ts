@@ -432,4 +432,24 @@ describe("FrameBuffer", () => {
       expect(buffer.playbackTimeS).toBeNull();
     });
   });
+
+  it("descartar por exceso no arrastra lo reproducido del trozo tirado", () => {
+    // Cinco trozos de 100 ms: pre-roll alcanzado. Se reproducen 40 ms del de
+    // cabeza y luego llegan tres más, que pasan de maxS y obligan a descartar.
+    const buffer = new FrameBuffer();
+    for (let i = 0; i < 5; i++) {
+      buffer.push(makeFrame({ sequenceNumber: i, tStartS: i * 0.1 }));
+    }
+    buffer.advance(0.04);
+    expect(buffer.playbackTimeS).toBeCloseTo(0.04);
+
+    for (let i = 5; i < 8; i++) {
+      buffer.push(makeFrame({ sequenceNumber: i, tStartS: i * 0.1 }));
+    }
+
+    // El octavo deja 800 ms en el buffer y se descarta hasta 500: sobreviven
+    // los trozos de 0,3 s en adelante. La cabeza es el inicio del primero,
+    // sin los 40 ms del trozo tirado encima.
+    expect(buffer.playbackTimeS).toBeCloseTo(0.3);
+  });
 });
