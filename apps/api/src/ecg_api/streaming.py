@@ -23,6 +23,27 @@ from .simulation import SimulationManager, SimulationState
 CHUNK_INTERVAL_S = 0.1  # ~10 mensajes/s, la cadencia del diseño
 
 
+async def _wait_next_tick(next_tick: float, interval_s: float) -> float:
+    """Espera al siguiente tic y devuelve cuándo tocaba.
+
+    Los tics se encadenan sobre el anterior y no sobre el reloj, para que el
+    jitter del scheduler no acumule deriva. Pero eso, sin tope, convertía
+    cualquier parón del proceso en una ráfaga: un portátil suspendido una
+    hora en modo escritorio despertaba generando 36.000 chunks seguidos y
+    otros tantos mensajes, y el reloj de simulación —y con él la
+    farmacocinética— saltaba esa hora de golpe. Un retraso de más de un
+    intervalo no se recupera: se descarta y se sigue desde ahora, igual que
+    una pausa.
+    """
+    loop = asyncio.get_running_loop()
+    next_tick += interval_s
+    now = loop.time()
+    if now - next_tick > interval_s:
+        next_tick = now
+    await asyncio.sleep(max(0.0, next_tick - now))
+    return next_tick
+
+
 async def stream_chunks(
     manager: SimulationManager,
     outbox: FrameOutbox,
@@ -43,8 +64,7 @@ async def stream_chunks(
                 channels_v=chunk.channels_v,
             )
             outbox.put(frame)
-        next_tick += interval_s
-        await asyncio.sleep(max(0.0, next_tick - asyncio.get_running_loop().time()))
+        next_tick = await _wait_next_tick(next_tick, interval_s)
 
 
 async def stream_measurements(
@@ -74,8 +94,7 @@ async def stream_measurements(
             payload = manager.measurements()
             if payload is not None:
                 await publish(payload)
-        next_tick += interval_s
-        await asyncio.sleep(max(0.0, next_tick - asyncio.get_running_loop().time()))
+        next_tick = await _wait_next_tick(next_tick, interval_s)
 
 
 async def stream_pharmacology(
@@ -101,8 +120,7 @@ async def stream_pharmacology(
             payload = manager.pharmacology_payload()
             if payload is not None:
                 await publish(payload)
-        next_tick += interval_s
-        await asyncio.sleep(max(0.0, next_tick - asyncio.get_running_loop().time()))
+        next_tick = await _wait_next_tick(next_tick, interval_s)
 
 
 async def stream_cardiac(
@@ -132,5 +150,4 @@ async def stream_cardiac(
             state = manager.heart_state()
             if state is not None:
                 await publish(state)
-        next_tick += interval_s
-        await asyncio.sleep(max(0.0, next_tick - asyncio.get_running_loop().time()))
+        next_tick = await _wait_next_tick(next_tick, interval_s)

@@ -31,6 +31,19 @@ CHUNK_SAMPLES = 50  # 100 ms a 500 Hz — la cadencia de streaming del diseño
 _SEED_UPPER_BOUND = 2**31
 
 
+def ensure_rhythm_exists(rhythm_id: str) -> None:
+    """Lanza `RhythmNotFoundError` si el catálogo no tiene ese ritmo.
+
+    Existe para poder rechazar un `start` **antes** de desmontar la sesión
+    que haya en marcha: fallar después dejaba el socket con una sesión sin
+    streaming que seguía aceptando órdenes.
+    """
+    try:
+        get_rhythm(rhythm_id)
+    except KeyError as exc:
+        raise RhythmNotFoundError(str(exc)) from exc
+
+
 class SimulationState(str, Enum):
     RUNNING = "running"
     PAUSED = "paused"
