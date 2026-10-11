@@ -512,6 +512,11 @@ export function ECGWorkspace({
           disconnectReason={describeClose(store.lastDisconnect)}
           connectionState={store.connectionState}
           hasConnectedOnce={hasConnectedOnce}
+          onReconnect={
+            selectedRhythm
+              ? () => handleRhythmSelect(selectedRhythm.rhythm_id, selectedRhythm)
+              : undefined
+          }
           isAwaitingSignal={isAwaitingSignal}
           isFrozen={isFrozen}
           gainFits={metrics.gainFits}

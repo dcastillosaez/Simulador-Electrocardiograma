@@ -144,7 +144,7 @@ def project(params: EngineParams, state: PhysiologyState) -> EngineParams:
 
     `params` son los de mando: de ellos se conservan intactos el ruido y la
     variabilidad, que describen la medición y no al paciente, y los desfases
-    de eje por onda, que describen el ritmo. Solo se sobreescriben la
+    de eje por onda y los mandos propios del ritmo, que describen el ritmo. Solo se sobreescriben la
     frecuencia y la orientación del eje, que son lo único fisiológico que
     `EngineParams` sabe representar.
     """
@@ -153,6 +153,11 @@ def project(params: EngineParams, state: PhysiologyState) -> EngineParams:
         noise=params.noise,
         variability=params.variability,
         axis=replace(params.axis, orientation_deg=state.axis_deg),
+        # Los mandos propios del ritmo tampoco son farmacología. Un mapa vacío
+        # el motor lo lee como «valores de catálogo» y reconstruye la fuente:
+        # cualquier fármaco devolvía un flutter 4:1 a 2:1 y un escape de 35 a
+        # 40 sin que nadie tocara un control.
+        rhythm=params.rhythm,
         # La descripción del paciente no es un efecto farmacológico: la
         # adrenalina cambia su frecuencia, no lo convierte en otra persona.
         # Sin esto, la primera dosis borraría el paciente inventado y el

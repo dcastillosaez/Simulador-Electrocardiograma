@@ -6,7 +6,7 @@ import pytest
 
 from ecg_api.errors import InvalidParamsError
 from ecg_api.simulation import CHUNK_SAMPLES, SimulationManager
-from ecg_engine import EngineParams
+from ecg_engine import EngineParams, PatientSpec
 
 SAMPLES_PER_SECOND = 500
 
@@ -188,3 +188,56 @@ def test_un_ritmo_que_bombea_conserva_sus_constantes() -> None:
     assert physiology["systolic_bp_mmhg"] > 0.0
     assert physiology["respiratory_rate_bpm"] > 0.0
     assert physiology["cardiac_output_l_min"] > 0.0
+
+
+@pytest.mark.parametrize(
+    ("rhythm_id", "drug_id", "dose", "rhythm"),
+    [
+        (
+            "atrial_flutter",
+            "diltiazem",
+            20.0,
+            {"atrial_rate_hz": 250 / 60, "conduction_ratio": 4.0},
+        ),
+        (
+            "av_block_third",
+            "atropine",
+            1.0,
+            {"atrial_rate_hz": 75 / 60, "escape_rate_hz": 35 / 60},
+        ),
+    ],
+)
+def test_un_farmaco_no_devuelve_el_ritmo_a_sus_valores_de_catalogo(
+    rhythm_id: str, drug_id: str, dose: float, rhythm: dict[str, float]
+) -> None:
+    """Con un fármaco activo, los mandos del ritmo siguen siendo los del
+    operador. Antes la proyección los perdía y el motor reconstruía la fuente
+    con los de catálogo: un flutter 4:1 a 250 saltaba a 2:1 a 300, y un
+    escape de 35 a 40, sin que nadie tocara un control."""
+    m = SimulationManager()
+    m.start(rhythm_id, EngineParams(rhythm=rhythm), seed=7)
+    pulse_before = m._engine.params.heart_rate_hz
+    m.administer(drug_id, dose, "IV")
+    # Pasado el inicio de acción de los dos: el diltiazem tarda en llegar.
+    _advance(m, 180.0)
+    assert not m.pharmacology._engine.effect_at(m.duration_s).is_neutral()
+    assert dict(m._engine.params.rhythm) == pytest.approx(rhythm)
+    assert m._engine.params.heart_rate_hz == pytest.approx(pulse_before)
+
+
+def test_un_paciente_inventado_que_entra_en_asistolia_publica_una_parada() -> None:
+    """Quitarle aurícula y escape en caliente lo deja sin latidos. El panel
+    tiene que decirlo igual que el 3D: el perfil mecánico se recalculaba al
+    arrancar y no al editar, y seguía publicando 120/75 sobre una asistolia."""
+    m = SimulationManager()
+    m.start("custom_patient", EngineParams(patient=PatientSpec()), seed=7)
+    assert m.pharmacology_payload()["physiology"]["systolic_bp_mmhg"] > 0.0
+
+    m.update(EngineParams(patient=PatientSpec(atrial_rate_bpm=0.0, escape_rate_bpm=0.0)))
+    physiology = m.pharmacology_payload()["physiology"]
+    assert physiology["systolic_bp_mmhg"] == 0.0
+    assert physiology["stroke_volume_ml"] == 0.0
+
+    # Y al devolverle el ritmo vuelve a bombear.
+    m.update(EngineParams(patient=PatientSpec()))
+    assert m.pharmacology_payload()["physiology"]["systolic_bp_mmhg"] > 0.0

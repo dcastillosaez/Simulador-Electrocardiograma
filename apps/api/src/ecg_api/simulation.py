@@ -160,7 +160,9 @@ class SimulationManager:
         # Las constantes de un paciente inventado se editan en caliente igual
         # que sus intervalos: mover su tensión basal tiene que llegar al panel
         # sin reiniciar la sesión.
-        self.pharmacology.rebase(self._command_params, self._vitals)
+        self.pharmacology.rebase(
+            self._command_params, self._vitals, self._profile()
+        )
         # Reaplicar de inmediato: sin esto, un `update` con fármacos a bordo
         # dejaría el motor generando con la frecuencia de mando pelada hasta
         # el siguiente chunk, y se vería un salto en el trazado.
