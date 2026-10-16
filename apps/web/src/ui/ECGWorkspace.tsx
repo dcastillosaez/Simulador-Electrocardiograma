@@ -153,6 +153,11 @@ export function ECGWorkspace({
   // volver tiene que seguir siendo el mismo paciente.
   const [patient, setPatient] = useState<PatientPayload>(DEFAULT_PATIENT);
   const isCustomPatient = store.selectedRhythmId === CUSTOM_PATIENT_ID;
+  // El último paciente que ya viaja hacia el servidor, por `start` o por
+  // `update`. Sin él, elegir el paciente personalizado mandaba el `start` con
+  // el paciente y, 200 ms después, un `update` con el mismo: el motor
+  // reconstruía la fuente sin motivo y el trazado daba un salto al arrancar.
+  const appliedPatientRef = useRef<PatientPayload | null>(null);
 
   const leadColumns = useMemo(() => leadColumnsForLayout(layout), [layout]);
   const sampleRateHz = store.sampleRateHz ?? DEFAULT_SAMPLE_RATE_HZ;
@@ -306,6 +311,9 @@ export function ECGWorkspace({
       // borrar el caso que se estaba montando.
       ...(rhythmId === CUSTOM_PATIENT_ID ? { patient } : {}),
     });
+    if (rhythmId === CUSTOM_PATIENT_ID) {
+      appliedPatientRef.current = patient;
+    }
   };
 
   const currentParams =
@@ -333,10 +341,11 @@ export function ECGWorkspace({
 
   useEffect(() => {
     if (!isCustomPatient || !currentParams) return;
-    const timer = window.setTimeout(
-      () => runtime.update({ ...currentParams, patient }),
-      PATIENT_APPLY_DELAY_MS
-    );
+    if (patient === appliedPatientRef.current) return;
+    const timer = window.setTimeout(() => {
+      appliedPatientRef.current = patient;
+      runtime.update({ ...currentParams, patient });
+    }, PATIENT_APPLY_DELAY_MS);
     return () => window.clearTimeout(timer);
     // `currentParams` cambia con cada respuesta del servidor, incluida la que
     // provoca este mismo efecto: depender de él reenviaría el paciente en
