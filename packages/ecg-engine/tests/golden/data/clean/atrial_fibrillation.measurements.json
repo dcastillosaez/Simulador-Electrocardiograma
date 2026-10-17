@@ -1,6 +1,6 @@
 {
   "atrial_rate_hz": null,
-  "ventricular_rate_hz": 1.4,
+  "ventricular_rate_hz": 1.334713896435114,
   "rr_mean_s": 0.7492242364980982,
   "rr_std_s": 0.17944586967735207,
   "pr_mean_s": null,

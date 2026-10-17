@@ -177,3 +177,28 @@ def test_clamped_axis_respects_the_catalog_ranges():
     )
     # qrs_offset_deg tiene rango ±90: 200 se recorta a 90.
     assert engine.params.axis.qrs_offset_deg == 90.0
+
+
+def test_source_started_s_marks_where_a_rebuilt_source_begins():
+    """Una fuente reconstruida describe el ritmo desde cero: quien mide
+    necesita saber desde dónde la señal es suya."""
+    engine = EcgEngine(
+        "av_block_third",
+        seed=1,
+        params=EngineParams(rhythm={"atrial_rate_hz": 1.25, "escape_rate_hz": 0.6}),
+    )
+    assert engine.source_started_s == 0.0
+    engine.generate(1000)
+    engine.update_params(
+        EngineParams(rhythm={"atrial_rate_hz": 1.5, "escape_rate_hz": 0.6})
+    )
+    assert engine.source_started_s == pytest.approx(2.0)
+    engine.reset()
+    assert engine.source_started_s == 0.0
+
+
+def test_a_rate_change_does_not_rebuild_the_source():
+    engine = EcgEngine("sinus_normal", seed=1)
+    engine.generate(1000)
+    engine.update_params(EngineParams(heart_rate_hz=1.5))
+    assert engine.source_started_s == 0.0
