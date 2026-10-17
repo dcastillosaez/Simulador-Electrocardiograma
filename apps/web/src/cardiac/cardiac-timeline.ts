@@ -12,9 +12,11 @@ export type ChamberName = MechanicalEventPayload["chamber"];
  *
  * Sin React ni Three.js a propósito: es la única parte de la animación con
  * lógica que merezca un test, y así lo tiene sin necesitar WebGL. */
+type StoredEvent = MechanicalEventPayload & { key: string };
+
 export class CardiacTimeline {
-  private events: MechanicalEventPayload[] = [];
-  private readonly seen = new Set<string>();
+  private events: StoredEvent[] = [];
+  private seen = new Set<string>();
 
   get size(): number {
     return this.events.length;
@@ -24,13 +26,17 @@ export class CardiacTimeline {
    *
    * La deduplicación es por cámara e índice y no por instante: el índice del
    * evento eléctrico es estable y el instante es un flotante redondeado, que
-   * no es una clave con la que uno quiera comparar por igualdad. */
-  push(incoming: readonly MechanicalEventPayload[]): void {
+   * no es una clave con la que uno quiera comparar por igualdad.
+   *
+   * Estable dentro de una fuente, eso sí: una fuente reconstruida vuelve a
+   * contar desde 0, y sin la época en la clave un ritmo más lento quedaba
+   * entero por debajo de los índices ya vistos y el corazón dejaba de latir. */
+  push(incoming: readonly MechanicalEventPayload[], epoch = 0): void {
     for (const event of incoming) {
-      const key = `${event.chamber}:${event.index}`;
+      const key = `${epoch}:${event.chamber}:${event.index}`;
       if (this.seen.has(key)) continue;
       this.seen.add(key);
-      this.events.push(event);
+      this.events.push({ ...event, key });
     }
   }
 
@@ -56,6 +62,10 @@ export class CardiacTimeline {
    * 70.000 eventos que `excursionAt` recorrería sesenta veces por segundo. */
   prune(tS: number): void {
     this.events = this.events.filter((event) => event.t_end_s >= tS);
+    // Las claves se van con sus eventos: sin esto el conjunto crecía durante
+    // toda la sesión. Un duplicado tardío de algo ya podado caería en el
+    // pasado y se podaría en la siguiente pasada.
+    this.seen = new Set(this.events.map((event) => event.key));
   }
 
   clear(): void {

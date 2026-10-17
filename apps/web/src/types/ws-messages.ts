@@ -192,6 +192,10 @@ export interface CardiacEventsMessage {
   type: "cardiac_events";
   t_start_s: number;
   t_end_s: number;
+  /** Desde cuándo genera la fuente que numeró estos eventos. Una fuente
+   * reconstruida vuelve a contar los índices desde 0: el mismo índice de
+   * otra época es otro latido. Ausente en sesiones anteriores a este campo. */
+  source_started_s?: number;
   events: MechanicalEventPayload[];
   /** Coreografía valvular de las contracciones ventriculares de esta ventana.
    *
