@@ -155,3 +155,33 @@ describe("CardiacTimeline", () => {
     expect(timeline.excursionAt("ventricles", 1.0)).toBe(0);
   });
 });
+
+describe("CardiacTimeline tras reconstruir la fuente", () => {
+  it("acepta los latidos de una fuente nueva aunque repitan índice", () => {
+    // Un paciente a 120 lpm durante un minuto llega al índice ~120; al bajar
+    // a 60 la fuente nueva vuelve a contar y sus índices quedan por debajo.
+    // Sin la época en la clave se descartaban todos y el corazón se paraba.
+    const timeline = new CardiacTimeline();
+    timeline.push([beat({ index: 60, t_start_s: 30.0, t_peak_s: 30.15, t_end_s: 30.4 })], 0);
+    timeline.push([beat({ index: 120, t_start_s: 59.5, t_peak_s: 59.65, t_end_s: 59.9 })], 0);
+    timeline.push([beat({ index: 60, t_start_s: 61.0, t_peak_s: 61.15, t_end_s: 61.4 })], 60);
+    expect(timeline.excursionAt("ventricles", 61.15)).toBeCloseTo(1, 5);
+  });
+
+  it("sigue descartando el mismo latido de la misma fuente", () => {
+    const timeline = new CardiacTimeline();
+    timeline.push([beat()], 5);
+    timeline.push([beat()], 5);
+    expect(timeline.size).toBe(1);
+  });
+
+  it("podar olvida también las claves de lo podado", () => {
+    const timeline = new CardiacTimeline();
+    timeline.push([beat({ index: 0 })], 0);
+    timeline.prune(10);
+    expect(timeline.size).toBe(0);
+    // Si la clave siguiera ahí, el mismo índice en el futuro se descartaría.
+    timeline.push([beat({ index: 0, t_start_s: 11, t_peak_s: 11.15, t_end_s: 11.4 })], 0);
+    expect(timeline.size).toBe(1);
+  });
+});

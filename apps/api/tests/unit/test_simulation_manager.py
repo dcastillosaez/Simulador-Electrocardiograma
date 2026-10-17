@@ -196,3 +196,17 @@ def test_without_a_rebuild_measurements_start_right_away():
     m.start("sinus_normal", None, seed=7)
     _advance(m, 0.1)
     assert m.measurements() is not None
+
+
+def test_cardiac_events_carry_the_epoch_of_the_source_that_numbered_them():
+    """Una fuente reconstruida vuelve a contar los latidos desde 0. Sin la
+    época, el cliente —que deduplica por índice— descartaba como ya vistos
+    todos los de un ritmo más lento y el corazón 3D dejaba de latir."""
+    m = SimulationManager()
+    m.start("custom_patient", _custom(160.0), seed=7)
+    _advance(m, 2.0)
+    assert m.cardiac_events()["source_started_s"] == 0.0
+
+    m.update(_custom(280.0))
+    _advance(m, 2.0)
+    assert m.cardiac_events()["source_started_s"] == pytest.approx(2.0)

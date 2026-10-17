@@ -44,9 +44,11 @@ export const RESTING_APERTURE: Record<ValveGroup, number> = {
  *
  * Sin React ni Three.js a propósito, como su hermana: es la parte de la
  * animación con lógica que merece un test, y así lo tiene sin WebGL. */
+type StoredValveEvent = ValveEventPayload & { key: string };
+
 export class ValveTimeline {
-  private events: ValveEventPayload[] = [];
-  private readonly seen = new Set<number>();
+  private events: StoredValveEvent[] = [];
+  private seen = new Set<string>();
 
   get size(): number {
     return this.events.length;
@@ -58,11 +60,14 @@ export class ValveTimeline {
    * instante: los mensajes se solapan en el tiempo y el mismo latido llega más
    * de una vez, pero sus flotantes redondeados no son una clave con la que uno
    * quiera comparar por igualdad. */
-  push(incoming: readonly ValveEventPayload[]): void {
+  push(incoming: readonly ValveEventPayload[], epoch = 0): void {
+    // La época va en la clave por lo mismo que en `CardiacTimeline`: una
+    // fuente reconstruida vuelve a numerar desde 0.
     for (const event of incoming) {
-      if (this.seen.has(event.index)) continue;
-      this.seen.add(event.index);
-      this.events.push(event);
+      const key = `${epoch}:${event.index}`;
+      if (this.seen.has(key)) continue;
+      this.seen.add(key);
+      this.events.push({ ...event, key });
     }
   }
 
@@ -129,6 +134,7 @@ export class ValveTimeline {
     this.events = this.events.filter(
       (event) => event.t_open_av_s + VALVE_TRANSITION_S >= tS
     );
+    this.seen = new Set(this.events.map((event) => event.key));
   }
 
   clear(): void {

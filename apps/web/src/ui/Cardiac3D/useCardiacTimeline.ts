@@ -36,11 +36,12 @@ export function useCardiacTimeline(runtime: SessionRuntime): UseCardiacTimelineR
 
   useEffect(() => {
     const onEvents = (message: CardiacEventsMessage) => {
-      timeline.current.push(message.events);
+      const epoch = message.source_started_s ?? 0;
+      timeline.current.push(message.events, epoch);
       // `?? []` y no `message.valves` a secas: una sesión guardada antes de
       // que el servidor publicara válvulas se reproduce sin ellas en vez de
       // reventar al primer mensaje.
-      valves.current.push(message.valves ?? []);
+      valves.current.push(message.valves ?? [], epoch);
     };
     const onState = (message: HeartStateMessage) => setHeartState(message.values);
     // Un ritmo nuevo arranca en t=0: sin vaciar, las contracciones del ritmo

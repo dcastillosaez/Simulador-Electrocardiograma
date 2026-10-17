@@ -358,6 +358,7 @@ class SimulationManager:
             rr_s=rr_s,
             t_start_s=t_start_s,
             t_end_s=t_end_s,
+            source_started_s=self._engine.source_started_s,
         )
 
     def heart_state(self) -> dict | None:
