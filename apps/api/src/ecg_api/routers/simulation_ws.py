@@ -130,6 +130,18 @@ def _on_background_task_done(
     exc = task.exception()
     if exc is None:
         return
+    if isinstance(exc, WebSocketDisconnect):
+        # El cliente se fue mientras una tarea de fondo le estaba enviando:
+        # Starlette convierte el envío sobre un socket ya cortado en
+        # `WebSocketDisconnect(1006)`. Es una desconexión, no un fallo del
+        # motor, y tratarla como tal llenaba el log de trazas con una
+        # referencia de error que nadie había visto. El bucle principal
+        # recibe la misma desconexión y cierra la sesión por su cuenta.
+        logger.info(
+            "el cliente se desconectó durante el envío: session_id=%s",
+            manager.session_id,
+        )
+        return
     reference = _log_engine_failure(manager, exc)
     # Se guarda la referencia en `close_tasks` (y se espera en el `finally`
     # del handler): una tarea de `asyncio.create_task` sin referencia fuerte
