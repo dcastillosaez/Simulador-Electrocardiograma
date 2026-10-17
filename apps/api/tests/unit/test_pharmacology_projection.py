@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from ecg_api.pharmacology import (
@@ -126,3 +128,62 @@ def test_la_proyeccion_conserva_los_mandos_del_ritmo() -> None:
     params = EngineParams(rhythm={"atrial_rate_hz": 250 / 60, "conduction_ratio": 4.0})
     projected = project(params, PhysiologyState(heart_rate_bpm=60.0))
     assert dict(projected.rhythm) == dict(params.rhythm)
+
+
+class TestMandosPorRitmo:
+    """La proyección sobre los ritmos que declaran sus propios mandos."""
+
+    BLOQUEO = EngineParams(
+        rhythm={"atrial_rate_hz": 75 / 60, "escape_rate_hz": 35 / 60}
+    )
+
+    def test_el_basal_de_un_bloqueo_completo_toma_su_auricula(self) -> None:
+        # El de mando es el escape (35); la sinusal es la aurícula (75).
+        state = baseline_from_params(
+            replace(self.BLOQUEO, heart_rate_hz=35 / 60),
+            rhythm_id="av_block_third",
+        ).state
+        assert state.sinus_rate_bpm == pytest.approx(75.0)
+
+    def test_un_efecto_despreciable_deja_los_mandos_exactos(self) -> None:
+        """Un mando que cambiara por un 1 % reconstruiría la fuente sin
+        que el trazado mostrara nada distinto."""
+        baseline = PhysiologyState(sinus_rate_bpm=75.0)
+        state = PhysiologyState(sinus_rate_bpm=75.6, automaticity=1.01)
+        projected = project(
+            self.BLOQUEO, state, rhythm_id="av_block_third", baseline=baseline
+        )
+        assert dict(projected.rhythm) == dict(self.BLOQUEO.rhythm)
+
+    def test_la_sinusal_mueve_la_auricula_y_no_el_escape(self) -> None:
+        baseline = PhysiologyState(sinus_rate_bpm=75.0)
+        state = PhysiologyState(sinus_rate_bpm=90.0)
+        projected = project(
+            self.BLOQUEO, state, rhythm_id="av_block_third", baseline=baseline
+        )
+        assert projected.rhythm["atrial_rate_hz"] * 60 == pytest.approx(90.0)
+        assert projected.rhythm["escape_rate_hz"] * 60 == pytest.approx(35.0)
+
+    @pytest.mark.parametrize(
+        ("av_conduction", "ratio"),
+        [(1.35, 2.0), (1.0, 2.0), (0.8, 3.0), (0.7, 3.0), (0.5, 4.0)],
+    )
+    def test_el_nodo_decide_el_grado_de_bloqueo_del_flutter(
+        self, av_conduction: float, ratio: float
+    ) -> None:
+        params = EngineParams(rhythm={"atrial_rate_hz": 5.0, "conduction_ratio": 2.0})
+        projected = project(
+            params,
+            PhysiologyState(av_conduction=av_conduction),
+            rhythm_id="atrial_flutter",
+            baseline=PhysiologyState(),
+        )
+        assert projected.rhythm["conduction_ratio"] == ratio
+        assert projected.rhythm["atrial_rate_hz"] == 5.0
+
+    def test_sin_basal_no_se_toca_ningun_mando(self) -> None:
+        projected = project(
+            self.BLOQUEO, PhysiologyState(sinus_rate_bpm=120.0), rhythm_id="av_block_third"
+        )
+        assert dict(projected.rhythm) == dict(self.BLOQUEO.rhythm)
+

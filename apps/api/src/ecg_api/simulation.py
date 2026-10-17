@@ -115,7 +115,7 @@ class SimulationManager:
         # constantes de un paciente que camina.
         self._vitals = vitals
         self._pharmacology = PharmacologySession(
-            self._command_params, self._profile(), vitals
+            self._command_params, self._profile(), vitals, rhythm_id=self.rhythm_id
         )
         self.state = SimulationState.RUNNING
         return self.session_id
@@ -226,7 +226,10 @@ class SimulationManager:
     def pharmacology_payload(self) -> dict | None:
         if self._pharmacology is None:
             return None
-        return self._pharmacology.payload(self.duration_s)
+        return self._pharmacology.payload(
+            self.duration_s,
+            engine_params=self._engine.params if self._engine is not None else None,
+        )
 
     def pause(self) -> None:
         self.state = SimulationState.PAUSED
