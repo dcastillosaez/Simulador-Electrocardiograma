@@ -57,3 +57,7 @@ apps/api/packaging/build/
 # Descarga de BodyParts3D para reconstruir heart.glb: 136 MB de fuente que
 # no se versionan. Ver docs/fase-d/anatomy-source.md.
 docs/fase-d/.bodyparts3d-cache/
+
+# Empaquetados y exportaciones. Un zip de decenas de MB se queda en el
+# historial para siempre aunque luego se borre; ninguno está versionado.
+*.zip
