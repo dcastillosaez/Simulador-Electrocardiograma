@@ -279,6 +279,102 @@ describe("ECGWorkspace", () => {
     });
   });
 
+  it("tras un cierre del servidor, «Reconectar» vuelve a arrancar el mismo ritmo", async () => {
+    // El servidor cierra por inactividad, por un fallo o al reiniciarse, y
+    // antes nada reabría la conexión: elegir el ritmo lanzaba sin capturar y
+    // elegir el mismo ni siquiera llegaba a llamar a nadie.
+    stubRhythmFetch();
+    const sockets: FakeWebSocket[] = [];
+    render(
+      <ECGWorkspace
+        wsUrl="ws://test"
+        apiBaseUrl="http://api.test"
+        webSocketFactory={() => {
+          const socket = new FakeWebSocket();
+          sockets.push(socket);
+          return socket as unknown as WebSocket;
+        }}
+      />
+    );
+
+    await waitFor(() => screen.getByText("Sinusal normal"));
+    act(() => sockets[0].dispatch("open", {}));
+    await userEvent.selectOptions(screen.getByLabelText("Seleccionar ritmo"), "sinus_normal");
+    await waitFor(() => expect(sockets[0].sentMessages.length).toBeGreaterThan(0));
+
+    act(() => {
+      sockets[0].readyState = 3;
+      sockets[0].dispatch("close", { code: 1000, reason: "sin actividad" });
+    });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Reconectar" }));
+    expect(sockets).toHaveLength(2);
+
+    act(() => sockets[1].dispatch("open", {}));
+    expect(JSON.parse(sockets[1].sentMessages[0])).toMatchObject({
+      type: "start",
+      rhythm_id: "sinus_normal",
+    });
+  });
+
+  it("elegir el paciente personalizado no manda un update de más tras el start", async () => {
+    // El start ya lleva el paciente. Antes, 200 ms después salía un update
+    // con el mismo paciente: el motor reconstruía la fuente sin motivo y el
+    // trazado daba un salto justo al arrancar.
+    const customSummary = {
+      rhythm_id: "custom_patient",
+      display_name: "Paciente personalizado",
+      category: "custom",
+      ventricular_rate_hz: 1.1667,
+      pr_is_measurable: true,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url.endsWith("/api/rhythms")) {
+          return Promise.resolve({ ok: true, json: async () => [customSummary] });
+        }
+        if (url.endsWith("/api/drugs")) {
+          return Promise.resolve({ ok: true, json: async () => [DRUG_SUMMARY] });
+        }
+        if (url.endsWith("/api/patients")) {
+          return Promise.resolve({ ok: true, json: async () => [] });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ ...RHYTHM_DETAIL, ...customSummary }),
+        });
+      })
+    );
+    render(
+      <ECGWorkspace
+        wsUrl="ws://test"
+        apiBaseUrl="http://api.test"
+        webSocketFactory={() => fakeSocket as unknown as WebSocket}
+      />
+    );
+
+    await waitFor(() => screen.getByText("Paciente personalizado"));
+    act(() => fakeSocket.dispatch("open", {}));
+    await userEvent.selectOptions(screen.getByLabelText("Seleccionar ritmo"), "custom_patient");
+    await waitFor(() => expect(fakeSocket.sentMessages.length).toBeGreaterThan(0));
+
+    const sentTypes = () => fakeSocket.sentMessages.map((m) => JSON.parse(m).type);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(sentTypes()).toEqual(["start"]);
+
+    // Editar el paciente sí tiene que llegar al servidor.
+    await userEvent.selectOptions(
+      await screen.findByLabelText("Conducción auriculoventricular"),
+      "ratio"
+    );
+    await waitFor(() => expect(sentTypes()).toContain("update"), { timeout: 1000 });
+    const update = JSON.parse(
+      fakeSocket.sentMessages.find((m) => JSON.parse(m).type === "update")!
+    );
+    expect(update.params.patient.av_conduction).toBe("ratio");
+  });
+
   it("un frame nuevo produce dibujo incremental en el canvas de la derivacion", async () => {
     stubRhythmFetch();
     render(

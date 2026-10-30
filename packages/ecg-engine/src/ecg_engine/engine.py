@@ -42,6 +42,7 @@ class EcgEngine:
         )
         self._sample_index = 0
         self._source: SignalSource = self._build_source()
+        self._source_started_s = 0.0
 
     # --- construcción y estado --------------------------------------------
 
@@ -161,6 +162,17 @@ class EcgEngine:
         return self._params
 
     @property
+    def source_started_s(self) -> float:
+        """Instante desde el que genera la fuente actual.
+
+        Una fuente reconstruida —otro paciente, otro grado de bloqueo— vuelve
+        a describir el ritmo desde t=0, así que sus eventos y la señal que
+        generó la anterior no son la misma historia. Quien mida una ventana de
+        señal necesita saber dónde empieza la que corresponde a estos eventos.
+        """
+        return self._source_started_s
+
+    @property
     def source(self) -> SignalSource:
         """Fuente subyacente, de solo lectura.
 
@@ -192,6 +204,7 @@ class EcgEngine:
             or dict(self._params.rhythm) != previous_rhythm
         ):
             self._source = self._build_source()
+            self._source_started_s = self.t_s
             return
         # La misma regla que al construir: un ritmo con mandos propios no
         # recibe la frecuencia de mando. Sin esta condición, el `heart_rate_hz`
@@ -214,6 +227,7 @@ class EcgEngine:
         """
         self._sample_index = 0
         self._source = self._build_source()
+        self._source_started_s = 0.0
 
     def generate(self, n_samples: int) -> np.ndarray:
         """Genera el siguiente bloque de señal y avanza el reloj."""

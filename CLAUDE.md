@@ -45,6 +45,8 @@ Reglas que no se deducen leyendo el código y que, si se rompen, rompen algo.
 
 **Añadir una molécula es añadir un YAML** en `packages/pharmacology-engine/src/pharmacology_engine/catalog/data/`. Si alguna vez obliga a tocar código fuera de ahí, la arquitectura ha fallado.
 
+**El fármaco entra por el mando que le toca.** En los ritmos con mandos propios lo declara `RHYTHM_DRIVES`: la sinusal mueve la aurícula de un bloqueo completo, la automaticidad los focos (escape, taquicardia ventricular) y la conducción AV el grado de bloqueo del flutter; un paciente inventado responde igual, con su aurícula, su escape y su bloqueo. El efecto va en escalones del 5 % porque cada cambio de mando reconstruye la fuente, y el pulso que se publica es el que genera el motor, no el que calcula la farmacología.
+
 **La hemodinámica pasa por `circulation_adjusted`** antes de publicarse, que la corrige con el perfil mecánico del ritmo: sin sístole ventricular no hay tensión, ni gasto, ni respiración, por mucho que la farmacología sepa calcularlas.
 
 **La fisiología vive en `MechanicalProfile`**, no en el cliente. Los instantes del ciclo los manda el servidor —cuatro por sístole para las válvulas, no dos, porque entre el cierre auriculoventricular y la apertura de las sigmoideas hay contracción y relajación isovolumétricas—; del cliente es solo cómo transcurre el viaje entre esos instantes. La patada auricular es la sístole auricular leída de la misma línea temporal, así que una fibrilación auricular se lleva la onda A por delante sin ningún caso especial.

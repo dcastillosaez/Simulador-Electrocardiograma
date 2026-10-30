@@ -240,6 +240,23 @@ def av_relationship(
     return f"{ratio.numerator}:{ratio.denominator}"
 
 
+def _rate_hz(times_s: np.ndarray, duration_s: float) -> float:
+    """Frecuencia a partir del intervalo medio entre eventos.
+
+    Contar eventos y dividir por la ventana solo da múltiplos de una décima
+    de hercio en diez segundos: un sinusal a 70 salía 66 o 72 según cuántos
+    latidos cayeran dentro, al lado de un RR de 861 ms que dice 69,7, y un
+    escape a 35 alternaba entre 30 y 36. Con dos eventos ya hay un intervalo
+    y la cifra es la del ritmo. El recuento queda para un único evento,
+    donde no hay intervalo que medir.
+    """
+    if times_s.size >= 2:
+        return 1.0 / float(np.diff(times_s).mean())
+    if times_s.size == 1:
+        return 1.0 / duration_s
+    return math.nan
+
+
 def measure(
     events: Sequence[CardiacEvent],
     signal_v: np.ndarray,
@@ -263,13 +280,9 @@ def measure(
     ventricular = _event_times(events, EventKind.VENTRICULAR)
 
     duration_s = signal_v.shape[1] / float(sample_rate_hz)
-    ventricular_rate_hz = (
-        float(ventricular.size) / duration_s if ventricular.size else math.nan
-    )
+    ventricular_rate_hz = _rate_hz(ventricular, duration_s)
     atrial_rate_hz = (
-        float(atrial.size) / duration_s
-        if atrial_rate_is_measurable and atrial.size
-        else math.nan
+        _rate_hz(atrial, duration_s) if atrial_rate_is_measurable else math.nan
     )
 
     rr = np.diff(ventricular) if ventricular.size > 1 else np.array([])

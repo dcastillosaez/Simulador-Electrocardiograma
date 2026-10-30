@@ -41,7 +41,7 @@ from ..schemas import (
     stopped_message,
     updated_message,
 )
-from ..simulation import SimulationManager
+from ..simulation import SimulationManager, ensure_rhythm_exists
 from ..streaming import (
     stream_cardiac,
     stream_chunks,
@@ -130,6 +130,18 @@ def _on_background_task_done(
     exc = task.exception()
     if exc is None:
         return
+    if isinstance(exc, WebSocketDisconnect):
+        # El cliente se fue mientras una tarea de fondo le estaba enviando:
+        # Starlette convierte el envío sobre un socket ya cortado en
+        # `WebSocketDisconnect(1006)`. Es una desconexión, no un fallo del
+        # motor, y tratarla como tal llenaba el log de trazas con una
+        # referencia de error que nadie había visto. El bucle principal
+        # recibe la misma desconexión y cierra la sesión por su cuenta.
+        logger.info(
+            "el cliente se desconectó durante el envío: session_id=%s",
+            manager.session_id,
+        )
+        return
     reference = _log_engine_failure(manager, exc)
     # Se guarda la referencia en `close_tasks` (y se espera en el `finally`
     # del handler): una tarea de `asyncio.create_task` sin referencia fuerte
@@ -201,14 +213,26 @@ async def simulation_ws(websocket: WebSocket) -> None:
     # El token del modo escritorio viaja como subprotocolo: el navegador no
     # deja poner cabeceras en `new WebSocket(url)`, y en la query string
     # acabaría en los logs. En servidor no hay token y esto no hace nada.
+    #
+    # El subprotocolo aceptado hay que devolverlo en la respuesta: un
+    # navegador que ofrece uno y no recibe ninguno de vuelta aborta el
+    # handshake ("Sent non-empty 'Sec-WebSocket-Protocol' header but no
+    # response was received"), así que validar el token y aceptar sin él
+    # dejaba la ventana del escritorio sin conexión.
+    subprotocol: str | None = None
     if settings.desktop_token:
-        presentado = next(
+        subprotocol = next(
             (
-                p.removeprefix(TOKEN_SUBPROTOCOL_PREFIX)
+                p
                 for p in websocket.scope.get("subprotocols", [])
                 if p.startswith(TOKEN_SUBPROTOCOL_PREFIX)
             ),
             None,
+        )
+        presentado = (
+            subprotocol.removeprefix(TOKEN_SUBPROTOCOL_PREFIX)
+            if subprotocol is not None
+            else None
         )
         if not token_matches(settings.desktop_token, presentado):
             logger.warning("handshake rechazado: token ausente o incorrecto")
@@ -230,13 +254,15 @@ async def simulation_ws(websocket: WebSocket) -> None:
         return
 
     try:
-        await _run_session(websocket, settings, session_factory)
+        await _run_session(websocket, settings, session_factory, subprotocol)
     finally:
         limiter.release(client)
 
 
-async def _run_session(websocket: WebSocket, settings, session_factory) -> None:
-    await websocket.accept()
+async def _run_session(
+    websocket: WebSocket, settings, session_factory, subprotocol: str | None = None
+) -> None:
+    await websocket.accept(subprotocol=subprotocol)
 
     manager = SimulationManager()
     outbox = FrameOutbox(maxsize=OUTBOX_MAXSIZE)
@@ -330,6 +356,18 @@ async def _run_session(websocket: WebSocket, settings, session_factory) -> None:
                 continue
 
             if isinstance(message, StartMessage):
+                # El ritmo se comprueba antes de tocar la sesión en marcha. Un
+                # `start` con un ritmo inexistente paraba las tareas de fondo
+                # y persistía la sesión saliente, y solo entonces fallaba:
+                # quedaba un `session_id` vivo sin streaming que aceptaba
+                # `update` y `pause`, y el `finally` la volvía a persistir.
+                try:
+                    ensure_rhythm_exists(message.rhythm_id)
+                except SimulationError as exc:
+                    await websocket.send_json(
+                        error_message(code=exc.code, detail=str(exc))
+                    )
+                    continue
                 if manager.session_id is not None:
                     # Un `start` sobre un socket con una sesión ya activa
                     # reemplaza esa sesión. Sin este bloque, el par de tareas
@@ -339,14 +377,13 @@ async def _run_session(websocket: WebSocket, settings, session_factory) -> None:
                     # sesión saliente, aunque cumpliera el umbral de
                     # persistencia, se pierde en silencio en cuanto
                     # `manager.start` reinicie el motor y sobrescriba
-                    # `session_id`. Se para, se persiste si corresponde, y
-                    # se libera `persisted` para el ciclo de vida de la
-                    # sesión nueva.
+                    # `session_id`. Se para y se persiste si corresponde;
+                    # `persisted` se libera más abajo, cuando la sesión nueva
+                    # ya ha arrancado.
                     await _stop_background_tasks(background_tasks)
                     background_tasks = []
                     outbox.clear()
                     await _maybe_persist()
-                    persisted = False
 
                 try:
                     session_id = manager.start(
@@ -369,6 +406,9 @@ async def _run_session(websocket: WebSocket, settings, session_factory) -> None:
                         error_message(code=exc.code, detail=str(exc))
                     )
                     continue
+                # Solo con la sesión nueva ya en pie: liberarlo antes dejaba
+                # que un arranque fallido volviera a persistir la saliente.
+                persisted = False
                 await websocket.send_json(
                     started_message(
                         session_id=session_id,

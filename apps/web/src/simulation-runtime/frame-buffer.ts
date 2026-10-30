@@ -113,6 +113,11 @@ export class FrameBuffer {
       // realidad falta señal (spec §4: nunca interpolar).
       if (discardedAny) {
         this.entries[0].gapBefore = true;
+        // Lo reproducido a medias era del trozo que se acaba de tirar. Dejarlo
+        // aplicado al nuevo de cabeza adelantaba la cabeza de reproducción
+        // —el reloj del corazón 3D— hasta 100 ms respecto al trazado, y
+        // consumía antes de tiempo el primer trozo superviviente.
+        this.pendingS = 0;
       }
     }
     if (!this.preRolled && buffered >= this.targetS) {

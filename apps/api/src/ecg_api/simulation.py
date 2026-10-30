@@ -28,7 +28,25 @@ from .measuring import MeasurementWindow, measurements_payload
 from .pharmacology import PatientVitals, PharmacologySession
 
 CHUNK_SAMPLES = 50  # 100 ms a 500 Hz — la cadencia de streaming del diseño
+
+#: Señal mínima que se acumula tras reconstruir la fuente antes de volver a
+#: publicar medidas. Mientras tanto el inspector conserva las anteriores, que
+#: son las del trazado que todavía está en pantalla.
+MEASUREMENT_SETTLE_S = 3.0
 _SEED_UPPER_BOUND = 2**31
+
+
+def ensure_rhythm_exists(rhythm_id: str) -> None:
+    """Lanza `RhythmNotFoundError` si el catálogo no tiene ese ritmo.
+
+    Existe para poder rechazar un `start` **antes** de desmontar la sesión
+    que haya en marcha: fallar después dejaba el socket con una sesión sin
+    streaming que seguía aceptando órdenes.
+    """
+    try:
+        get_rhythm(rhythm_id)
+    except KeyError as exc:
+        raise RhythmNotFoundError(str(exc)) from exc
 
 
 class SimulationState(str, Enum):
@@ -52,6 +70,9 @@ class SimulationManager:
         self._engine: EcgEngine | None = None
         self._sequence_number: int = 0
         self._window: MeasurementWindow | None = None
+        # Desde cuándo genera la fuente cuya señal hay en la ventana. Ver
+        # `next_chunk`.
+        self._measured_source_s: float = 0.0
         # Hasta dónde se han publicado ya contracciones. Es una marca de
         # agua, no un reloj: lo que ya salió no vuelve a salir.
         self._cardiac_published_until_s: float = 0.0
@@ -89,6 +110,7 @@ class SimulationManager:
         # nuevo, y medir a caballo entre dos ritmos promediaria dos
         # fisiologias distintas.
         self._window = MeasurementWindow(self._engine.sample_rate_hz)
+        self._measured_source_s = self._engine.source_started_s
         # Marca de agua nueva: un ritmo nuevo arranca en t=0, y conservar la
         # del ritmo anterior se comería sus primeros latidos.
         self._cardiac_published_until_s = 0.0
@@ -102,7 +124,7 @@ class SimulationManager:
         # constantes de un paciente que camina.
         self._vitals = vitals
         self._pharmacology = PharmacologySession(
-            self._command_params, self._profile(), vitals
+            self._command_params, self._profile(), vitals, rhythm_id=self.rhythm_id
         )
         self.state = SimulationState.RUNNING
         return self.session_id
@@ -160,7 +182,9 @@ class SimulationManager:
         # Las constantes de un paciente inventado se editan en caliente igual
         # que sus intervalos: mover su tensión basal tiene que llegar al panel
         # sin reiniciar la sesión.
-        self.pharmacology.rebase(self._command_params, self._vitals)
+        self.pharmacology.rebase(
+            self._command_params, self._vitals, self._profile()
+        )
         # Reaplicar de inmediato: sin esto, un `update` con fármacos a bordo
         # dejaría el motor generando con la frecuencia de mando pelada hasta
         # el siguiente chunk, y se vería un salto en el trazado.
@@ -211,7 +235,10 @@ class SimulationManager:
     def pharmacology_payload(self) -> dict | None:
         if self._pharmacology is None:
             return None
-        return self._pharmacology.payload(self.duration_s)
+        return self._pharmacology.payload(
+            self.duration_s,
+            engine_params=self._engine.params if self._engine is not None else None,
+        )
 
     def pause(self) -> None:
         self.state = SimulationState.PAUSED
@@ -235,6 +262,15 @@ class SimulationManager:
         t_start_s = self._engine.t_s
         channels_v = self._engine.generate(CHUNK_SAMPLES)
         assert self._window is not None
+        # Una fuente reconstruida —el paciente editado, un mando movido, un
+        # fármaco que cambia el grado de bloqueo— vuelve a describir el ritmo
+        # desde cero, y sus eventos ya no son los de la señal que generó la
+        # anterior. Medir la ventana entera con ellos publicaba al instante la
+        # especificación nueva —un PR de 280 a los 100 ms— sobre diez segundos
+        # de trazado que aún tenían 160. La ventana empieza de nuevo.
+        if self._engine.source_started_s != self._measured_source_s:
+            self._window.reset()
+            self._measured_source_s = self._engine.source_started_s
         self._window.append(channels_v)
         chunk = Chunk(
             sequence_number=self._sequence_number,
@@ -255,6 +291,14 @@ class SimulationManager:
         fibrilacion se generan, pero no se miden).
         """
         if self._engine is None or self._window is None:
+            return None
+        # Tras una reconstrucción se deja acumular señal antes de medir: con
+        # unos pocos cientos de milisegundos no hay latidos y todo saldría
+        # vacío. Al arrancar la sesión no se espera, como hasta ahora.
+        if (
+            self._measured_source_s > 0.0
+            and self._window.duration_s < MEASUREMENT_SETTLE_S
+        ):
             return None
         definition = get_rhythm(self.rhythm_id)
         return measurements_payload(
@@ -314,6 +358,7 @@ class SimulationManager:
             rr_s=rr_s,
             t_start_s=t_start_s,
             t_end_s=t_end_s,
+            source_started_s=self._engine.source_started_s,
         )
 
     def heart_state(self) -> dict | None:

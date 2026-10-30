@@ -30,6 +30,7 @@ def cardiac_events_payload(
     rr_s: float,
     t_start_s: float,
     t_end_s: float,
+    source_started_s: float = 0.0,
 ) -> dict[str, Any]:
     """Compone el mensaje de contracciones para la ventana dada.
 
@@ -43,6 +44,14 @@ def cardiac_events_payload(
         "type": "cardiac_events",
         "t_start_s": round(t_start_s, 3),
         "t_end_s": round(t_end_s, 3),
+        # La época de la fuente que numeró estos eventos. Una fuente
+        # reconstruida —el paciente editado, un mando, un fármaco— vuelve a
+        # contar los latidos desde 0, y el cliente, que deduplica por índice,
+        # descartaba todos los de un ritmo más lento como ya vistos: el
+        # corazón se quedaba quieto hasta que los índices nuevos alcanzaban a
+        # los viejos. Con la época, el mismo índice de otra fuente es otro
+        # latido.
+        "source_started_s": round(source_started_s, 3),
         "events": [event.as_payload() for event in mechanical],
         "valves": [
             valve.as_payload() for valve in derive_valve_events(mechanical, profile)

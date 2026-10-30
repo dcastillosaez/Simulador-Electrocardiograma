@@ -269,3 +269,19 @@ describe("ValveTimeline", () => {
     expect(timeline.size).toBe(1);
   });
 });
+
+describe("ValveTimeline tras reconstruir la fuente", () => {
+  it("acepta el ciclo de una fuente nueva aunque repita índice", () => {
+    const valves = new ValveTimeline();
+    valves.push([cycle(1.0, 3)], 0);
+    valves.push([cycle(5.0, 3)], 4);
+    expect(valves.size).toBe(2);
+  });
+
+  it("sigue descartando el mismo ciclo de la misma fuente", () => {
+    const valves = new ValveTimeline();
+    valves.push([cycle(1.0, 3)], 4);
+    valves.push([cycle(1.0, 3)], 4);
+    expect(valves.size).toBe(1);
+  });
+});

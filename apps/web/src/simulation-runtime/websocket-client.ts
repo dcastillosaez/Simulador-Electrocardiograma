@@ -75,6 +75,11 @@ export class WebSocketClient {
     this.socket = socket;
   }
 
+  /** `true` solo con el socket abierto: ni mientras conecta ni ya cerrado. */
+  get isOpen(): boolean {
+    return this.socket !== null && this.socket.readyState === 1;
+  }
+
   sendJson(message: unknown): void {
     if (!this.socket || this.socket.readyState !== 1 /* WebSocket.OPEN */) {
       throw new Error("WebSocketClient: intento de enviar sin conexión abierta");

@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 import pytest
 
@@ -111,3 +112,31 @@ async def test_an_empty_window_publishes_nothing_instead_of_crashing():
     published = await _collect_measurements(manager, n_iterations=3)
 
     assert published == []
+
+
+async def test_a_stalled_loop_does_not_burst_to_catch_up():
+    """Un parón del proceso (un portátil suspendido) no se recupera de golpe.
+
+    Antes, el bucle encadenaba los tics sobre el anterior sin tope: al
+    despertar generaba todos los chunks atrasados seguidos y el reloj de
+    simulación saltaba el tiempo del parón entero.
+    """
+    interval_s = 0.01
+    manager = SimulationManager()
+    manager.start("sinus_normal", None, 1)
+    outbox = FrameOutbox(maxsize=1000)
+    task = asyncio.create_task(
+        stream_chunks(manager, outbox, sample_rate_hz=500, interval_s=interval_s)
+    )
+    await asyncio.sleep(interval_s * 3)
+    before = manager._sequence_number
+
+    time.sleep(interval_s * 40)  # noqa: ASYNC251 — bloquear el bucle es el parón
+    await asyncio.sleep(interval_s * 3)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    produced_after_stall = manager._sequence_number - before
+    # Sin el tope serían ~43: los 40 atrasados más los 3 de después.
+    assert produced_after_stall <= 10

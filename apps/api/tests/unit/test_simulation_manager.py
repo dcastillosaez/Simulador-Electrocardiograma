@@ -4,7 +4,7 @@ import pytest
 
 from ecg_api.errors import RhythmNotFoundError
 from ecg_api.simulation import CHUNK_SAMPLES, SimulationManager, SimulationState
-from ecg_engine import EngineParams
+from ecg_engine import EngineParams, PatientSpec
 from ecg_engine.types import N_LEADS
 
 
@@ -151,3 +151,62 @@ def test_the_pulse_of_a_complete_block_is_its_escape() -> None:
     # Publicar aquí los 90 de la aurícula sería anunciar la frecuencia de unas
     # cámaras que no conducen para un paciente cuyo pulso es 30.
     assert manager.params.heart_rate_hz * 60 == pytest.approx(30.0, rel=0.01)
+
+
+# --- medidas tras reconstruir la fuente -------------------------------------
+#
+# Editar el paciente o mover un mando reconstruye la fuente, y la nueva
+# describe el ritmo desde cero. Medir la ventana entera con sus eventos
+# publicaba la especificación nueva al instante sobre diez segundos de
+# trazado que aún eran la anterior.
+
+
+def _custom(pr_ms: float) -> EngineParams:
+    return EngineParams(patient=PatientSpec(pr_ms=pr_ms))
+
+
+def test_after_a_rebuild_the_previous_measurements_hold_while_signal_builds_up():
+    m = SimulationManager()
+    m.start("custom_patient", _custom(160.0), seed=7)
+    _advance(m, 12.0)
+    assert m.measurements()["values"]["pr_ms"] == pytest.approx(160.0)
+
+    m.update(_custom(280.0))
+    _advance(m, 0.1)
+    # Nada nuevo que publicar: el cliente conserva el PR de 160, que es el
+    # del trazado que sigue en pantalla.
+    assert m.measurements() is None
+
+
+def test_after_a_rebuild_only_the_new_signal_is_measured():
+    m = SimulationManager()
+    m.start("custom_patient", _custom(160.0), seed=7)
+    _advance(m, 12.0)
+    m.update(_custom(280.0))
+    _advance(m, 5.0)
+
+    payload = m.measurements()
+    assert payload is not None
+    assert payload["window_s"] == pytest.approx(5.0)
+    assert payload["values"]["pr_ms"] == pytest.approx(280.0)
+
+
+def test_without_a_rebuild_measurements_start_right_away():
+    m = SimulationManager()
+    m.start("sinus_normal", None, seed=7)
+    _advance(m, 0.1)
+    assert m.measurements() is not None
+
+
+def test_cardiac_events_carry_the_epoch_of_the_source_that_numbered_them():
+    """Una fuente reconstruida vuelve a contar los latidos desde 0. Sin la
+    época, el cliente —que deduplica por índice— descartaba como ya vistos
+    todos los de un ritmo más lento y el corazón 3D dejaba de latir."""
+    m = SimulationManager()
+    m.start("custom_patient", _custom(160.0), seed=7)
+    _advance(m, 2.0)
+    assert m.cardiac_events()["source_started_s"] == 0.0
+
+    m.update(_custom(280.0))
+    _advance(m, 2.0)
+    assert m.cardiac_events()["source_started_s"] == pytest.approx(2.0)

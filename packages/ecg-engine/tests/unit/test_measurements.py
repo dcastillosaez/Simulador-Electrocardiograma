@@ -301,3 +301,35 @@ class TestAvRelationship:
         """Una proporción que no cae cerca de ninguna fracción sencilla se
         declara variable en vez de inventar un 47:31."""
         assert av_relationship([], 7.31, 1.0) == VARIABLE
+
+
+@pytest.mark.parametrize("bpm", [35.0, 48.0, 70.0, 75.0])
+def test_rate_comes_from_the_interval_not_from_counting_the_window(bpm):
+    """Contar latidos en diez segundos solo da múltiplos de 6 lpm: un sinusal
+    a 70 salía 66 o 72 junto a un RR que decía 69,7, y un escape a 35
+    alternaba entre 30 y 36. La frecuencia tiene que ser la del intervalo."""
+    rr_s = 60.0 / bpm
+    beats = int(10.0 / rr_s) + 1
+    events = [
+        CardiacEvent(kind=kind, t_s=0.3 + i * rr_s, template_id=template, index=i)
+        for i in range(beats)
+        if 0.3 + i * rr_s < 10.0
+        for kind, template in (
+            (EventKind.ATRIAL, "sinus_p"),
+            (EventKind.VENTRICULAR, "normal_qrst"),
+        )
+    ]
+    result = measure(events, np.zeros((N_LEADS, 5000)), 500)
+    assert result.ventricular_rate_hz * 60.0 == pytest.approx(bpm)
+    assert result.atrial_rate_hz * 60.0 == pytest.approx(bpm)
+
+
+def test_a_single_beat_still_gives_a_rate():
+    """Con un solo latido no hay intervalo: queda el recuento."""
+    events = [
+        CardiacEvent(
+            kind=EventKind.VENTRICULAR, t_s=1.0, template_id="normal_qrst", index=0
+        )
+    ]
+    result = measure(events, np.zeros((N_LEADS, 5000)), 500)
+    assert result.ventricular_rate_hz == pytest.approx(0.1)

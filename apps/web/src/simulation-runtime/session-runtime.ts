@@ -51,6 +51,8 @@ export class SessionRuntime extends TypedEventEmitter<SessionRuntimeEvents> {
   private readonly ws: WebSocketClient;
   private lastSequenceNumber: number | null = null;
   private lastSessionId: string | null = null;
+  /** Un `start` pedido sin conexión abierta, a la espera de que abra. */
+  private pendingStart: ClientMessage | null = null;
 
   constructor(
     wsUrl: string,
@@ -63,6 +65,9 @@ export class SessionRuntime extends TypedEventEmitter<SessionRuntimeEvents> {
     this.ws.onOpen = () => {
       this.state = "connected";
       this.emit("connected", {});
+      const pending = this.pendingStart;
+      this.pendingStart = null;
+      if (pending) this.ws.sendJson(pending);
     };
     this.ws.onTextMessage = (raw) => {
       this.handleServerMessage(JSON.parse(raw) as ServerMessage);
@@ -70,6 +75,10 @@ export class SessionRuntime extends TypedEventEmitter<SessionRuntimeEvents> {
     this.ws.onBinaryMessage = (data) => this.handleFrame(data);
     this.ws.onClose = ({ code, reason }) => {
       this.state = "idle";
+      // Si la conexión que tenía que llevarlo no llegó a abrir, el `start`
+      // se descarta: el usuario lo repetirá, y reenviarlo solo en un intento
+      // posterior arrancaría un ritmo que ya nadie está mirando.
+      this.pendingStart = null;
       this.buffer.clear();
       this.lastSequenceNumber = null;
       this.lastSessionId = null;
@@ -97,11 +106,28 @@ export class SessionRuntime extends TypedEventEmitter<SessionRuntimeEvents> {
   }
 
   disconnect(): void {
+    this.pendingStart = null;
     this.ws.close();
   }
 
+  /** Arranca un ritmo, conectando antes si hace falta.
+   *
+   * El servidor cierra la conexión por inactividad, al fallar el motor o al
+   * reiniciarse, y antes nada la volvía a abrir: elegir un ritmo lanzaba un
+   * error sin capturar y la pantalla dejaba de responder hasta recargar. Se
+   * reconecta aquí, al pedirlo el usuario, y no en bucle al cerrarse: un
+   * reintento automático volvería a ocupar la plaza que el cierre por
+   * inactividad acababa de liberar. */
   start(rhythmId: string, params?: EngineParamsPayload, seed?: number): void {
-    this.send({ type: "start", rhythm_id: rhythmId, params, seed });
+    const message: ClientMessage = { type: "start", rhythm_id: rhythmId, params, seed };
+    if (this.ws.isOpen) {
+      this.ws.sendJson(message);
+      return;
+    }
+    this.pendingStart = message;
+    if (this.state !== "connecting") {
+      this.connect();
+    }
   }
 
   update(params: EngineParamsPayload): void {
@@ -138,7 +164,18 @@ export class SessionRuntime extends TypedEventEmitter<SessionRuntimeEvents> {
     });
   }
 
+  /** Sin conexión no hay sesión en el servidor a la que mandarle nada: el
+   * mensaje se descarta y se avisa, en vez de lanzar desde el manejador de
+   * un deslizador. */
   private send(message: ClientMessage): void {
+    if (!this.ws.isOpen) {
+      this.emit("error", {
+        type: "error",
+        code: "NOT_CONNECTED",
+        detail: "Sin conexión con el simulador. Pulsa «Reconectar» o elige un ritmo.",
+      });
+      return;
+    }
     this.ws.sendJson(message);
   }
 

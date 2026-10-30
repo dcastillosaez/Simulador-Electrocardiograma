@@ -6,7 +6,7 @@ import pytest
 
 from ecg_api.errors import InvalidParamsError
 from ecg_api.simulation import CHUNK_SAMPLES, SimulationManager
-from ecg_engine import EngineParams
+from ecg_engine import EngineParams, PatientSpec
 
 SAMPLES_PER_SECOND = 500
 
@@ -188,3 +188,163 @@ def test_un_ritmo_que_bombea_conserva_sus_constantes() -> None:
     assert physiology["systolic_bp_mmhg"] > 0.0
     assert physiology["respiratory_rate_bpm"] > 0.0
     assert physiology["cardiac_output_l_min"] > 0.0
+
+
+@pytest.mark.parametrize(
+    ("rhythm_id", "drug_id", "dose", "rhythm"),
+    [
+        (
+            "atrial_flutter",
+            "diltiazem",
+            20.0,
+            {"atrial_rate_hz": 250 / 60, "conduction_ratio": 4.0},
+        ),
+    ],
+)
+def test_un_farmaco_no_devuelve_el_ritmo_a_sus_valores_de_catalogo(
+    rhythm_id: str, drug_id: str, dose: float, rhythm: dict[str, float]
+) -> None:
+    """Con un fármaco activo, los mandos del ritmo siguen siendo los del
+    operador. Antes la proyección los perdía y el motor reconstruía la fuente
+    con los de catálogo: un flutter 4:1 a 250 saltaba a 2:1 a 300, y un
+    escape de 35 a 40, sin que nadie tocara un control."""
+    m = SimulationManager()
+    m.start(rhythm_id, EngineParams(rhythm=rhythm), seed=7)
+    pulse_before = m._engine.params.heart_rate_hz
+    m.administer(drug_id, dose, "IV")
+    # Pasado el inicio de acción de los dos: el diltiazem tarda en llegar.
+    _advance(m, 180.0)
+    assert not m.pharmacology._engine.effect_at(m.duration_s).is_neutral()
+    assert dict(m._engine.params.rhythm) == pytest.approx(rhythm)
+    assert m._engine.params.heart_rate_hz == pytest.approx(pulse_before)
+
+
+def test_un_paciente_inventado_que_entra_en_asistolia_publica_una_parada() -> None:
+    """Quitarle aurícula y escape en caliente lo deja sin latidos. El panel
+    tiene que decirlo igual que el 3D: el perfil mecánico se recalculaba al
+    arrancar y no al editar, y seguía publicando 120/75 sobre una asistolia."""
+    m = SimulationManager()
+    m.start("custom_patient", EngineParams(patient=PatientSpec()), seed=7)
+    assert m.pharmacology_payload()["physiology"]["systolic_bp_mmhg"] > 0.0
+
+    m.update(EngineParams(patient=PatientSpec(atrial_rate_bpm=0.0, escape_rate_bpm=0.0)))
+    physiology = m.pharmacology_payload()["physiology"]
+    assert physiology["systolic_bp_mmhg"] == 0.0
+    assert physiology["stroke_volume_ml"] == 0.0
+
+    # Y al devolverle el ritmo vuelve a bombear.
+    m.update(EngineParams(patient=PatientSpec()))
+    assert m.pharmacology_payload()["physiology"]["systolic_bp_mmhg"] > 0.0
+
+
+# --- los fármacos llegan a los ritmos con mandos propios -------------------
+#
+# En flutter, TV, bloqueo completo y paciente inventado el pulso lo calcula
+# el motor a partir de los mandos, así que un `heart_rate_hz` proyectado no
+# llegaba al trazado: el panel decía una frecuencia y el ECG otra. Cada efecto
+# entra ahora por el mando que le corresponde (`RHYTHM_DRIVES`).
+
+
+def _started(rhythm_id: str, params: EngineParams) -> SimulationManager:
+    m = SimulationManager()
+    m.start(rhythm_id, params, seed=7)
+    return m
+
+
+def _engine_bpm(m: SimulationManager, name: str) -> float:
+    return m._engine.params.rhythm[name] * 60.0
+
+
+def _published_matches_the_trace(m: SimulationManager) -> None:
+    physiology = m.pharmacology_payload()["physiology"]
+    assert physiology["heart_rate_bpm"] == pytest.approx(
+        m._engine.params.heart_rate_hz * 60.0
+    )
+
+
+def test_la_atropina_acelera_la_auricula_de_un_bloqueo_completo() -> None:
+    m = _started(
+        "av_block_third",
+        EngineParams(rhythm={"atrial_rate_hz": 75 / 60, "escape_rate_hz": 35 / 60}),
+    )
+    m.administer("atropine", 1.0, "IV")
+    _advance(m, 180.0)
+
+    assert _engine_bpm(m, "atrial_rate_hz") > 75.0
+    # El escape no sigue a la sinusal: el pulso es el escape, no la aurícula.
+    assert m._engine.params.heart_rate_hz * 60.0 < 50.0
+    physiology = m.pharmacology_payload()["physiology"]
+    assert physiology["sinus_rate_bpm"] == pytest.approx(
+        _engine_bpm(m, "atrial_rate_hz")
+    )
+    _published_matches_the_trace(m)
+
+
+def test_un_frenador_del_nodo_sube_el_grado_de_bloqueo_del_flutter() -> None:
+    m = _started(
+        "atrial_flutter",
+        EngineParams(rhythm={"atrial_rate_hz": 300 / 60, "conduction_ratio": 2}),
+    )
+    m.administer("diltiazem", 20.0, "IV")
+    _advance(m, 420.0)  # el pico del diltiazem
+
+    assert m._engine.params.rhythm["conduction_ratio"] == 3.0
+    assert _engine_bpm(m, "atrial_rate_hz") == pytest.approx(300.0)
+    assert m._engine.params.heart_rate_hz * 60.0 == pytest.approx(100.0)
+    _published_matches_the_trace(m)
+
+
+def test_un_antiarritmico_frena_el_foco_de_una_tv() -> None:
+    m = _started(
+        "ventricular_tachycardia",
+        EngineParams(rhythm={"ventricular_rate_hz": 180 / 60}),
+    )
+    m.administer("lidocaine", 100.0, "IV")
+    _advance(m, 180.0)
+
+    assert _engine_bpm(m, "ventricular_rate_hz") < 180.0
+    _published_matches_the_trace(m)
+
+
+def test_el_paciente_inventado_sigue_a_la_sinusal() -> None:
+    m = _started("custom_patient", EngineParams(patient=PatientSpec()))
+    m.administer("atropine", 1.0, "IV")
+    _advance(m, 180.0)
+
+    patient = m._engine.params.patient
+    assert patient is not None
+    assert patient.atrial_rate_bpm > PatientSpec().atrial_rate_bpm
+    _published_matches_the_trace(m)
+
+
+def test_un_farmaco_no_crea_una_auricula_que_el_paciente_no_tiene() -> None:
+    m = _started(
+        "custom_patient",
+        EngineParams(patient=PatientSpec(atrial_rate_bpm=0.0, escape_rate_bpm=40.0)),
+    )
+    m.administer("epinephrine", 1.0, "IV")
+    _advance(m, 180.0)
+
+    patient = m._engine.params.patient
+    assert patient is not None
+    assert patient.atrial_rate_bpm == 0.0
+    assert patient.escape_rate_bpm > 40.0
+
+
+def test_el_efecto_no_reconstruye_la_fuente_en_cada_chunk() -> None:
+    """Cada cambio de mando reconstruye la fuente. El efecto va en escalones
+    para que un fármaco atraviese unas pocas transiciones y no 1.800."""
+    m = _started(
+        "av_block_third",
+        EngineParams(rhythm={"atrial_rate_hz": 75 / 60, "escape_rate_hz": 35 / 60}),
+    )
+    m.administer("atropine", 1.0, "IV")
+    changes = 0
+    previous = dict(m._engine.params.rhythm)
+    for _ in range(int(180.0 * SAMPLES_PER_SECOND / CHUNK_SAMPLES)):
+        m.next_chunk()
+        current = dict(m._engine.params.rhythm)
+        changes += current != previous
+        previous = current
+    assert 0 < changes <= 20
+
