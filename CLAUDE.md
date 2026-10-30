@@ -1,32 +1,21 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Plataforma de simulación clínica de ECG. No es un dibujador de ondas: hay un motor fisiológico que genera la señal en las doce derivaciones, un motor de farmacología que modifica el estado del paciente, un corazón 3D que late con el mismo reloj que el trazado y una aplicación de escritorio que lo empaqueta todo.
 
-## Descripción
+**Uso previsto: docencia.** Si el producto se acerca a herramienta de apoyo clínico real, las implicaciones legales y regulatorias son otras. Mantener el posicionamiento como simulador formativo salvo decisión explícita en contra.
 
-Proyecto independiente dentro de `F:/Documentos/IA/Medicina/`, sin relación con los demás proyectos de esa carpeta (`Cuaderno_Residente/`, `Rotacion_Psiquiatria/`, `Estudio Insomnio/`, `Estudio_Sarampion/`). Ignora el `../CLAUDE.md` del directorio padre al trabajar aquí.
+## Dónde está la verdad
 
-**Alcance de análisis:** únicamente el contenido de `F:/Documentos/IA/Medicina/Simulador_Electrocardiograma/`.
+Este fichero son reglas, no estado. El estado y el porqué de cada decisión viven en:
 
-## Estilo de respuesta
+- `docs/fase-g/arquitectura.md` — el qué y el por qué de la aplicación de escritorio.
+- `docs/fase-g/plan-de-fases.md` — las ocho sub-fases, con criterios de aceptación comprobables.
+- `docs/fase-g/estado.md` — qué está hecho, qué falta y qué no puede hacerse sin comprar un certificado o levantar un servidor.
+- `docs/fase-d/valvulas.md` — el ciclo de las cuatro válvulas y cómo se sintetizaron las poses.
+- `docs/requisitos-del-sistema.md` y `docs/instalacion.md`.
+- `Instrucciones.md.txt` e `Instrucciones_Electrocardiograma.md` — el brief original, como contexto histórico.
 
-Respuestas cortas por consola: lo mínimo necesario para confirmar el resultado. Sin resúmenes largos, sin repetir lo ya dicho, sin narrar el proceso. Si el éxito es evidente por el resultado de la herramienta, basta una línea o nada. Prioriza minimizar el consumo de tokens.
-
-**Estado actual:** fase 1 implementada de extremo a extremo. `packages/ecg-engine/` genera los doce ritmos del MVP en las doce derivaciones, de forma determinista, con red de golden signals en tres niveles. `apps/api/` los sirve por WebSocket (frames binarios a 10Hz) y publica las medidas fisiológicas en JSON a 1Hz: las dos frecuencias —auricular y ventricular, que en medio catálogo no son la misma— con la relación de conducción entre ellas, más RR, PR, QRS, QT y QTc. `apps/web/` es el puesto de simulación clínica, con su propio sistema de diseño en `packages/ui-system/`.
-
-**Fase F (farmacología) implementada.** `packages/pharmacology-engine/` es un paquete independiente que **no importa nada de `ecg-engine`** —hay un test que lo verifica leyendo los imports de cada módulo—. Quince moléculas como YAML en `catalog/data/`, curvas concentración-tiempo, acumulación de dosis con techo e interacciones declarativas. Su única salida es `PhysiologyState`, y `apps/api/src/ecg_api/pharmacology/projection.py` es el **único** punto del sistema donde ese estado se traduce a `EngineParams`. El resto del estado fisiológico —PR, QRS, QT, conducción AV, contractilidad, presión, gasto— viaja por el canal JSON `pharmacology` a 1Hz, listo para el corazón 3D de la fase D. Lo que se publica pasa antes por `circulation_adjusted`, que corrige la hemodinámica con el perfil mecánico del ritmo: sin sístole ventricular no hay tensión, ni gasto, ni respiración, por mucho que la farmacología sepa calcularlas. Las administraciones se registran en `drug_administrations` y la sesión guarda la versión del motor farmacológico, que es lo que hace verificable un replay.
-
-Añadir una molécula es añadir un archivo YAML. Si alguna vez obliga a tocar código fuera de `catalog/data/`, la arquitectura ha fallado.
-
-**Válvulas.** Las cuatro se abren y se cierran con el ciclo cardíaco, y con el mismo reloj que dibuja el trazado. El servidor manda **cuatro** instantes por sístole (`packages/heart-engine/src/heart_engine/valves.py`) y no dos, porque las dos parejas no son la una el negativo de la otra: entre el cierre auriculoventricular y la apertura de las sigmoideas, y entre el cierre de estas y la reapertura de aquellas, hay dos intervalos cortos con las cuatro cerradas — la contracción y la relajación isovolumétricas. Los 50 y los 70 ms viven en `MechanicalProfile`, junto al resto del perfil mecánico del ritmo, porque son fisiología; lo que es del cliente es cómo transcurre el viaje entre esos instantes. Sin sístole organizada no hay ciclo, y sin ciclo el cliente deja las válvulas donde las deja la presión: auriculoventriculares abiertas, sigmoideas cerradas. La geometría son las once valvas de BodyParts3D sacadas a nodos propios, pero **ninguna de las dos poses del ciclo sale de la fuente**: BodyParts3D las modela entreabiertas, en una posición neutra por la que se veía pasar el 22% del orificio mitral con la válvula supuestamente cerrada. Las dos se sintetizan girando cada valva sobre su anillo, con el giro pesado por vértice para que valga cero en el anclaje —una valva está sujeta por la base y ahí no gira; girarla en bloque despegaba la inserción de la pared y la metía a través, y la sigmoidea pulmonar izquierda asomaba 3,8 mm por fuera del tronco—. Los ángulos no se escriben a mano: se buscan contra dos propiedades comprobables, que ninguna valva se vea desde fuera y que cerrada no deje pasar por el orificio. Lo de «desde fuera» ha fallado dos veces por preguntar lo que no era, y la segunda es la corrección de esta tanda: se medía contra **una sola piel** —que incluía el miocardio, apagado en la interfaz, así que una valva fuera del molde del ventrículo pasaba la prueba y al usuario se le veía asomar— y en **las dos poses extremas**, dando por bueno todo lo de en medio cuando la comba empuja la trayectoria justo hacia fuera de esa cuerda. Ahora son dos pieles —el órgano con miocardio y lo que se ve por defecto sin él— y siete puntos del recorrido, compuestos con la misma cuenta que hace la GPU: se valida lo que se ve, no lo que se exporta.
-
-**Abierta no es un estado.** Si el cliente se limitara a los cuatro instantes, la animación tendría dos estados y media vuelta del ciclo congelada en cada uno. Las auriculoventriculares dibujan la curva en M: pico de llenado rápido, caída al 35% en la diastasis y reapertura con la sístole auricular, más baja que la primera. Y cuándo ocurre esa reapertura no lo decide el cliente —**la patada auricular es la sístole auricular**, la misma que encoge las aurículas, leída de la misma línea temporal—, así que una fibrilación auricular se lleva la onda A por delante sin ningún caso especial. Las sigmoideas tampoco son un rectángulo: se van cerrando un cuarto conforme decelera la eyección. La base del `.glb` es la pose cerrada y van dos *morph targets*, la abierta y una comba: la GPU interpola en recta y la cuerda de un arco de cien grados se mete un 38% por dentro, así que sin ella el velo se acortaba a media apertura. Ver `docs/fase-d/valvulas.md`.
-
-**Ganancia estándar y reparto del área.** La escala del trazado la negocian las dos dimensiones, no solo el ancho: el papel encoge —milímetro más pequeño, cuadrícula igual de cuadrada, los mismos 250 mm a lo ancho— hasta que los 40 mm de tira a 10 mm/mV caben en el alto disponible, y solo cuando ni al mínimo de escala caben se baja la ganancia. Antes la escala salía del ancho a secas y el efecto era perverso: cuanto más ancha la ventana, más grande el milímetro y menos milivoltios por tira, así que la ganancia estándar quedaba descartada de oficio y el automático vivía en 5 mm/mV. Como consecuencia el ECG ya no ocupa todo el ancho, sino el que le pide el papel, y el corazón 3D se acopló a su derecha en lugar de a una banda apaisada debajo: el sobrante horizontal es su sitio, no una franja vacía. El reparto lo calcula `computeLayoutMetrics` (`ecgWidthPx`) y ya no hay divisor arrastrable. Y el sobrante creció al juntar las dos columnas de paneles en una: el inspector bajó al lado izquierdo, debajo del escenario, y los 280 px que ocupaba a la derecha son ahora del corazón —de 285 a 573 px de marco en una pantalla de 1920—. En esa columna manda el inspector: pide primero su alto natural y el escenario scrollea con lo que quede, porque los mandos del paciente se tocan una vez y las medidas se miran a cada latido. El tope no es una proporción sino el suelo del escenario —220 px—, y para que el inspector quepa entero en una pantalla de 900 se comprimió de 583 a 486 px: el nombre del ritmo salió de la rejilla de medidas (en media columna se partía en tres líneas; no es una medida, es la etiqueta de lo que se pidió) y el eje pasó a llevar la zona en el hueco de la unidad en vez de dentro del valor. Medido con los trece ritmos: el peor caso son 548 px, y el tope a 900 es 569. El corazón ocupa ese sobrante **entero**, alto incluido: el marco cuadrado que hubo primero lo fijaba el lado corto —258 px en una pantalla de 1600— y dejaba medio panel vacío encima mientras los rótulos de la escena se pisaban entre sí. Ahora los rótulos van en una rejilla con dos repartos, uno por encima y otro por debajo de los 520 px de marco (consulta de contenedor, no de ventana: lo que manda es lo que mide el marco), y el precio del marco alto —con `fov` vertical, un lienzo estrecho recorta el modelo por los costados— lo paga la cámara, que encuadra por el lado corto (`framingRadius`).
-
-**Mandos por ritmo.** Un ritmo con dos marcapasos no cabe en una sola frecuencia, así que tres del catálogo declaran los suyos en `rhythm_parameters` y el resto sigue manejándose con `heart_rate_hz`: el flutter tiene aurícula (100-350: el flutter típico gira entre 250 y 350, pero uno frenado por antiarrítmicos baja de ahí sin dejar de serlo) y grado de bloqueo (2:1 a 4:1), la taquicardia ventricular su foco (100-250) y el bloqueo completo su sinusal y su escape por separado. `heart_rate_hz` significa siempre lo mismo —el pulso ventricular— y en esos tres lo **calcula** el motor (`derived_rate_hz`) en vez de aceptarlo; por eso el acuse de arranque lo devuelve ya resuelto. Antes de esto los cuatro se declaraban de frecuencia fija y la interfaz mostraba «150 lpm (fija)»: cierto para el programa, falso para el paciente. La fibrilación ventricular sigue fija, que ahí sí es verdad clínica.
-
-**Paciente personalizado.** El catálogo tiene una decimotercera entrada, `custom_patient`, que no es un ritmo: es un hueco que rellena el usuario. Lo eléctrico —frecuencia auricular, conducción AV, intervalos, morfología— viaja como `PatientSpec` (`packages/ecg-engine/src/ecg_engine/patient.py`) dentro de `EngineParams`, y lo hemodinámico —tensión, respiración, volumen sistólico— alimenta el basal del motor farmacológico; la API es quien reparte las dos mitades. Los intervalos se cumplen: pedir un QRS de 140 ms produce una señal en la que `measure` mide 140. La plantilla de latido se reconstruye del propio `template_id`, que lleva la especificación escrita dentro (`custom_beat.py`), así que no hay registro global que crezca ni golden que pierda su significado. Los casos se guardan con nombre en `custom_patients` y se recargan desde el editor.
+Al cerrar una fase, el relato va a su `estado.md`. Aquí solo sube lo que se convierte en regla.
 
 ## Cómo arrancar
 
@@ -34,10 +23,11 @@ Añadir una molécula es añadir un archivo YAML. Si alguna vez obliga a tocar c
 arrancar.bat
 ```
 
-Levanta Postgres en Docker (abriendo Docker Desktop si hace falta), aplica migraciones, arranca API y frontend en ventanas separadas y abre el navegador. `parar.bat` detiene el contenedor de Postgres, que es lo único que queda en segundo plano al cerrar las ventanas.
+Levanta Postgres en Docker (abriendo Docker Desktop si hace falta), aplica migraciones, arranca API y frontend en ventanas separadas y abre el navegador. `parar.bat` detiene el contenedor, que es lo único que queda en segundo plano al cerrar las ventanas.
 
-- Frontend: `http://localhost:5600` — el 5173 por defecto de Vite cae en un rango que Windows reserva para sí en la máquina de desarrollo, así que `vite.config.ts` fija otro puerto.
-- API: `http://localhost:8200` — el 8000 tampoco sirve, y por el mismo motivo que el 5173: Windows reserva rangos enteros de puertos (Hyper-V y Docker los piden al arrancar) y el 7990-8089 cae dentro de uno. El síntoma no es "puerto ocupado" sino un error de permisos, `WinError 10013`. `arrancar.bat` comprueba que el puerto se pueda escuchar antes de levantar nada, y admite `set PUERTO_API=...` para cambiarlo. Los rangos reservados se ven con `netsh interface ipv4 show excludedportrange protocol=tcp`.
+Frontend en `http://localhost:5600`, API en `http://localhost:8200`. **No son los puertos por defecto, y es a propósito:** el 5173 de Vite y el rango 7990-8089 caen en bloques que Windows reserva para sí en la máquina de desarrollo (Hyper-V y Docker los piden al arrancar). El síntoma no es «puerto ocupado» sino `WinError 10013`, un error de permisos. `arrancar.bat` comprueba que el puerto se pueda escuchar antes de levantar nada y admite `set PUERTO_API=...`. Los rangos reservados se ven con `netsh interface ipv4 show excludedportrange protocol=tcp`.
+
+Escritorio (Tauri 2): `cd apps/desktop && npm run dev`, o `npm run build` para el instalador.
 
 Para ver lo que produce el motor sin montar nada más:
 
@@ -45,101 +35,32 @@ Para ver lo que produce el motor sin montar nada más:
 cd packages/ecg-engine && uv run --extra viz python tools/render_rhythms.py
 ```
 
-Escribe los doce trazados en formato de papel de ECG en `tools/output/`.
+Escribe los trazados en formato de papel de ECG en `tools/output/`.
 
-## Objetivo del producto
+## Invariantes
 
-Plataforma de simulación clínica de ECG (no un simple dibujador de ondas). Tres niveles de ambición, construidos por fases:
+Reglas que no se deducen leyendo el código y que, si se rompen, rompen algo.
 
-- **Nivel 1 — visualizador didáctico:** ECG en 1/3/6/12 derivaciones, pausa, velocidad, amplitud, calibración, filtro, ruido, FC.
-- **Nivel 2 — simulador clínico:** ritmos normales y patológicos, cambios dinámicos (isquemia, arritmias, bloqueos AV, extrasístoles, taquicardias, FV), transiciones temporales, respuesta a intervenciones.
-- **Nivel 3 — plataforma profesional (objetivo final):** editor de escenarios, evaluación automática del alumno, registro de sesiones, exportación de trazas, modo instructor, API para LMS/simuladores/laboratorios.
+**Farmacología aislada.** `packages/pharmacology-engine/` no importa nada de `ecg-engine`, y hay un test que lo verifica leyendo los imports de cada módulo. Su única salida es `PhysiologyState`, y `apps/api/src/ecg_api/pharmacology/projection.py` es el único punto del sistema donde ese estado se traduce a `EngineParams`. El resto del estado fisiológico viaja por el canal JSON `pharmacology` a 1 Hz.
 
-## Arquitectura (capas)
+**Añadir una molécula es añadir un YAML** en `packages/pharmacology-engine/src/pharmacology_engine/catalog/data/`. Si alguna vez obliga a tocar código fuera de ahí, la arquitectura ha fallado.
 
-1. **Motor fisiológico** — núcleo. Genera señal ECG y estado del paciente (ritmo base, morfología P-QRS-T, intervalos PR/QRS/QT/RR, ruido/artefactos/deriva). Debe ser agnóstico de interfaz: ejecutable en navegador, backend o tests.
-2. **Motor de escenarios** — narrativa clínica: líneas de tiempo, condiciones, eventos, disparadores por intervención, branching.
-3. **Motor de reglas** — decide cómo cambia el ECG según estado del paciente. Reglas declarativas, no `if/else` disperso (ej.: hiperpotasemia → ensancha QRS y aplana P).
-4. **Capa de visualización** — trazado a 60fps, zoom, grid clínico, selección de derivaciones, congelar pantalla, medición de intervalos, exportación PDF/imagen.
-5. **Capa de evaluación** — identificación de ritmo, tiempo de respuesta, intervención elegida, adherencia a protocolo, puntuación.
-6. **Persistencia e integración** — usuarios, sesiones, escenarios, resultados, biblioteca de casos, versiones de escenarios, telemetría.
+**La hemodinámica pasa por `circulation_adjusted`** antes de publicarse, que la corrige con el perfil mecánico del ritmo: sin sístole ventricular no hay tensión, ni gasto, ni respiración, por mucho que la farmacología sepa calcularlas.
 
-## Modelo de dominio
+**La fisiología vive en `MechanicalProfile`**, no en el cliente. Los instantes del ciclo los manda el servidor —cuatro por sístole para las válvulas, no dos, porque entre el cierre auriculoventricular y la apertura de las sigmoideas hay contracción y relajación isovolumétricas—; del cliente es solo cómo transcurre el viaje entre esos instantes. La patada auricular es la sístole auricular leída de la misma línea temporal, así que una fibrilación auricular se lleva la onda A por delante sin ningún caso especial.
 
-`Paciente` (edad, sexo, constantes, contexto clínico, comorbilidades) · `Estado fisiológico` (ritmo, conducción, repolarización, perfusión, oxigenación, electrolitos) · `Señal ECG` (derivaciones, amplitud, frecuencia, ruido, filtros) · `Escenario` (objetivos, pasos, eventos, criterios de éxito/fallo) · `Intervención` (fármaco, maniobra, desfibrilación, marcapasos, oxígeno) · `Observación` (hallazgos del usuario) · `Resultado` (aciertos, errores, tiempos, puntuación).
+**Las valvas se validan contra dos pieles** —el órgano con miocardio y lo que se ve por defecto sin él— y en **siete puntos del recorrido**, compuestos con la misma cuenta que hace la GPU. Validar contra una sola piel, o solo en las dos poses extremas, da por bueno lo que al usuario se le ve asomar: ha fallado así dos veces. Los ángulos no se escriben a mano, se buscan contra dos propiedades comprobables: que ninguna valva se vea desde fuera y que cerrada no deje pasar por el orificio.
 
-## Motor ECG — requisitos técnicos
+**La escala del trazado la negocian las dos dimensiones**, no solo el ancho. El papel encoge —milímetro más pequeño, cuadrícula igual de cuadrada, los mismos 250 mm a lo ancho— hasta que los 40 mm de tira a 10 mm/mV caben en el alto disponible, y solo si ni al mínimo de escala caben se baja la ganancia. Sacarla del ancho a secas descarta de oficio la ganancia estándar. El reparto lo calcula `computeLayoutMetrics` (`apps/web/src/render/layout-engine.ts`, campo `ecgWidthPx`), y el sobrante horizontal es del corazón 3D, no una franja vacía. En esa columna manda el inspector: pide primero su alto natural y el escenario scrollea con lo que quede, con suelo de 220 px.
 
-- **Morfología:** cada latido como suma de componentes (P, QRS, T, ST, PR, QT). Vía modelos paramétricos (gaussianas/spline), plantillas, síntesis por segmentos, o mezcla plantilla+perturbación.
-- **Variabilidad realista:** variabilidad RR, variación de amplitud entre derivaciones, artefacto de movimiento, ruido muscular, interferencia de red, deriva de línea base, filtro de monitor, saturación/clipping.
-- **Derivaciones:** 12 estándar + ritmo largo, con opción de ver 1/3/6.
-- **Dinámica temporal:** evolución segundo a segundo y minuto a minuto, con eventos gatillados por historia clínica.
+**Golden signals en tres niveles.** Si cambia la señal de un ritmo, es cambio intencional o es regresión. No hay tercera opción.
 
-## Catálogo de ritmos/patologías (biblioteca base)
+**El esquema de base de datos es portable.** Con `with_variant`, Postgres recibe `JSONB` y `UUID` nativos y SQLite `JSON` y `CHAR(32)`; los tests corren contra los dos (`ECG_TEST_DB=postgres|sqlite`). Y hay modo degradado: la aplicación arranca sin base de datos, `/api/health` lo declara en `persistence` y `/api/sessions` responde 503 con el motivo.
 
-Ritmo sinusal normal, taquicardia sinusal, bradicardia sinusal, FA, flutter auricular, TSV, TV, FV, bloqueo AV 1º/2º/3º, BRI/BCRD, IAM con elevación ST, pericarditis, hiperkalemia, hipokalemia, hipocalcemia, hipercalcemia, WPW, torsades.
+**La lógica clínica no vive en la UI.** Vive en especificaciones, tests, datasets y reglas versionadas. Los escenarios se diseñan como especificaciones declarativas —estado inicial, eventos, condiciones, transiciones, resultados esperados—, no como pantallas, y nada se simula con `if/else` disperso. Claude no es fuente de verdad clínica.
 
-## Fases de implementación
+## Catálogo
 
-- **Fase 1 (MVP):** 1 y 12 derivaciones, 10–15 ritmos comunes, controles velocidad/amplitud/ruido, motor simple de escenarios, almacenamiento básico de sesiones.
-- **Fase 2:** evolución temporal de patologías, respuesta a intervenciones, escenarios con decisiones, evaluación automática, modo instructor, biblioteca de casos.
-- **Fase 3:** editor visual de escenarios, plantillas, colaboración, permisos, analítica, exportaciones, integración LMS, autenticación robusta, auditoría.
-- **Fase 4:** pruebas con usuarios reales, validación con cardiólogos/docentes, ajuste fino de señal, benchmark de rendimiento, hardening de seguridad.
+Doce ritmos más `custom_patient`, que no es un ritmo sino un hueco que rellena el usuario: lo eléctrico viaja como `PatientSpec` (`packages/ecg-engine/src/ecg_engine/patient.py`) dentro de `EngineParams` y lo hemodinámico alimenta el basal del motor farmacológico; la API reparte las dos mitades. Los intervalos se cumplen: pedir un QRS de 140 ms produce una señal en la que `measure` mide 140. La plantilla de latido se reconstruye del propio `template_id`, que lleva la especificación escrita dentro (`custom_beat.py`), así que no hay registro global que crezca ni golden que pierda su significado.
 
-No mezclar fases: no meter todo en el MVP.
-
-## Stack recomendado
-
-- **Frontend:** React + TypeScript, Canvas o WebGL para el trazado, Zustand/Redux, Tailwind (o diseño propio si se necesita precisión visual alta).
-- **Backend:** Python + FastAPI (prioriza facilidad para motor/lógica) o Node.js/NestJS si el equipo es muy TS.
-- **Motor de simulación:** Python para prototipo/modelado; mover a Rust o librería optimizada si hace falta rendimiento.
-- **Base de datos:** PostgreSQL + Redis (sesiones tiempo real/caché); casos clínicos como JSON versionado.
-- **Infraestructura:** Docker, CI/CD, logs estructurados y métricas.
-
-## Estructura de repositorio objetivo
-
-```
-/ecg-simulator
-  /apps
-    /web
-    /api
-    /instructor-dashboard
-  /packages
-    /ecg-engine
-    /scenario-engine
-    /signal-models
-    /ui-components
-    /shared-types
-  /docs
-    /domain-model
-    /scenario-spec
-    /clinical-reference
-  /tests
-    /unit
-    /integration
-    /golden-signals
-```
-
-## Principios de diseño
-
-- Diseñar por **escenarios clínicos**, no por pantallas.
-- Escenarios como **especificaciones declarativas** (JSON/YAML o DSL propio): estado inicial, eventos, condiciones, transiciones, resultados esperados.
-- Validar contra **trazas de referencia** (intervalos, morfología, segmentación, apariencia visual).
-- Separar **realismo clínico** de **experiencia de usuario** (legible, rápido, entrenable, explicativo).
-- La lógica clínica vive en especificaciones/tests/datasets/reglas versionadas — nunca solo en el código de UI.
-
-## Testing (desde el día 1)
-
-Unitarias del motor de señal · reglas fisiológicas · escenarios · visuales con capturas de referencia · rendimiento · regresión de ritmos · evaluación del alumno. Usar **golden outputs**: la señal esperada de un escenario debe mantenerse estable entre versiones salvo cambio intencional.
-
-## Riesgos a evitar
-
-Construir solo la UI dejando el motor vacío · meter lógica clínica en componentes front-end · no versionar escenarios · no separar señal y presentación · simular todo con `if/else` · no validar con profesionales clínicos · subestimar ruido/artefactos · no diseñar desde el inicio para 12 derivaciones.
-
-## Aviso regulatorio
-
-Uso previsto: **docencia**. Si el producto se acerca a herramienta de apoyo clínico real, hay implicaciones legales/regulatorias distintas — mantener el posicionamiento como simulador formativo salvo decisión explícita en contra.
-
-## Cómo usar Claude en este proyecto
-
-Como arquitecto, generador de casos y copiloto de pruebas: especificaciones funcionales, modelos de dominio, escenarios clínicos, conversión de escenarios a JSON, tests unitarios, revisión de arquitectura, documentación de ritmos/criterios, UI de instructor/dashboard. **No** usar como fuente de verdad única de la lógica clínica — esa verdad vive en especificaciones, tests, datasets y reglas versionadas.
+`heart_rate_hz` significa siempre lo mismo, el pulso ventricular. Tres ritmos tienen dos marcapasos y no caben en una sola frecuencia, así que declaran los suyos en `rhythm_parameters` y el motor **calcula** el ventricular (`derived_rate_hz`) en vez de aceptarlo: el flutter (aurícula y grado de bloqueo), la taquicardia ventricular (su foco) y el bloqueo completo (sinusal y escape por separado). La fibrilación ventricular sí es de frecuencia fija, que ahí es verdad clínica.
