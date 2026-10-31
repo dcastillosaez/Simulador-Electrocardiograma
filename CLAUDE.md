@@ -12,6 +12,7 @@ Este fichero son reglas, no estado. El estado y el porqué de cada decisión viv
 - `docs/fase-g/plan-de-fases.md` — las ocho sub-fases, con criterios de aceptación comprobables.
 - `docs/fase-g/estado.md` — qué está hecho, qué falta y qué no puede hacerse sin comprar un certificado o levantar un servidor.
 - `docs/fase-d/valvulas.md` — el ciclo de las cuatro válvulas y cómo se sintetizaron las poses.
+- `docs/fase-h/propagacion-electrica.md` — especificación, aún sin implementar, de la propagación eléctrica en el corazón 3D.
 - `docs/requisitos-del-sistema.md` y `docs/instalacion.md`.
 - `Instrucciones.md.txt` e `Instrucciones_Electrocardiograma.md` — el brief original, como contexto histórico.
 
