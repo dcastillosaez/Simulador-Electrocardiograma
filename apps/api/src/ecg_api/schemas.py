@@ -279,11 +279,18 @@ class EngineParamsPayload(FinitePayload):
         )
 
 
-def engine_params_to_dict(params: EngineParams) -> dict:
+def engine_params_to_dict(
+    params: EngineParams, vitals: PatientVitals | None = None
+) -> dict:
     """El sentido inverso de `to_engine_params`, para mensajes salientes y
     para la columna `params` de la sesión persistida. Sin Pydantic de por
     medio: `EngineParams` y sus dataclasses anidadas ya son inmutables y
-    completas, no hace falta validarlas otra vez, solo volcarlas."""
+    completas, no hace falta validarlas otra vez, solo volcarlas.
+
+    Las constantes van dentro del paciente porque ahí las escribe el cliente.
+    Sin ellas, este eco era incompleto: la interfaz lo reenvía tal cual en el
+    siguiente `update`, así que mover el eje de un paciente con 80/50 lo
+    devolvía a 120/75, y la sesión guardada perdía sus constantes."""
     payload = {
         "heart_rate_hz": params.heart_rate_hz,
         "noise": asdict(params.noise),
@@ -299,6 +306,8 @@ def engine_params_to_dict(params: EngineParams) -> dict:
         # razón por la que la sesión guarda la versión del motor.
         patient = asdict(params.patient)
         patient["av_conduction"] = params.patient.av_conduction.value
+        if vitals is not None:
+            patient.update(asdict(vitals))
         payload["patient"] = patient
     return payload
 
@@ -405,6 +414,7 @@ def started_message(
     sample_rate_hz: int,
     channels: int,
     params: EngineParams,
+    vitals: PatientVitals | None = None,
 ) -> dict:
     """Acuse de arranque, con los parámetros que el motor acabó aplicando.
 
@@ -422,12 +432,14 @@ def started_message(
         "seed": seed,
         "sample_rate_hz": sample_rate_hz,
         "channels": channels,
-        "params": engine_params_to_dict(params),
+        "params": engine_params_to_dict(params, vitals),
     }
 
 
-def updated_message(*, params: EngineParams) -> dict:
-    return {"type": "updated", "params": engine_params_to_dict(params)}
+def updated_message(
+    *, params: EngineParams, vitals: PatientVitals | None = None
+) -> dict:
+    return {"type": "updated", "params": engine_params_to_dict(params, vitals)}
 
 
 def paused_message() -> dict:

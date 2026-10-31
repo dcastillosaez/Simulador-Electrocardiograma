@@ -416,6 +416,7 @@ async def _run_session(
                         sample_rate_hz=DEFAULT_SAMPLE_RATE_HZ,
                         channels=12,
                         params=manager.params,
+                        vitals=manager.vitals,
                     )
                 )
                 producer_task = asyncio.create_task(
@@ -471,7 +472,9 @@ async def _run_session(
                         else None
                     ),
                 )
-                await websocket.send_json(updated_message(params=applied))
+                await websocket.send_json(
+                    updated_message(params=applied, vitals=manager.vitals)
+                )
 
             elif isinstance(message, AdministerMessage):
                 if await _reject_if_no_active_session(websocket, manager):

@@ -6,7 +6,8 @@ import pytest
 
 from ecg_api.errors import InvalidParamsError
 from ecg_api.simulation import CHUNK_SAMPLES, SimulationManager
-from ecg_engine import EngineParams, PatientSpec
+from ecg_api.pharmacology import PatientVitals
+from ecg_engine import AvConduction, AxisParams, EngineParams, PatientSpec
 
 SAMPLES_PER_SECOND = 500
 
@@ -348,3 +349,89 @@ def test_el_efecto_no_reconstruye_la_fuente_en_cada_chunk() -> None:
         previous = current
     assert 0 < changes <= 20
 
+
+
+def _corre(manager: SimulationManager, segundos: float) -> None:
+    for _ in range(int(segundos * 500 / CHUNK_SAMPLES)):
+        manager.next_chunk()
+
+
+@pytest.mark.parametrize("bpm", [100, 125, 150, 180])
+def test_una_tv_esta_disociada_a_cualquier_frecuencia(bpm: int) -> None:
+    manager = SimulationManager()
+    manager.start(
+        "ventricular_tachycardia",
+        EngineParams(rhythm={"ventricular_rate_hz": bpm / 60}),
+        seed=1,
+    )
+    _corre(manager, 11.0)
+    assert manager.measurements()["av_relationship"] == "dissociated"
+
+
+def test_un_paciente_en_bloqueo_completo_no_publica_pr() -> None:
+    """Aunque las dos cámaras vayan al mismo paso: eso parece conducción y no
+    lo es, y quien lo sabe es la especificación."""
+    manager = SimulationManager()
+    manager.start(
+        "custom_patient",
+        EngineParams(
+            patient=PatientSpec(
+                atrial_rate_bpm=60,
+                av_conduction=AvConduction.COMPLETE_BLOCK,
+                escape_rate_bpm=60,
+            )
+        ),
+        seed=1,
+    )
+    _corre(manager, 11.0)
+    assert manager.measurements()["values"]["pr_ms"] is None
+
+
+def test_las_primeras_medidas_no_inventan_una_frecuencia() -> None:
+    manager = SimulationManager()
+    manager.start("sinus_normal", None, seed=1)
+    manager.next_chunk()
+    values = manager.measurements()["values"]
+    assert values["ventricular_rate_bpm"] is None
+    assert values["atrial_rate_bpm"] is None
+
+
+def test_un_farmaco_no_mueve_un_eje_extremo() -> None:
+    manager = SimulationManager()
+    manager.start(
+        "sinus_normal", EngineParams(axis=AxisParams(orientation_deg=-120.0)), seed=1
+    )
+    manager.administer("lidocaine", 100, "IV")
+    _corre(manager, 60.0)
+    assert manager.pharmacology.has_administrations
+    assert manager._engine.params.axis.orientation_deg == -120.0
+
+
+def test_las_constantes_del_editor_llegan_tal_cual_al_panel() -> None:
+    manager = SimulationManager()
+    manager.start(
+        "custom_patient",
+        EngineParams(patient=PatientSpec()),
+        seed=1,
+        vitals=PatientVitals(30.0, 20.0, 0.0, 200.0),
+    )
+    physiology = manager.pharmacology_payload()["physiology"]
+    assert physiology["systolic_bp_mmhg"] == 30.0
+    assert physiology["respiratory_rate_bpm"] == 0.0
+    assert physiology["stroke_volume_ml"] == 200.0
+
+
+def test_el_pulso_de_un_mobitz_es_el_conducido() -> None:
+    """Una de cada cuatro P no conduce, y eso tiene que notarse en el gasto."""
+    manager = SimulationManager()
+    manager.start("av_block_second_mobitz_i", None, seed=1)
+    physiology = manager.pharmacology_payload()["physiology"]
+    assert physiology["heart_rate_bpm"] == pytest.approx(56.25)
+    assert physiology["cardiac_output_l_min"] == pytest.approx(56.25 * 70 / 1000, abs=1e-2)
+    assert manager.heart_state()["values"]["heart_rate_bpm"] == pytest.approx(56.25)
+
+
+def test_un_ritmo_sin_latidos_perdidos_publica_su_mando() -> None:
+    manager = SimulationManager()
+    manager.start("sinus_normal", EngineParams(heart_rate_hz=80 / 60), seed=1)
+    assert manager.pharmacology_payload()["physiology"]["heart_rate_bpm"] == 80.0

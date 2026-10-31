@@ -52,6 +52,14 @@ las dos cámaras al mismo paso. Ahí el trazado es genuinamente ambiguo y un
 cardiólogo tampoco puede distinguirla de una conducción fija sin más datos.
 """
 
+MIN_SINGLE_BEAT_WINDOW_S: float = 3.0
+"""Ventana mínima para dar una frecuencia con un solo latido.
+
+Tres segundos son el RR del escape más lento que describe el catálogo, 20 lpm.
+Por debajo, un latido suelto no dice nada de la frecuencia: lo único que hay es
+que la ventana es corta.
+"""
+
 AV_RATIO_MAX_TERM: int = 6
 """Mayor número que puede aparecer a un lado de la relación.
 
@@ -198,6 +206,7 @@ def av_relationship(
     events: Sequence[CardiacEvent],
     atrial_rate_hz: float,
     ventricular_rate_hz: float,
+    dissociated: bool = False,
 ) -> str | None:
     """Cómo se relacionan las dos frecuencias, dicho como lo diría un informe.
 
@@ -217,6 +226,11 @@ def av_relationship(
     foco sin que ninguna gobierne a la otra, así que la disociación se
     comprueba antes, y sobre los eventos: es la dispersión de la distancia
     P-QRS la que lo dice.
+
+    `dissociated` lo aporta quien conoce la conducción, porque hay disociación
+    que los eventos no delatan: una TV a 150 sobre una aurícula a 75 repite la
+    distancia cada dos latidos, y sin este dato salía «1:2» en vez de
+    «disociada».
     """
     if (
         math.isnan(atrial_rate_hz)
@@ -226,6 +240,8 @@ def av_relationship(
     ):
         return None
 
+    if dissociated:
+        return DISSOCIATED
     atrial_times = _event_times(events, EventKind.ATRIAL)
     ventricular_times = _event_times(events, EventKind.VENTRICULAR)
     if _is_dissociated(_atrioventricular_intervals(atrial_times, ventricular_times)):
@@ -247,12 +263,13 @@ def _rate_hz(times_s: np.ndarray, duration_s: float) -> float:
     de hercio en diez segundos: un sinusal a 70 salía 66 o 72 según cuántos
     latidos cayeran dentro, al lado de un RR de 861 ms que dice 69,7, y un
     escape a 35 alternaba entre 30 y 36. Con dos eventos ya hay un intervalo
-    y la cifra es la del ritmo. El recuento queda para un único evento,
-    donde no hay intervalo que medir.
+    y la cifra es la del ritmo. El recuento queda para un único evento, donde
+    no hay intervalo que medir, y solo sobre una ventana que lo justifique:
+    un latido en los primeros 100 ms de una sesión no son 600 lpm.
     """
     if times_s.size >= 2:
         return 1.0 / float(np.diff(times_s).mean())
-    if times_s.size == 1:
+    if times_s.size == 1 and duration_s >= MIN_SINGLE_BEAT_WINDOW_S:
         return 1.0 / duration_s
     return math.nan
 

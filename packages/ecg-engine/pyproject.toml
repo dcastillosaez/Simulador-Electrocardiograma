@@ -1,6 +1,6 @@
 [project]
 name = "ecg-engine"
-version = "1.0.0"
+version = "1.0.1"
 description = "Motor fisiológico de generación de ECG"
 requires-python = ">=3.12"
 dependencies = ["numpy>=2.0"]

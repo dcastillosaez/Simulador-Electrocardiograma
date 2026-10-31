@@ -24,6 +24,7 @@ from .projection import (
     PatientVitals,
     baseline_from_params,
     circulation_adjusted,
+    engine_pulse_bpm,
     engine_sinus_bpm,
     project,
 )
@@ -152,7 +153,7 @@ class PharmacologySession:
             sinus = engine_sinus_bpm(engine_params, self._rhythm_id)
             state = replace(
                 state,
-                heart_rate_bpm=engine_params.heart_rate_hz * 60.0,
+                heart_rate_bpm=engine_pulse_bpm(engine_params, self._rhythm_id),
                 sinus_rate_bpm=state.sinus_rate_bpm if sinus is None else sinus,
             )
         state = circulation_adjusted(state, self._profile)

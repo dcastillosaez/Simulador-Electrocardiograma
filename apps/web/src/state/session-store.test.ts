@@ -107,6 +107,29 @@ describe("useSessionStore", () => {
     });
   });
 
+  it("al perder la conexion no quedan medidas ni farmacos de un paciente que ya no existe", () => {
+    const fake = new FakeWebSocket();
+    const runtime = new SessionRuntime("ws://test", () => fake as unknown as WebSocket);
+    useSessionStore.getState().attachRuntime(runtime);
+    useSessionStore.setState({
+      measurements: { pr_ms: 160 },
+      avRelationship: "1:1",
+      physiology: { systolic_bp_mmhg: 120 },
+      activeDrugs: [{ drug_id: "atropine" } as never],
+      interactions: [{ rule_id: "x" } as never],
+    });
+
+    runtime.emit("disconnected", { code: 1006, reason: "" });
+
+    const state = useSessionStore.getState();
+    expect(state.measurements).toBeNull();
+    expect(state.avRelationship).toBeNull();
+    expect(state.physiology).toBeNull();
+    expect(state.activeDrugs).toEqual([]);
+    expect(state.interactions).toEqual([]);
+    expect(state.lastDisconnect).toEqual({ code: 1006, reason: "" });
+  });
+
   it("attachRuntime devuelve detach: llamarlo dos veces sobre la misma instancia sin desuscribir duplicaria framesLost", () => {
     // Reproduce lo que hace React StrictMode en desarrollo: monta, limpia,
     // vuelve a montar el mismo efecto sobre la MISMA instancia de

@@ -32,13 +32,15 @@ from .types import (
 from .variability import amplitude_scale
 from .waveform import render_component
 
-RENDER_MARGIN_S: float = 0.6
+RENDER_MARGIN_S: float = 0.8
 """Margen temporal que el llamante debe añadir al pedir eventos.
 
-Una onda T se extiende hasta medio segundo después del pico de su R, así que
-un latido anterior a la ventana sigue contribuyendo dentro de ella. Quien
-llama a `render_events` debe pasar los eventos de `[t0 - margen, t1 + margen)`,
-o aparecerán discontinuidades en las fronteras de chunk.
+Una onda T se extiende hasta el final del QT, que en un paciente inventado
+llega a 700 ms, así que un latido anterior a la ventana sigue contribuyendo
+dentro de ella. Quien llama a `render_events` debe pasar los eventos de
+`[t0 - margen, t1 + margen)`, o aparecerán discontinuidades en las fronteras de
+chunk. Si los eventos se piden por la P, hay que sumar además el retardo de la
+conducción: ver `BeatBasedSource.render`.
 """
 
 

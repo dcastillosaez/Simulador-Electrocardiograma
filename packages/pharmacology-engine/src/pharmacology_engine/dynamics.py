@@ -97,7 +97,8 @@ def apply_effect(baseline: PhysiologyState, effect: DrugEffect) -> PhysiologySta
             oxygen_consumption=(
                 baseline.oxygen_consumption * effect.oxygen_consumption
             ),
-        )
+        ),
+        baseline,
     )
 
 

@@ -79,3 +79,29 @@ def test_el_resultado_siempre_esta_acotado() -> None:
 
 def test_no_divide_por_cero() -> None:
     assert apply_effect(BASE, DrugEffect(av_conduction=0.0)).pr_interval_ms > 0.0
+
+
+def test_un_farmaco_no_recorta_un_basal_fuera_de_los_limites() -> None:
+    """Los límites son hasta dónde empuja un fármaco, no lo que un paciente
+    inventado puede ser: una aurícula a 300 o un eje de -120 se quedan donde
+    estaban si el fármaco no los toca."""
+    baseline = PhysiologyState(
+        heart_rate_bpm=300.0,
+        sinus_rate_bpm=300.0,
+        axis_deg=-120.0,
+        systolic_bp_mmhg=30.0,
+        diastolic_bp_mmhg=15.0,
+        respiratory_rate_bpm=0.0,
+        stroke_volume_ml=200.0,
+    )
+    state = apply_effect(baseline, DrugEffect(pr_delta_ms=10.0))
+    assert state.sinus_rate_bpm == 300.0
+    assert state.axis_deg == -120.0
+    assert state.systolic_bp_mmhg == 30.0
+    assert state.respiratory_rate_bpm == 0.0
+    assert state.stroke_volume_ml == 200.0
+
+
+def test_un_farmaco_no_saca_un_basal_normal_de_los_limites() -> None:
+    state = apply_effect(PhysiologyState(), DrugEffect(sinus_rate=10.0))
+    assert state.sinus_rate_bpm == 260.0

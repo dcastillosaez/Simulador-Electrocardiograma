@@ -192,6 +192,24 @@ def engine_sinus_bpm(params: EngineParams, rhythm_id: str | None) -> float | Non
     return None
 
 
+def engine_pulse_bpm(params: EngineParams, rhythm_id: str | None) -> float:
+    """El pulso que el motor de señal está generando.
+
+    Casi siempre es la frecuencia de mando. En un Mobitz I no: el mando es la
+    sinusal y una de cada cuatro P no conduce, y publicar el mando calculaba el
+    gasto cardíaco con 75 latidos sobre un trazado que da 56. La proporción la
+    declara el catálogo, y un ritmo sin latidos perdidos da 1 exacto.
+    """
+    pulse_bpm = params.heart_rate_hz * 60.0
+    if rhythm_id is None or params.patient is not None:
+        return pulse_bpm
+    definition = get_rhythm(rhythm_id)
+    commanded_hz = definition.default_parameters["heart_rate_hz"]
+    if commanded_hz <= 0.0:
+        return pulse_bpm
+    return pulse_bpm * definition.ventricular_rate_hz / commanded_hz
+
+
 def _basal_sinus_bpm(params: EngineParams, rhythm_id: str | None) -> float:
     """La sinusal del paciente sin fármacos.
 

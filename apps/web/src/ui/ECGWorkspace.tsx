@@ -295,8 +295,12 @@ export function ECGWorkspace({
     setSelectedRhythm(detail);
     store.selectRhythm(rhythmId);
     // Un ritmo nuevo arranca un trazado nuevo: dejarlo congelado mostraría el
-    // ritmo anterior detenido mientras el motor genera otro distinto.
+    // ritmo anterior detenido mientras el motor genera otro distinto. El zoom
+    // se va con el congelado, igual que al descongelar a mano.
     setIsFrozen(false);
+    setPaperSpeedMmS(REFERENCE_PAPER_SPEED_MM_S);
+    setViewStartRingPos(0);
+    setMagnifier(false);
     runtime.start(rhythmId, {
       heart_rate_hz: detail.default_parameters.heart_rate_hz,
       noise: SILENT_NOISE,

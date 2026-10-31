@@ -21,6 +21,7 @@ nunca duplican un evento.
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 from dataclasses import dataclass
 
 import numpy as np
@@ -68,15 +69,19 @@ class EventTrain:
 
     def events(self, t0_s: float, t1_s: float) -> list[CardiacEvent]:
         self._extend_until(t1_s)
+        # Búsqueda binaria y no un recorrido: la línea temporal crece con la
+        # sesión y esto se pide unas quince veces por segundo. En una guardia
+        # de ocho horas de fibrilación son doscientos mil eventos por llamada.
+        first = bisect_left(self._times_s, t0_s)
+        last = bisect_left(self._times_s, t1_s)
         return [
             CardiacEvent(
                 kind=self.kind,
-                t_s=t_s,
+                t_s=self._times_s[index],
                 template_id=self.template_id,
                 index=index,
             )
-            for index, t_s in enumerate(self._times_s)
-            if t0_s <= t_s < t1_s
+            for index in range(first, last)
         ]
 
 

@@ -18,7 +18,7 @@ from typing import Protocol, Sequence
 
 import numpy as np
 
-from .conduction import ConductionPolicy
+from .conduction import CompleteBlock, ConductionPolicy
 from .leads import DEFAULT_PROJECTION_SET, LeadProjectionSet, projection_set_for_axis
 from .overlays import MorphologyOverlay
 from .renderer import (
@@ -60,19 +60,32 @@ class BeatBasedSource:
 
         En los ritmos con conducción 1:1 manda el tren auricular. En la
         fibrilación auricular manda el nodo AV, porque la aurícula va a su
-        aire y lo que el usuario controla es la respuesta ventricular. Los
-        trenes regulares ignoran el cambio: su frecuencia es estructural.
+        aire y lo que el usuario controla es la respuesta ventricular: tocar
+        también el tren dejaba las ondas f a 80 por minuto, sueltas y de una
+        en una, en vez de las 420 de una aurícula que fibrila. Los trenes
+        regulares ignoran el cambio: su frecuencia es estructural.
         """
-        self._atrial.set_rate_hz(rate_hz)
         setter = getattr(self._conduction, "set_rate_hz", None)
         if setter is not None:
             setter(rate_hz)
+        else:
+            self._atrial.set_rate_hz(rate_hz)
 
     def set_axis(self, axis: AxisParams) -> None:
         """Recalcula el conjunto de proyecciones al cambiar el eje eléctrico.
         Espejo de `set_rate_hz`: el motor lo llama cuando el usuario mueve el
         eje, y el conjunto se guarda para no recomputarlo en cada trozo."""
         self._projection_set = projection_set_for_axis(axis)
+
+    @property
+    def is_dissociated(self) -> bool:
+        """Cierto si ninguna P alcanza el ventrículo.
+
+        Es un hecho de la política de conducción y no una lectura de la señal:
+        dos marcapasos regulares a frecuencias con proporción sencilla repiten
+        la distancia P-QRS igual que un bloqueo periódico.
+        """
+        return isinstance(self._conduction, CompleteBlock)
 
     def events(self, t0_s: float, t1_s: float) -> list[CardiacEvent]:
         atrial = list(self._atrial.events(t0_s, t1_s))
@@ -95,9 +108,13 @@ class BeatBasedSource:
         t_s = time_grid(start_index, n_samples, sample_rate_hz)
         window_end_s = t0_s + n_samples / float(sample_rate_hz)
         # El margen es imprescindible: la T de un latido anterior a la ventana
-        # sigue contribuyendo dentro de ella.
+        # sigue contribuyendo dentro de ella. Hacia atrás se le suma el retardo
+        # de la conducción porque la ventana filtra por la P y lo que llega a
+        # la ventana es la T de su QRS: con un PR largo, la P salía del margen
+        # con la T a medio dibujar y el trazo daba un salto en la frontera.
+        lookback_s = RENDER_MARGIN_S + getattr(self._conduction, "max_delay_s", 0.0)
         events = self.events(
-            max(0.0, t0_s - RENDER_MARGIN_S), window_end_s + RENDER_MARGIN_S
+            max(0.0, t0_s - lookback_s), window_end_s + RENDER_MARGIN_S
         )
         return render_events(
             events,
