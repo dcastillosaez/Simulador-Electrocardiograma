@@ -148,7 +148,10 @@ def measurements_payload(
         "window_s": round(duration_s, 3),
         "atrial_activity": atrial_activity.value,
         "av_relationship": av_relationship(
-            events, result.atrial_rate_hz, result.ventricular_rate_hz
+            events,
+            result.atrial_rate_hz,
+            result.ventricular_rate_hz,
+            dissociated=getattr(source, "is_dissociated", False),
         ),
         "values": {
             "atrial_rate_bpm": _bpm(result.atrial_rate_hz),

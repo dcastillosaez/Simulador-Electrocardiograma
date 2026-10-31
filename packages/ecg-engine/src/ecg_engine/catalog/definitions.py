@@ -11,6 +11,7 @@ auditable la revisión por un profesional antes de cerrar la fase.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Mapping
@@ -71,6 +72,8 @@ class ParameterRange:
     minimum: float
     maximum: float
     default: float
+    integer: bool = False
+    """El parámetro cuenta algo —un grado de bloqueo— y solo admite enteros."""
 
     def __post_init__(self) -> None:
         if self.minimum > self.maximum:
@@ -84,7 +87,8 @@ class ParameterRange:
             )
 
     def clamp(self, value: float) -> float:
-        return min(max(value, self.minimum), self.maximum)
+        clamped = min(max(value, self.minimum), self.maximum)
+        return float(math.floor(clamped + 0.5)) if self.integer else clamped
 
 
 @dataclass(frozen=True, slots=True)
@@ -376,7 +380,9 @@ def _fixed(rate_hz: float) -> ParameterRange:
 #: cada dos, tres o cuatro; el 1:1 es excepcional y peligroso, y el 5:1 no se ve.
 FLUTTER_PARAMETERS: Mapping[str, ParameterRange] = {
     "atrial_rate_hz": ParameterRange(_bpm(100), _bpm(350), _bpm(300)),
-    "conduction_ratio": ParameterRange(2.0, 4.0, 2.0),
+    # Entero: la fuente solo sabe dejar pasar una de cada n, y un 2,5 publicaba
+    # un pulso de 120 sobre un trazado que iba a 150.
+    "conduction_ratio": ParameterRange(2.0, 4.0, 2.0, integer=True),
 }
 
 #: El foco de una taquicardia ventricular. Por debajo de 100 es un ritmo

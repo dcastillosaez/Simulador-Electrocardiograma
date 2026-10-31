@@ -13,6 +13,7 @@ aquí, sin tocar los trenes.
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from dataclasses import dataclass
 from typing import Protocol, Sequence, runtime_checkable
 
@@ -66,6 +67,10 @@ class FixedPR:
     pr_s: float
     template_id: str = "normal_qrst"
 
+    @property
+    def max_delay_s(self) -> float:
+        return self.pr_s
+
     def conduct(
         self,
         atrial: Sequence[CardiacEvent],
@@ -95,6 +100,11 @@ class WenckebachPR:
             raise ValueError(
                 f"cycle_length debe ser al menos 2, recibido {self.cycle_length}"
             )
+
+    @property
+    def max_delay_s(self) -> float:
+        """El PR de la última P que conduce, que es la penúltima del ciclo."""
+        return self.pr_base_s + (self.cycle_length - 2) * self.pr_increment_s
 
     def conduct(
         self,
@@ -128,6 +138,10 @@ class FixedRatioBlock:
     def __post_init__(self) -> None:
         if self.ratio < 2:
             raise ValueError(f"ratio debe ser al menos 2, recibido {self.ratio}")
+
+    @property
+    def max_delay_s(self) -> float:
+        return self.pr_s
 
     def conduct(
         self,
@@ -199,16 +213,22 @@ class IrregularConduction:
         self.rr_spread_s = rr_spread_s
         self.template_id = template_id
         self._times_s: list[float] = [0.0]
+        self._spread_fraction = rr_spread_s / mean_rr_s
 
     def set_rate_hz(self, rate_hz: float) -> None:
         """Ajusta la respuesta ventricular media.
 
         Solo afecta a los latidos aún no generados: la caché ya emitida no se
         reescribe, igual que en `EventTrain`.
+
+        La dispersión escala con el RR. Fija en 200 ms, a 180 lpm valía más de
+        la mitad del RR medio: `_MIN_RR_S` recortaba solo la cola corta y la
+        respuesta se quedaba en 163 con el mando en 180.
         """
         if rate_hz <= 0.0:
             raise ValueError(f"rate_hz debe ser positivo, recibido {rate_hz}")
         self.mean_rr_s = 1.0 / rate_hz
+        self.rr_spread_s = self.mean_rr_s * self._spread_fraction
 
     def _extend_until(self, t_s: float, rng: np.random.Generator) -> None:
         while self._times_s[-1] < t_s:
@@ -231,13 +251,14 @@ class IrregularConduction:
         —o al conjunto vacío— dejando fuera latidos que sí debían sonar.
         """
         self._extend_until(t1_s, rng)
+        first = bisect_left(self._times_s, t0_s)
+        last = bisect_left(self._times_s, t1_s)
         return [
             CardiacEvent(
                 kind=EventKind.VENTRICULAR,
-                t_s=t_s,
+                t_s=self._times_s[index],
                 template_id=self.template_id,
                 index=index,
             )
-            for index, t_s in enumerate(self._times_s)
-            if t0_s <= t_s < t1_s
+            for index in range(first, last)
         ]

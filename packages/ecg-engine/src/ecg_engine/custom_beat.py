@@ -65,10 +65,18 @@ siendo un paciente."""
 
 
 def _rounded(value: float) -> float:
-    """Un decimal. El identificador tiene que ser estable como texto: dos
-    especificaciones que solo difieran en el bit dieciséis de un flotante son
-    la misma plantilla, y deben producir la misma cadena."""
+    """Un decimal, para los milisegundos. El identificador tiene que ser
+    estable como texto: dos especificaciones que solo difieran en el bit
+    dieciséis de un flotante son la misma plantilla, y deben producir la misma
+    cadena."""
     return round(float(value), 1)
+
+
+def _rounded_amplitude(value: float) -> float:
+    """Tres decimales, para las amplitudes. El editor las mueve de 0,05 en
+    0,05 y aquí un decimal es demasiado grueso: un ST de 0,05 mV se dibujaba de
+    0,1 y una P de 0,25× se quedaba en 0,2×."""
+    return round(float(value), 3)
 
 
 def custom_ventricular_id(
@@ -83,8 +91,8 @@ def custom_ventricular_id(
         f"{CUSTOM_PREFIX}{VENTRICULAR_KIND};"
         f"qrs={_rounded(qrs_ms)};"
         f"qt={_rounded(qt_ms)};"
-        f"st={_rounded(st_shift_mv)};"
-        f"t={_rounded(t_scale)}"
+        f"st={_rounded_amplitude(st_shift_mv)};"
+        f"t={_rounded_amplitude(t_scale)}"
     )
 
 
@@ -95,7 +103,7 @@ def custom_atrial_id(*, p_scale: float = 1.0) -> str:
     que hace una hiperpotasemia y anularla es no tener onda P; nada de eso
     necesita más parámetros.
     """
-    return f"{CUSTOM_PREFIX}{ATRIAL_KIND};p={_rounded(p_scale)}"
+    return f"{CUSTOM_PREFIX}{ATRIAL_KIND};p={_rounded_amplitude(p_scale)}"
 
 
 def is_custom(template_id: str) -> bool:

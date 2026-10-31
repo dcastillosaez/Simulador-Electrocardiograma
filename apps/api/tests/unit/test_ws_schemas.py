@@ -19,7 +19,9 @@ from ecg_api.schemas import (
     stopped_message,
     updated_message,
 )
-from ecg_engine import EngineParams, NoiseParams
+from ecg_api.pharmacology import PatientVitals
+from ecg_api.schemas import PatientPayload
+from ecg_engine import EngineParams, NoiseParams, PatientSpec
 
 
 def test_parse_start_message_with_full_params():
@@ -311,3 +313,15 @@ def test_the_start_acknowledgement_carries_the_resolved_pulse():
     )
     assert payload["params"]["heart_rate_hz"] == pytest.approx(100 / 60)
     assert payload["params"]["rhythm"]["conduction_ratio"] == 3
+
+
+def test_el_eco_del_paciente_conserva_sus_constantes() -> None:
+    """La interfaz reenvía este eco en el siguiente `update`: sin las
+    constantes, mover el eje devolvía a un paciente con 80/50 a 120/75."""
+    vitals = PatientVitals(80.0, 50.0, 22.0, 45.0)
+    payload = engine_params_to_dict(
+        EngineParams(patient=PatientSpec(pr_ms=240.0)), vitals
+    )
+    reenviado = PatientPayload.model_validate(payload["patient"])
+    assert reenviado.to_vitals() == vitals
+    assert reenviado.to_spec().pr_ms == 240.0

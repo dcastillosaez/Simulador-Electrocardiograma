@@ -334,15 +334,27 @@ PHYSIOLOGY_BOUNDS: Mapping[str, tuple[float, float]] = {
 }
 
 
-def clamp_physiology(state: PhysiologyState) -> PhysiologyState:
+def clamp_physiology(
+    state: PhysiologyState, baseline: PhysiologyState | None = None
+) -> PhysiologyState:
     """Recorta el estado a `PHYSIOLOGY_BOUNDS` y ordena las dos presiones.
 
     El orden importa: recortar sístole y diástole por separado puede dejar
     una diastólica por encima de la sistólica, que es un estado imposible y
     que el panel de constantes pintaría tal cual.
+
+    Con `baseline`, los límites se ensanchan hasta incluirlo. Los límites son
+    hasta dónde puede empujar un fármaco, no lo que un paciente puede ser: el
+    editor admite una aurícula a 300 o una tensión de 30, y el eje llega a
+    -180. Recortar ahí movía al paciente sin que nadie lo hubiera tocado:
+    cualquier fármaco, por neutro que fuera sobre ese eje, bajaba la aurícula
+    a 255 y llevaba un eje de -120 a -90.
     """
     values = {f.name: getattr(state, f.name) for f in fields(state)}
     for name, (low, high) in PHYSIOLOGY_BOUNDS.items():
+        if baseline is not None:
+            low = min(low, getattr(baseline, name))
+            high = max(high, getattr(baseline, name))
         values[name] = min(max(values[name], low), high)
     if values["diastolic_bp_mmhg"] > values["systolic_bp_mmhg"]:
         values["diastolic_bp_mmhg"] = values["systolic_bp_mmhg"]

@@ -92,6 +92,15 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
         seed: null,
         sampleRateHz: null,
         lastDisconnect: { code: event.code, reason: event.reason },
+        // Sin sesión no hay nada que medir ni nada a bordo: dejarlo pintado
+        // enseñaba constantes y fármacos activos de un paciente que ya no
+        // existe en el servidor.
+        measurements: null,
+        atrialActivity: null,
+        avRelationship: null,
+        activeDrugs: [],
+        interactions: [],
+        physiology: null,
       });
     const onStarted = (message: SessionRuntimeEvents["started"]) =>
       set({

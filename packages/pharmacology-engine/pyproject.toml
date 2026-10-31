@@ -1,6 +1,6 @@
 [project]
 name = "pharmacology-engine"
-version = "1.0.0"
+version = "1.0.1"
 description = "Motor farmacológico del simulador de ECG"
 requires-python = ">=3.12"
 dependencies = ["pyyaml>=6.0"]

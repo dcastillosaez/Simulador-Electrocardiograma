@@ -34,7 +34,7 @@ from .models import (
     combine,
 )
 
-PHARMACOLOGY_ENGINE_VERSION = "1.0.0"
+PHARMACOLOGY_ENGINE_VERSION = "1.0.1"
 """Se persiste junto a la sesión. Un replay solo es válido si coinciden la
 semilla, la versión del motor de ECG y esta: cambiar una curva de
 concentración cambia la señal sin cambiar ni una administración."""

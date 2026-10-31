@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ECGWorkspace } from "./ECGWorkspace";
@@ -533,5 +533,41 @@ describe("ECGWorkspace", () => {
     expect(
       screen.getByRole("application", { name: /medición sobre el trazado/i })
     ).toBeInTheDocument();
+  });
+
+  it("volver a arrancar un ritmo estando congelado devuelve el papel a su velocidad", async () => {
+    stubRhythmFetch();
+    render(
+      <ECGWorkspace
+        wsUrl="ws://test"
+        apiBaseUrl="http://api.test"
+        webSocketFactory={() => fakeSocket as unknown as WebSocket}
+      />
+    );
+    await waitFor(() => screen.getByText("Sinusal normal"));
+    act(() => fakeSocket.dispatch("open", {}));
+    await userEvent.selectOptions(screen.getByLabelText("Seleccionar ritmo"), "sinus_normal");
+    act(() => {
+      fakeSocket.dispatch("message", {
+        data: JSON.stringify({
+          type: "started",
+          session_id: "11111111-1111-1111-1111-111111111111",
+          seed: 1,
+          sample_rate_hz: 500,
+          channels: 12,
+        }),
+      });
+    });
+    await userEvent.click(screen.getByRole("button", { name: /congelar/i }));
+    fireEvent.wheel(screen.getByRole("application", { name: /medición sobre el trazado/i }), {
+      deltaY: -100,
+      ctrlKey: true,
+    });
+    expect(screen.getByText("50 mm/s")).toBeInTheDocument();
+
+    act(() => fakeSocket.dispatch("close", { code: 1006, reason: "" }));
+    await userEvent.click(screen.getByRole("button", { name: /reconectar/i }));
+
+    expect(screen.getByText("25 mm/s")).toBeInTheDocument();
   });
 });

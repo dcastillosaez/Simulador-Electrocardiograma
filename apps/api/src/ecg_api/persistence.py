@@ -35,7 +35,7 @@ async def persist_session(
         SessionRow(
             id=manager.session_id,
             rhythm_id=manager.rhythm_id,
-            params=engine_params_to_dict(manager.params),
+            params=engine_params_to_dict(manager.params, manager.vitals),
             seed=manager.seed,
             engine_semver=ecg_engine.__version__,
             engine_commit=settings.engine_commit,

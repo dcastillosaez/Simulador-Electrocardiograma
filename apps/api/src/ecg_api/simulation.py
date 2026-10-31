@@ -26,6 +26,7 @@ from .cardiac import cardiac_events_payload
 from .errors import InvalidParamsError, RhythmNotFoundError
 from .measuring import MeasurementWindow, measurements_payload
 from .pharmacology import PatientVitals, PharmacologySession
+from .pharmacology.projection import engine_pulse_bpm
 
 CHUNK_SAMPLES = 50  # 100 ms a 500 Hz — la cadencia de streaming del diseño
 
@@ -147,6 +148,12 @@ class SimulationManager:
         atropina, y una sesión guardada mezclaría órdenes con fármacos."""
         assert self._command_params is not None
         return self._command_params
+
+    @property
+    def vitals(self) -> PatientVitals | None:
+        """Las constantes del paciente inventado, que viven aparte de los
+        parámetros y sin las que su descripción queda a medias."""
+        return self._vitals
 
     @property
     def pharmacology(self) -> PharmacologySession:
@@ -301,11 +308,18 @@ class SimulationManager:
         ):
             return None
         definition = get_rhythm(self.rhythm_id)
+        # El catálogo no sabe si un paciente inventado tiene PR: depende de la
+        # conducción que le haya escrito el usuario.
+        patient = self._engine.params.patient
         return measurements_payload(
             source=self._engine.source,
             window=self._window,
             t_end_s=self._engine.t_s,
-            pr_is_measurable=definition.pr_is_measurable,
+            pr_is_measurable=(
+                patient.pr_is_measurable
+                if patient is not None
+                else definition.pr_is_measurable
+            ),
             atrial_activity=definition.atrial_activity,
         )
 
@@ -367,5 +381,5 @@ class SimulationManager:
         return HeartState.from_profile(
             self._profile(),
             self.rhythm_id,
-            self._engine.params.heart_rate_hz * 60.0,
+            engine_pulse_bpm(self._engine.params, self.rhythm_id),
         ).as_payload()

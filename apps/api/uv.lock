@@ -176,7 +176,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "ecg-engine"
-version = "1.0.0"
+version = "1.0.1"
 source = { editable = "../../packages/ecg-engine" }
 dependencies = [
     { name = "numpy" },
@@ -505,7 +505,7 @@ wheels = [
 
 [[package]]
 name = "pharmacology-engine"
-version = "1.0.0"
+version = "1.0.1"
 source = { editable = "../../packages/pharmacology-engine" }
 dependencies = [
     { name = "pyyaml" },
