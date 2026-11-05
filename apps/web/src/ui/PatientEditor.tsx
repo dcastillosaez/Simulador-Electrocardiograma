@@ -5,11 +5,17 @@ import type { CatalogClient } from "../simulation-runtime/catalog-client";
 import type { ParameterRange } from "../types/rhythms";
 import {
   anticipatedVentricularRate,
+  type AtrialOriginName,
   type AvConductionName,
   type CustomPatientSummary,
   type PatientPayload,
 } from "../types/patients";
 import styles from "./PatientEditor.module.css";
+
+const ORIGIN_LABELS: Record<AtrialOriginName, string> = {
+  sinus: "Nodo sinusal",
+  supraventricular: "Otro foco auricular",
+};
 
 const CONDUCTION_LABELS: Record<AvConductionName, string> = {
   conducted: "Conducida 1:1",
@@ -121,6 +127,22 @@ export function PatientEditor({
             ? "P invisible, pero la aurícula sigue despolarizando."
             : `${patient.p_amplitude_scale.toFixed(2)}× la P normal.`}
         </p>
+        {hasAtria && (
+          <>
+            <Select
+              label="Origen de la aurícula"
+              value={patient.atrial_origin ?? "sinus"}
+              options={(Object.keys(ORIGIN_LABELS) as AtrialOriginName[]).map(
+                (value) => ({ value, label: ORIGIN_LABELS[value] })
+              )}
+              onChange={(value) => set("atrial_origin", value as AtrialOriginName)}
+            />
+            <p className={styles.hint}>
+              No cambia el trazado: decide si el corazón 3D enciende el nodo
+              sinusal.
+            </p>
+          </>
+        )}
       </ControlGroup>
 
       <ControlGroup label="Conducción AV">

@@ -33,7 +33,14 @@ import {
   apertureLabel,
   type ValveHandles,
 } from "./ValveReadout";
-import { useCardiacTimeline } from "./useCardiacTimeline";
+import { useCardiacTimeline, type UseCardiacTimelineResult } from "./useCardiacTimeline";
+import { PlaybackClock } from "../../cardiac/playback-clock";
+import { createConductionUniforms } from "./ConductionSystem/conduction-material";
+import { FollowStructure } from "./ConductionSystem/FollowStructure";
+import {
+  DIDACTIC_NOTICE,
+  type ConductionStructure,
+} from "./ConductionSystem/conduction-structures";
 import { RESTING_APERTURE } from "../../cardiac/valve-timeline";
 import type { SessionRuntime } from "../../simulation-runtime/session-runtime";
 import styles from "./HeartScene.module.css";
@@ -57,6 +64,7 @@ const GROUP_LABELS: Record<HeartGroup, string> = {
   vessels: "Grandes vasos",
   myocardium: "Miocardio",
   valves: "Válvulas",
+  conduction: "Conducción",
 };
 
 /** Enciende el recorte local del renderizador.
@@ -126,14 +134,40 @@ function AspectFraming({ preset }: { preset: CameraPreset }) {
 
 export interface HeartSceneProps {
   runtime: SessionRuntime;
+  /** La cabeza de reproducción compartida con el repaso. Sin ella, la escena
+   * usa la del directo. */
+  clock?: PlaybackClock;
+  /** Las líneas temporales, si las aporta quien también las necesita (el
+   * repaso). Sin ellas la escena crea las suyas. */
+  cardiac?: UseCardiacTimelineResult;
+  /** La estructura de conducción seleccionada. Vive fuera de la escena porque
+   * su ficha se lee en el inspector. */
+  selectedStructure?: ConductionStructure | null;
+  onSelectStructure?: (structure: ConductionStructure | null) => void;
+  /** La cámara gira alrededor de la estructura elegida. */
+  followStructure?: boolean;
 }
 
-export function HeartScene({ runtime }: HeartSceneProps) {
-  const { timeline, valves, heartState } = useCardiacTimeline(runtime);
+export function HeartScene({
+  runtime,
+  clock: sharedClock,
+  cardiac,
+  selectedStructure = null,
+  onSelectStructure,
+  followStructure = false,
+}: HeartSceneProps) {
+  const own = useCardiacTimeline(runtime, cardiac === undefined);
+  const { timeline, valves, electrical, heartStates, heartState } = cardiac ?? own;
+  const ownClock = useMemo(() => new PlaybackClock(runtime.buffer), [runtime]);
+  const clock = sharedClock ?? ownClock;
   const [preset, setPreset] = useState<CameraPreset>(DEFAULT_PRESET);
   const [isolated, setIsolated] = useState<ReadonlySet<HeartGroup>>(new Set());
   const [opacity, setOpacity] = useState(1);
   const [myocardium, setMyocardium] = useState(false);
+  // Apagada por defecto, como el miocardio: es una capa que se enciende a
+  // propósito, y sus vías auriculares y su red de Purkinje son un esquema.
+  const [conduction, setConduction] = useState(false);
+  const conductionUniforms = useMemo(() => createConductionUniforms(), []);
   // Un corte por eje, cada uno con su profundidad. `null` es apagado.
   const [cuts, setCuts] = useState<Record<CutAxis, number | null>>({
     coronal: null,
@@ -236,9 +270,11 @@ export function HeartScene({ runtime }: HeartSceneProps) {
             resultado parecido sin salir a Internet. */}
         <LocalClipping />
         <AspectFraming preset={preset} />
+        <FollowStructure structure={followStructure ? selectedStructure : null} />
         <ScaleBar barRef={scaleBarRef} labelRef={scaleLabelRef} />
         <ValveReadout
-          runtime={runtime}
+          clock={clock}
+          heartStates={heartStates}
           valves={valves}
           timeline={timeline}
           heartState={heartState}
@@ -253,14 +289,22 @@ export function HeartScene({ runtime }: HeartSceneProps) {
 
         <Suspense fallback={null}>
           <HeartModel
-            runtime={runtime}
+            clock={clock}
+            heartStates={heartStates}
             timeline={timeline}
             valves={valves}
+            electrical={electrical}
             heartState={heartState}
             isolated={isolated}
             opacity={opacity}
             showMyocardium={myocardium}
             cuts={activeCuts}
+            // Aislar la conducción la enciende: aislar algo que no se ve
+            // dejaría el corazón en fantasma y nada delante.
+            showConduction={conduction || isolated.has("conduction")}
+            conductionUniforms={conductionUniforms}
+            selectedStructure={selectedStructure}
+            onSelectStructure={onSelectStructure}
           />
         </Suspense>
 
@@ -376,7 +420,24 @@ export function HeartScene({ runtime }: HeartSceneProps) {
             >
               Miocardio
             </button>
+            <button
+              type="button"
+              className={`${styles.group} ${conduction ? styles.groupActive : ""}`}
+              aria-pressed={conduction}
+              onClick={() => setConduction((on) => !on)}
+            >
+              {/* Otro rótulo que el del grupo de aislar: los dos botones
+                  conviven y hacen cosas distintas — este enciende la capa,
+                  aquel deja el resto del corazón en fantasma. */}
+              Ver conducción
+            </button>
           </div>
+          {/* La advertencia va pegada a la capa y solo cuando se ve: una
+              animación convincente parece más exacta de lo que es, y quien la
+              mira tiene que saber qué parte es esquema. */}
+          {(conduction || isolated.has("conduction")) && (
+            <p className={styles.didactic}>{DIDACTIC_NOTICE}</p>
+          )}
           {/* Los tres planos son combinables, no alternativas: Three.js conserva
               la geometría que está del lado bueno de todos, así que dos abren
               una esquina y tres un octante. */}

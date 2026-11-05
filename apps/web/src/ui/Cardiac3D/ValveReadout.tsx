@@ -1,3 +1,5 @@
+import type { PlaybackClock } from "../../cardiac/playback-clock";
+import type { HeartStateTimeline } from "../../cardiac/heart-state-timeline";
 import { useFrame } from "@react-three/fiber";
 import type { MutableRefObject, RefObject } from "react";
 import {
@@ -6,7 +8,6 @@ import {
   type ValveName,
 } from "./heart-valves";
 import type { ValvePhase, ValveTimeline } from "../../cardiac/valve-timeline";
-import type { SessionRuntime } from "../../simulation-runtime/session-runtime";
 import type { CardiacTimeline } from "../../cardiac/cardiac-timeline";
 import type { HeartStateValues } from "./useCardiacTimeline";
 import { excursionFor, ventricularFlow } from "./chamber-excursion";
@@ -44,7 +45,9 @@ export function apertureLabel(aperture: number): string {
 }
 
 export interface ValveReadoutProps {
-  runtime: SessionRuntime;
+  /** La cabeza de reproducción: la del directo, o el cursor del repaso. */
+  clock: PlaybackClock;
+  heartStates: MutableRefObject<HeartStateTimeline>;
   valves: MutableRefObject<ValveTimeline>;
   /** Las contracciones, para leer de ellas la sístole auricular. La onda A de
    * la mitral sale de ahí, así que el panel la necesita por el mismo motivo
@@ -72,16 +75,20 @@ export interface ValveReadoutProps {
  * se aproxima aquí: se vuelve a preguntar a la misma línea temporal con el
  * mismo instante, así que lo escrito y lo dibujado no pueden discrepar. */
 export function ValveReadout({
-  runtime,
+  clock,
+  heartStates,
   valves,
   timeline,
-  heartState,
+  heartState: latestHeartState,
   phaseRef,
   handles,
 }: ValveReadoutProps) {
   useFrame(() => {
-    const tS = runtime.buffer.playbackTimeS;
+    const tS = clock.timeS;
     if (tS === null) return;
+    // El estado vigente en ese instante, no el último que llegó: en el repaso
+    // pueden ser distintos.
+    const heartState = heartStates.current.valuesAt(tS) ?? latestHeartState;
 
     const phase = valves.current.phaseAt(tS);
     const phaseLabel = phase === null ? NO_CYCLE_LABEL : PHASE_LABELS[phase];

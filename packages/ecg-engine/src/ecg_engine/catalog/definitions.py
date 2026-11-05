@@ -19,6 +19,7 @@ from typing import Callable, Mapping
 import numpy as np
 
 from ..mechanics import NORMAL_PROFILE, ContractionMode, MechanicalProfile
+from ..types import ImpulseOrigin
 from ..conduction import (
     CompleteBlock,
     FixedPR,
@@ -156,6 +157,12 @@ class RhythmDefinition:
     # Los ocho ritmos con mecánica normal no lo declaran: solo los cuatro
     # que se apartan escriben algo.
     mechanical_profile: MechanicalProfile = field(default=NORMAL_PROFILE)
+    #: Dónde nace el impulso auricular. Va junto al perfil mecánico porque es
+    #: del mismo material: un hecho del ritmo que la señal no dice. Una TSV no
+    #: enciende el nodo sinusal aunque su P se parezca a una sinusal, y en una
+    #: FA o un flutter lo que llega al nodo AV sale de la aurícula, no de él.
+    #: Los ritmos sinusales no lo declaran.
+    atrial_origin: ImpulseOrigin = ImpulseOrigin.SINUS
 
 
 CUSTOM_PATIENT_ID: str = "custom_patient"
@@ -498,6 +505,7 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
             ventricular_amplitude=1.0,
             flutter_hz=7.0,
         ),
+        atrial_origin=ImpulseOrigin.SUPRAVENTRICULAR,
     ),
     RhythmDefinition(
         rhythm_id="atrial_flutter",
@@ -533,6 +541,7 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
             ventricular_amplitude=1.0,
             flutter_hz=5.0,
         ),
+        atrial_origin=ImpulseOrigin.SUPRAVENTRICULAR,
     ),
     RhythmDefinition(
         rhythm_id="svt",
@@ -553,6 +562,7 @@ DEFINITIONS: tuple[RhythmDefinition, ...] = (
             "Brugada J, et al. 2019 ESC Guidelines for supraventricular "
             "tachycardia",
         ),
+        atrial_origin=ImpulseOrigin.SUPRAVENTRICULAR,
     ),
     RhythmDefinition(
         rhythm_id="ventricular_tachycardia",

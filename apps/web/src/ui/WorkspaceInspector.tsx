@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Inspector, Metric, MetricGrid, Panel, Section, SectionTitle } from "@ui-system";
 import { zoneFor, ZONE_LABEL } from "./AxisControl/axis-zones";
 import { MeasurePanel } from "./MeasurePanel";
@@ -6,6 +7,8 @@ import type { SnapMode } from "../measure/snap";
 import type { ToolId } from "../measure/tools";
 import type { SessionState } from "../simulation-runtime/session-runtime";
 import type { AtrialActivityName } from "../types/ws-messages";
+import { ConductionCard } from "./Cardiac3D/ConductionSystem/ConductionCard";
+import type { ConductionStructure } from "./Cardiac3D/ConductionSystem/conduction-structures";
 
 /** Lo que se escribe donde iría la frecuencia auricular cuando no hay ninguna
  * que contar. No es un hueco a secas: en una fibrilación, «fibrilatoria» es
@@ -97,6 +100,18 @@ export interface WorkspaceInspectorProps {
    * que retomar) no se ofrece el botón: elegir uno en el selector ya
    * reconecta. */
   onReconnect?: () => void;
+  /** El repaso del trazado congelado está abierto. Las medidas del panel
+   * siguen siendo las del momento de congelar, y hay que decirlo para que
+   * nadie las atribuya al instante del cursor. */
+  isReviewing?: boolean;
+  /** La estructura de conducción elegida en el corazón 3D, si hay alguna. */
+  conductionStructure?: ConductionStructure | null;
+  onCloseConductionStructure?: () => void;
+  followingStructure?: boolean;
+  onToggleFollowStructure?: () => void;
+  /** El diagrama en escalera de la secuencia eléctrica (fase H5). Llega hecho
+   * porque quien tiene las líneas temporales es el puesto. */
+  ladder?: ReactNode;
 }
 
 /** El panel de información del puesto de simulación: estado de la sesión y
@@ -121,6 +136,12 @@ export function WorkspaceInspector({
   onToolChange,
   onSnapChange,
   onReconnect,
+  conductionStructure = null,
+  onCloseConductionStructure,
+  followingStructure = false,
+  onToggleFollowStructure,
+  ladder,
+  isReviewing = false,
 }: WorkspaceInspectorProps) {
   /** Una medida del servidor, lista para pasar a `Metric`.
    *
@@ -253,7 +274,21 @@ export function WorkspaceInspector({
             />
           </Section>
         )}
-        <Section title="Ritmo">
+        {/* La ficha entra solo con algo elegido y pide su alto natural, como
+            el resto del inspector: el escenario del corazón conserva su suelo
+            de 220 px y scrollea con lo que quede. */}
+        {conductionStructure && (
+          <Section title="Sistema de conducción">
+            <ConductionCard
+              structure={conductionStructure}
+              onClose={onCloseConductionStructure}
+              following={followingStructure}
+              onToggleFollow={onToggleFollowStructure}
+            />
+          </Section>
+        )}
+        {ladder && <Section title="Secuencia eléctrica">{ladder}</Section>}
+        <Section title={isReviewing ? "Ritmo (medidas del momento de congelar)" : "Ritmo"}>
           {/* Fuera de la rejilla, y no como su primera casilla: el nombre del
               ritmo no es una medida —no se mide sobre la señal, es la etiqueta
               de lo que se pidió— y en media columna se partía en tres líneas,

@@ -19,10 +19,11 @@ import numpy as np
 from ecg_engine import EcgEngine, EngineParams
 from ecg_engine.catalog import get_rhythm
 from ecg_engine.mechanics import MechanicalProfile
+from ecg_engine.types import ImpulseOrigin
 from heart_engine import HeartState
 from pharmacology_engine import DrugAdministration, PharmacologyError, Route
 
-from .cardiac import cardiac_events_payload
+from .cardiac import ELECTRICAL_LOOKAHEAD_S, cardiac_events_payload
 from .errors import InvalidParamsError, RhythmNotFoundError
 from .measuring import MeasurementWindow, measurements_payload
 from .pharmacology import PatientVitals, PharmacologySession
@@ -77,6 +78,8 @@ class SimulationManager:
         # Hasta dónde se han publicado ya contracciones. Es una marca de
         # agua, no un reloj: lo que ya salió no vuelve a salir.
         self._cardiac_published_until_s: float = 0.0
+        self._electrical_published_until_s: float = 0.0
+        self._electrical_source_s: float = 0.0
         # Los parámetros **de mando**: lo que el usuario pidió, no lo que el
         # motor está generando. Los dos coinciden mientras no haya fármacos
         # a bordo y divergen en cuanto los hay, y separarlos es lo que
@@ -115,6 +118,8 @@ class SimulationManager:
         # Marca de agua nueva: un ritmo nuevo arranca en t=0, y conservar la
         # del ritmo anterior se comería sus primeros latidos.
         self._cardiac_published_until_s = 0.0
+        self._electrical_published_until_s = 0.0
+        self._electrical_source_s = 0.0
         # El motor ya recortó los parámetros a los rangos del ritmo, así que
         # el mando se toma de él y no del mensaje: arrancar un bloqueo AV a
         # 300 lpm dejaría un basal farmacológico que el motor de señal nunca
@@ -356,6 +361,21 @@ class SimulationManager:
         )
         self._cardiac_published_until_s = t_end_s
 
+        # La electricidad va con su propia marca de agua, adelantada (ver
+        # `ELECTRICAL_LOOKAHEAD_S`). Una fuente reconstruida describe otra
+        # historia desde `source_started_s`: la marca vuelve ahí, o los
+        # primeros impulsos de la fuente nueva caerían por debajo de lo ya
+        # publicado de la vieja.
+        if self._engine.source_started_s != self._electrical_source_s:
+            self._electrical_source_s = self._engine.source_started_s
+            self._electrical_published_until_s = self._engine.source_started_s
+        e_start_s = self._electrical_published_until_s
+        e_end_s = max(e_start_s, t_end_s + ELECTRICAL_LOOKAHEAD_S)
+        electrical_events = (
+            source.events(e_start_s, e_end_s) if hasattr(source, "events") else []
+        )
+        self._electrical_published_until_s = e_end_s
+
         # Hay ritmos SIN frecuencia, y no por accidente: el catálogo declara
         # 0 lpm para la fibrilación ventricular porque una FV no tiene
         # frecuencia cardíaca. Ahí no hay RR que calcular, y tampoco hace
@@ -373,7 +393,19 @@ class SimulationManager:
             t_start_s=t_start_s,
             t_end_s=t_end_s,
             source_started_s=self._engine.source_started_s,
+            atrial_origin=self._atrial_origin(),
+            pairs_by_index=bool(getattr(source, "pairs_by_index", False)),
+            dissociated=bool(getattr(source, "is_dissociated", False)),
+            electrical_events=electrical_events,
         )
+
+    def _atrial_origin(self) -> ImpulseOrigin:
+        """Dónde nace la aurícula: lo declara el catálogo, o la especificación
+        cuando el paciente es inventado. Mismo reparto que `_profile`."""
+        patient = self._command_params.patient if self._command_params else None
+        if patient is not None:
+            return patient.atrial_origin
+        return get_rhythm(self.rhythm_id).atrial_origin
 
     def heart_state(self) -> dict | None:
         if self._engine is None:
@@ -382,4 +414,4 @@ class SimulationManager:
             self._profile(),
             self.rhythm_id,
             engine_pulse_bpm(self._engine.params, self.rhythm_id),
-        ).as_payload()
+        ).as_payload(t_s=self._engine.t_s)

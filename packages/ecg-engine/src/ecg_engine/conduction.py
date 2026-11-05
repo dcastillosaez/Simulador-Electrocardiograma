@@ -67,6 +67,10 @@ class FixedPR:
     pr_s: float
     template_id: str = "normal_qrst"
 
+    #: Cada QRS conserva el índice de la P que lo provocó. Es lo que permite
+    #: saber, sin mirar al futuro, qué P conduce y cuál se queda en el nodo AV.
+    pairs_by_index = True
+
     @property
     def max_delay_s(self) -> float:
         return self.pr_s
@@ -94,6 +98,8 @@ class WenckebachPR:
     pr_increment_s: float
     cycle_length: int
     template_id: str = "normal_qrst"
+
+    pairs_by_index = True
 
     def __post_init__(self) -> None:
         if self.cycle_length < 2:
@@ -135,6 +141,8 @@ class FixedRatioBlock:
     pr_s: float
     template_id: str = "normal_qrst"
 
+    pairs_by_index = True
+
     def __post_init__(self) -> None:
         if self.ratio < 2:
             raise ValueError(f"ratio debe ser al menos 2, recibido {self.ratio}")
@@ -165,6 +173,10 @@ class CompleteBlock:
     independiente, configurada en el catálogo. Aquí simplemente no se
     conduce nada, que es justo lo que ocurre en el nodo AV.
     """
+
+    #: Los QRS del escape llevan su propia numeración: un índice que coincida
+    #: con el de una P no es conducción.
+    pairs_by_index = False
 
     def conduct(
         self,
@@ -202,6 +214,10 @@ class IrregularConduction:
     """
 
     _MIN_RR_S: float = 0.24
+
+    #: Los QRS de una FA se numeran en su propia línea temporal: no hay una
+    #: onda f concreta que los provoque.
+    pairs_by_index = False
 
     def __init__(
         self,

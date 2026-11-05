@@ -88,6 +88,46 @@ export class SampleIndexRing {
     return null;
   }
 
+  /** Posición del anillo con la muestra más próxima a `sampleIndex`, o
+   * `null` si el anillo está vacío.
+   *
+   * La variante que necesita el cursor del repaso. `findRingPos` busca la
+   * coincidencia exacta y falla en un hueco de red, y un instante del repaso
+   * casi nunca cae exactamente en una muestra: el cursor tiene que poder
+   * atravesar una discontinuidad sin desaparecer, y sin inventar señal en
+   * ella. Fuera del historial devuelve el extremo correspondiente. */
+  findNearestRingPos(sampleIndex: number): number | null {
+    if (this.count === 0) {
+      return null;
+    }
+    let lo = 0;
+    let hi = this.count - 1;
+    if (sampleIndex <= this.indices[this.ringPosForK(lo)]) return this.ringPosForK(lo);
+    if (sampleIndex >= this.indices[this.ringPosForK(hi)]) return this.ringPosForK(hi);
+    // Invariante: indices[k=lo] < sampleIndex < indices[k=hi].
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      const value = this.indices[this.ringPosForK(mid)];
+      if (value === sampleIndex) return this.ringPosForK(mid);
+      if (value < sampleIndex) lo = mid;
+      else hi = mid;
+    }
+    const below = this.indices[this.ringPosForK(lo)];
+    const above = this.indices[this.ringPosForK(hi)];
+    return this.ringPosForK(sampleIndex - below <= above - sampleIndex ? lo : hi);
+  }
+
+  /** Índice absoluto de la muestra más antigua que sigue en el anillo, o
+   * `null` si está vacío. Es el borde de atrás del historial del repaso. */
+  get oldestSampleIndex(): number | null {
+    return this.count === 0 ? null : this.indices[this.ringPosForK(0)];
+  }
+
+  /** Índice absoluto de la última muestra escrita, o `null`. */
+  get newestSampleIndex(): number | null {
+    return this.count === 0 ? null : this.indices[this.ringPosForK(this.count - 1)];
+  }
+
   /** Vacía el anillo. Al arrancar una sesión nueva el eje de tiempo empieza de
    * cero: mezclarlo con los índices de la anterior daría medidas de un trazado
    * que ya no está en pantalla. */

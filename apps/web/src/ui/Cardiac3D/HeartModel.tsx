@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
-import { DoubleSide, Mesh, MeshStandardMaterial, Plane, Vector3 } from "three";
-import { applyExcursion } from "./HeartAnimator";
+import { DoubleSide, Group, Mesh, MeshStandardMaterial, Plane, Vector3 } from "three";
+import { applyExcursion, type ConductionGroupName } from "./HeartAnimator";
 import { HEART_NODE_NAMES, bindHeartNodes, type HeartNodeName, type Object3DLike } from "./heart-nodes";
 import {
   APPEARANCE,
@@ -30,15 +30,32 @@ import {
 } from "./HeartCutaway";
 import type { CardiacTimeline } from "../../cardiac/cardiac-timeline";
 import type { ValveTimeline } from "../../cardiac/valve-timeline";
+import type { ElectricalTimeline } from "../../cardiac/electrical-timeline";
+import type { HeartStateTimeline } from "../../cardiac/heart-state-timeline";
+import type { PlaybackClock } from "../../cardiac/playback-clock";
+import { writePulseUniforms } from "./ConductionSystem/conduction-pulse";
+import {
+  ACTIVATED_MESHES,
+  attachActivation,
+  createTissueUniforms,
+  injectActivation,
+  writeTissueUniforms,
+} from "./activation/tissue-activation";
+import { writeContinuousActivity } from "./activation/continuous-activity";
 import type { HeartStateValues } from "./useCardiacTimeline";
-import type { SessionRuntime } from "../../simulation-runtime/session-runtime";
+import { ConductionSystem } from "./ConductionSystem/ConductionSystem";
+import type { ConductionUniforms } from "./ConductionSystem/conduction-material";
+import type { ConductionStructure } from "./ConductionSystem/conduction-structures";
 
 export const HEART_MODEL_URL = "/models/heart.glb";
 
 export interface HeartModelProps {
-  runtime: SessionRuntime;
+  /** La cabeza de reproducción: la del directo, o el cursor del repaso. */
+  clock: PlaybackClock;
+  heartStates: MutableRefObject<HeartStateTimeline>;
   timeline: MutableRefObject<CardiacTimeline>;
   valves: MutableRefObject<ValveTimeline>;
+  electrical: MutableRefObject<ElectricalTimeline>;
   heartState: HeartStateValues | null;
   /** Grupos aislados. Vacío significa el corazón entero. */
   isolated: ReadonlySet<HeartGroup>;
@@ -51,6 +68,11 @@ export interface HeartModelProps {
   /** Cortes anatómicos activos. Vacío deja el corazón entero. No son
    * excluyentes: dos planos abren una esquina y tres un octante. */
   cuts: ActiveCut[];
+  /** Enseña el sistema de conducción. */
+  showConduction: boolean;
+  conductionUniforms: ConductionUniforms;
+  selectedStructure: ConductionStructure | null;
+  onSelectStructure?: (structure: ConductionStructure | null) => void;
 }
 
 /** Cuánto se descarta de la cola por detrás de la cabeza de reproducción. Un
@@ -63,14 +85,20 @@ const PRUNE_MARGIN_S = 1;
 const PRUNE_EVERY_FRAMES = 120;
 
 export function HeartModel({
-  runtime,
+  clock,
+  heartStates,
   timeline,
   valves,
-  heartState,
+  electrical,
+  heartState: latestHeartState,
   isolated,
   opacity,
   showMyocardium,
   cuts,
+  showConduction,
+  conductionUniforms,
+  selectedStructure,
+  onSelectStructure,
 }: HeartModelProps) {
   const { scene } = useGLTF(HEART_MODEL_URL);
   const nodes = useMemo(
@@ -82,12 +110,27 @@ export function HeartModel({
     [scene]
   );
   const frameCount = useRef(0);
+  const conductionGroups = useRef<Partial<Record<ConductionGroupName, Group>>>({});
 
   // Un material por estructura, creado una vez. El `.glb` no trae ninguno
   // —solo posiciones y normales—, así que sin esto Three.js aplica su blanco
   // por defecto a las nueve y el corazón se ve como un bloque gris de una
   // pieza. No es que al modelo le falten cavidades: es que estaban todas del
   // mismo color.
+  // La activación del tejido (fase H4): un uniforme por tejido, compartido por
+  // las cinco mallas que se activan, y dos atributos por vértice que se añaden
+  // una vez al cargar. Las mallas cuyo número de vértices no cuadra con el
+  // mapa se quedan sin activación (ver `attachActivation`).
+  const tissueUniforms = useMemo(() => createTissueUniforms(), []);
+  const activated = useMemo(() => {
+    const ok = new Set<HeartNodeName>();
+    for (const name of ACTIVATED_MESHES) {
+      const mesh = nodes[name] as unknown as Mesh;
+      if (mesh.geometry && attachActivation(name, mesh.geometry)) ok.add(name);
+    }
+    return ok;
+  }, [nodes]);
+
   const materials = useMemo(() => {
     const table = {} as Record<HeartNodeName, MeshStandardMaterial>;
     for (const name of HEART_NODE_NAMES) {
@@ -99,9 +142,14 @@ export function HeartModel({
         // grandes vasos cojan algo del reflejo especular y no queden planos.
         metalness: 0.04,
       });
+      if (activated.has(name)) injectActivation(table[name], tissueUniforms);
     }
     return table;
-  }, []);
+  }, [activated, tissueUniforms]);
+
+  useEffect(() => {
+    tissueUniforms.uActivationOn.value = showConduction ? 1 : 0;
+  }, [tissueUniforms, showConduction]);
 
   // Un solo material para las once valvas: las cuatro válvulas comparten
   // aspecto, y darle a cada valva el suyo serían once programas de sombreado
@@ -289,20 +337,40 @@ export function HeartModel({
     // `advance()` no se llama aquí: la llama `useSweepRenderer`, una sola vez
     // por tick. Llamarla también aquí consumiría trozos que el ECG nunca
     // llegaría a dibujar.
-    const tS = runtime.buffer.playbackTimeS;
+    //
+    // En el repaso, el cursor manda en vez de la cabeza: `clock` devuelve uno u
+    // otro y aquí no se distingue. Todo lo que sigue es función pura de `tS`,
+    // así que el mismo instante da la misma pose llegando desde delante,
+    // desde detrás o a cualquier velocidad.
+    const tS = clock.timeS;
     if (tS === null) return;
 
     frameCount.current += 1;
-    if (frameCount.current % PRUNE_EVERY_FRAMES === 0) {
-      timeline.current.prune(tS - PRUNE_MARGIN_S);
-      valves.current.prune(tS - PRUNE_MARGIN_S);
+    const liveS = clock.liveTimeS;
+    if (liveS !== null && frameCount.current % PRUNE_EVERY_FRAMES === 0) {
+      // La poda va contra la cabeza del directo y no contra `tS`, que en el
+      // repaso va hacia atrás: podar contra el cursor tiraría justo el pasado
+      // que se quiere mirar. El margen es lo que abarca el papel.
+      const horizon = liveS - clock.retentionS - PRUNE_MARGIN_S;
+      timeline.current.prune(horizon);
+      valves.current.prune(horizon);
+      electrical.current.prune(horizon);
+      heartStates.current.prune(horizon);
     }
+    const heartState = heartStates.current.valuesAt(tS) ?? latestHeartState;
 
     const atria = excursionFor("atria", tS, timeline.current, heartState);
-    applyExcursion(nodes, {
-      atria,
-      ventricles: excursionFor("ventricles", tS, timeline.current, heartState),
-    });
+    // La conducción recibe la escala en la misma llamada que las cámaras: si
+    // fuera en otra, un fotograma podría dibujar el His con la excursión del
+    // anterior y el corazón con la de este.
+    applyExcursion(
+      nodes,
+      {
+        atria,
+        ventricles: excursionFor("ventricles", tS, timeline.current, heartState),
+      },
+      conductionGroups.current
+    );
 
     // El mismo `tS` que acaba de mover las cámaras. Que sea el mismo no es un
     // detalle de implementación: es lo único que garantiza que la mitral se
@@ -312,6 +380,12 @@ export function HeartModel({
     // la onda A de la mitral y la tricúspide. No se recalcula ni se aproxima:
     // la patada auricular *es* la sístole auricular, y quién decide cuándo
     // ocurre es el servidor.
+    // El pulso, del mismo `tS`. Se escribe aunque la capa esté apagada: son
+    // siete pares de números, y así encenderla no enseña un fotograma viejo.
+    writePulseUniforms(electrical.current, tS, conductionUniforms);
+    writeTissueUniforms(electrical.current, tS, tissueUniforms);
+    writeContinuousActivity(heartState, tS, conductionUniforms, tissueUniforms);
+
     applyAperture(valveNodes, {
       atrioventricular: valves.current.apertureAt("atrioventricular", tS, atria),
       semilunar: valves.current.apertureAt(
@@ -325,6 +399,20 @@ export function HeartModel({
   return (
     <>
       <primitive object={scene} />
+      <ConductionSystem
+        nodes={nodes}
+        uniforms={conductionUniforms}
+        groups={conductionGroups}
+        visible={showConduction}
+        // Mismo trato que las válvulas: con su grupo aislado o sin aislar
+        // nada se ve con la opacidad del mando; si se aísla otra cosa, queda
+        // en fantasma.
+        opacity={groupIsVisible("conduction", isolated) ? opacity : GHOST_OPACITY}
+        planes={activePlanes.length === 0 ? null : activePlanes}
+        renderOrder={activePlanes.length === 0 ? 0 : CLIPPED_MESH_ORDER + 1}
+        selected={selectedStructure}
+        onSelect={onSelectStructure}
+      />
       {activePlanes.length > 0 && (
         <HeartCutaway
           nodes={nodes}

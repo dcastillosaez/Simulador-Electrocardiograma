@@ -1,0 +1,58 @@
+.panel {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.figure {
+  margin: 0;
+}
+
+.caption {
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.rowLabel {
+  fill: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 8px;
+}
+
+.rowLine {
+  stroke: var(--panel-border);
+  stroke-width: 0.5;
+}
+
+.bar {
+  stroke-width: 1.5;
+}
+
+/* El color dice el origen, que es lo único que distingue a dos impulsos
+   iguales en la escalera: arriba, el que nace en el nodo sinusal. */
+.sinus {
+  fill: var(--text-primary);
+  stroke: var(--text-primary);
+}
+
+.supraventricular {
+  fill: #ffb347;
+  stroke: #ffb347;
+}
+
+.ventricular {
+  fill: #4ecdc4;
+  stroke: #4ecdc4;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}

@@ -26,6 +26,10 @@ datos.append((str(RAIZ / "apps/api/migrations"), "migrations"))
 # fase F entera se queda sin moléculas dentro del ejecutable.
 datos += collect_data_files("pharmacology_engine", includes=["**/*.yaml", "**/*.yml"])
 
+# Y los tiempos de activación de la fase H: sin ellos, el primer mensaje
+# cardíaco del ejecutable fallaría al buscar el fichero.
+datos += collect_data_files("heart_engine", includes=["**/*.yaml"])
+
 # Los drivers de base de datos se cargan por nombre, así que el análisis
 # estático no los ve. Los dos: Postgres para quien conecte a un servidor y
 # SQLite para el escritorio.

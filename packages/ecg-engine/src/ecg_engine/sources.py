@@ -87,6 +87,15 @@ class BeatBasedSource:
         """
         return isinstance(self._conduction, CompleteBlock)
 
+    @property
+    def pairs_by_index(self) -> bool:
+        """Cierto si cada QRS conducido conserva el índice de su P.
+
+        Lo declara la política, no se deduce: en una fibrilación auricular los
+        QRS se numeran aparte y un índice compartido con una onda f sería una
+        casualidad, no una conducción."""
+        return bool(getattr(self._conduction, "pairs_by_index", False))
+
     def events(self, t0_s: float, t1_s: float) -> list[CardiacEvent]:
         atrial = list(self._atrial.events(t0_s, t1_s))
         # La ventana va explícita: la política no debe deducirla de `atrial`.

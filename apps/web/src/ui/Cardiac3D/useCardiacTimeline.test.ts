@@ -151,3 +151,40 @@ describe("useCardiacTimeline", () => {
     expect(timeline.size).toBe(0);
   });
 });
+
+describe("useCardiacTimeline — electricidad", () => {
+  const WITH_ELECTRICAL: CardiacEventsMessage = {
+    ...EVENTS,
+    electrical: [
+      {
+        impulse: 0,
+        origin: "sinus",
+        outcome: "conducted",
+        segments: [{ structure: "sa_node", t_start_s: 0.8, t_end_s: 0.8 }],
+      },
+    ],
+  };
+
+  it("encola los impulsos del mismo mensaje", () => {
+    const runtime = makeRuntime();
+    const { result } = renderHook(() => useCardiacTimeline(runtime));
+    act(() => runtime.emit("cardiacEvents", WITH_ELECTRICAL));
+    expect(result.current.electrical.current.size).toBe(1);
+  });
+
+  it("una sesión guardada sin electricidad se reproduce sin ella", () => {
+    const runtime = makeRuntime();
+    const { result } = renderHook(() => useCardiacTimeline(runtime));
+    act(() => runtime.emit("cardiacEvents", EVENTS));
+    expect(result.current.electrical.current.size).toBe(0);
+    expect(result.current.timeline.current.size).toBe(1);
+  });
+
+  it("un ritmo nuevo no deja ningún impulso del anterior", () => {
+    const runtime = makeRuntime();
+    const { result } = renderHook(() => useCardiacTimeline(runtime));
+    act(() => runtime.emit("cardiacEvents", WITH_ELECTRICAL));
+    act(() => runtime.emit("started", { type: "started" } as never));
+    expect(result.current.electrical.current.size).toBe(0);
+  });
+});

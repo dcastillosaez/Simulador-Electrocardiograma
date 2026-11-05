@@ -82,3 +82,34 @@ describe("SampleIndexRing", () => {
     expect(ring.findRingPos(1)).toBeNull();
   });
 });
+
+describe("SampleIndexRing.findNearestRingPos", () => {
+  it("devuelve null con el anillo vacío", () => {
+    expect(new SampleIndexRing(4).findNearestRingPos(3)).toBeNull();
+  });
+
+  it("encuentra la coincidencia exacta como findRingPos", () => {
+    const ring = new SampleIndexRing(8);
+    ring.push(new Float64Array([10, 11, 12, 13]));
+    expect(ring.findNearestRingPos(12)).toBe(ring.findRingPos(12));
+  });
+
+  it("atraviesa un hueco de red quedándose con la muestra más próxima", () => {
+    const ring = new SampleIndexRing(8);
+    // Se perdieron las muestras 13 a 19.
+    ring.push(new Float64Array([10, 11, 12, 20, 21]));
+    expect(ring.findRingPos(14)).toBeNull();
+    expect(ring.at(ring.findNearestRingPos(14)!)).toBe(12);
+    expect(ring.at(ring.findNearestRingPos(18)!)).toBe(20);
+  });
+
+  it("fuera del historial devuelve el extremo, también tras dar la vuelta", () => {
+    const ring = new SampleIndexRing(4);
+    ring.push(new Float64Array([0, 1, 2, 3, 4, 5]));
+    expect(ring.oldestSampleIndex).toBe(2);
+    expect(ring.newestSampleIndex).toBe(5);
+    expect(ring.at(ring.findNearestRingPos(-50)!)).toBe(2);
+    expect(ring.at(ring.findNearestRingPos(99)!)).toBe(5);
+    expect(ring.at(ring.findNearestRingPos(4.4)!)).toBe(4);
+  });
+});

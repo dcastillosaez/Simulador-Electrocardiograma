@@ -1,0 +1,68 @@
+/* La barra del repaso, encima del corazón. Pide su alto natural: el marco del
+   corazón se queda con el resto, que es la regla de esa columna. */
+.bar {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-background);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.active {
+  outline: 2px solid var(--inspector-ok);
+}
+
+.time {
+  margin-left: auto;
+  font-family: var(--font-mono);
+}
+
+.slider {
+  width: 100%;
+}
+
+.phase {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  min-height: 1.2em;
+}
+
+.notice {
+  margin: 0 0 var(--space-1);
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+}
+
+.phases {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.phaseChip {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+.bar[data-phase="P"] .phaseChip[data-chip="P"],
+.bar[data-phase="PR"] .phaseChip[data-chip="PR"],
+.bar[data-phase="QRS"] .phaseChip[data-chip="QRS"],
+.bar[data-phase="T"] .phaseChip[data-chip="T"] {
+  border-color: var(--inspector-ok);
+  color: var(--text-primary);
+}

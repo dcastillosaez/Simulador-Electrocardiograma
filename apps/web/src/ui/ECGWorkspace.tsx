@@ -26,6 +26,13 @@ import { HeartScene } from "./Cardiac3D/HeartScene";
 import { MeasureOverlay, type MeasureOverlayHandle } from "./MeasureOverlay";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import { WorkspaceInspector } from "./WorkspaceInspector";
+import type { ConductionStructure } from "./Cardiac3D/ConductionSystem/conduction-structures";
+import { useCardiacTimeline } from "./Cardiac3D/useCardiacTimeline";
+import { PlaybackClock } from "../cardiac/playback-clock";
+import { ReviewCursor, type ReviewCursorHandle } from "./review/ReviewCursor";
+import { ReviewTransport } from "./review/ReviewTransport";
+import { LadderPanel } from "./ladder/LadderPanel";
+import { reviewSnapshotLines, useReview } from "./review/useReview";
 import { useLayoutMetrics } from "./hooks/useLayoutMetrics";
 import { useSimulationRuntime } from "./hooks/useSimulationRuntime";
 import { composeSnapshotLines, useSweepRenderer } from "./hooks/useSweepRenderer";
@@ -196,9 +203,45 @@ export function ECGWorkspace({
     });
 
   const measureOverlayRef = useRef<MeasureOverlayHandle>(null);
+
+  // Las líneas temporales del corazón viven aquí y no dentro de la escena: el
+  // repaso las necesita para saltar de tramo en tramo y nombrar la fase, y
+  // tienen que ser las mismas que dibuja el corazón.
+  const cardiac = useCardiacTimeline(runtime);
+  const playbackClock = useMemo(() => new PlaybackClock(runtime.buffer), [runtime]);
+  // Lo que se conserva por detrás de la cabeza del directo es lo que abarca
+  // el papel: más allá el repaso no puede llegar.
+  // Es la misma cuenta con la que `useSweepRenderer` dimensiona el anillo: el
+  // ancho de la tira a la velocidad de papel de referencia.
+  playbackClock.retentionS =
+    metrics.stripWidthPx / (REFERENCE_PAPER_SPEED_MM_S * metrics.viewportScalePxPerMm);
+  const reviewCursorRef = useRef<ReviewCursorHandle>(null);
+  const reviewTimeRef = useRef<HTMLSpanElement>(null);
+  const reviewPhaseRef = useRef<HTMLSpanElement>(null);
+  const reviewSliderRef = useRef<HTMLInputElement>(null);
+  const review = useReview({
+    runtime,
+    frozen: isFrozen,
+    clock: playbackClock,
+    electrical: cardiac.electrical,
+    getMeasureSource,
+    sampleRateHz,
+    metrics,
+    view: measureView,
+    onFollow: setViewStartRingPos,
+    cursor: reviewCursorRef,
+    timeLabel: reviewTimeRef,
+    phaseLabel: reviewPhaseRef,
+    slider: reviewSliderRef,
+  });
   /** El puesto entero, que es la unidad que se exporta como imagen. */
   const shellRef = useRef<HTMLDivElement>(null);
   const [measureSession, setMeasureSession] = useState<MeasurementSession | null>(null);
+  // La estructura de conducción elegida en el corazón. Aquí y no en la escena
+  // porque su ficha se lee en el inspector, que es la columna de leer.
+  const [conductionStructure, setConductionStructure] =
+    useState<ConductionStructure | null>(null);
+  const [followStructure, setFollowStructure] = useState(false);
 
   const now = useClock();
   const clock = formatClock(now);
@@ -210,9 +253,15 @@ export function ECGWorkspace({
       composeSnapshot({
         stamp: clock,
         overlay: measureOverlayRef.current?.getCanvas() ?? null,
-        readout: composeSnapshotLines(isFrozen ? measureSession : null),
+        readout: [
+          ...composeSnapshotLines(isFrozen ? measureSession : null),
+          // En el repaso, la captura dice de qué instante y de qué fase es el
+          // corazón que enseña: el trazado congelado y el corazón ya no son
+          // del mismo momento si no se dice.
+          ...reviewSnapshotLines(playbackClock, cardiac.electrical.current),
+        ],
       }),
-    [composeSnapshot, clock, isFrozen, measureSession]
+    [composeSnapshot, clock, isFrozen, measureSession, playbackClock, cardiac.electrical]
   );
 
   // Lo que se exporta es el puesto entero, no el ECG suelto: la ganancia, la
@@ -495,6 +544,12 @@ export function ECGWorkspace({
               registerTrace={registerTrace}
               registerGrid={registerGrid}
               overlay={
+                <>
+                <ReviewCursor
+                  ref={reviewCursorRef}
+                  columns={leadColumns.length}
+                  metrics={metrics}
+                />
                 <MeasureOverlay
                   ref={measureOverlayRef}
                   active={isFrozen}
@@ -509,12 +564,28 @@ export function ECGWorkspace({
                   onPan={handlePan}
                   onZoom={handleZoom}
                 />
+                </>
               }
             />
           </div>
           <div className={styles.heartPane}>
+            {isFrozen && (
+              <ReviewTransport
+                review={review}
+                timeLabel={reviewTimeRef}
+                phaseLabel={reviewPhaseRef}
+                slider={reviewSliderRef}
+              />
+            )}
             <div className={styles.heartFrame}>
-              <HeartScene runtime={runtime} />
+              <HeartScene
+                runtime={runtime}
+                clock={playbackClock}
+                cardiac={cardiac}
+                selectedStructure={conductionStructure}
+                onSelectStructure={setConductionStructure}
+                followStructure={followStructure}
+              />
             </div>
           </div>
         </div>
@@ -542,8 +613,23 @@ export function ECGWorkspace({
           measurements={store.measurements}
           physiology={store.physiology}
           measureSession={isFrozen ? measureSession : null}
+          isReviewing={review.active}
           onToolChange={handleToolChange}
           onSnapChange={handleSnapChange}
+          conductionStructure={conductionStructure}
+          onCloseConductionStructure={() => {
+            setConductionStructure(null);
+            setFollowStructure(false);
+          }}
+          followingStructure={followStructure}
+          ladder={
+            <LadderPanel
+              electrical={cardiac.electrical}
+              clock={playbackClock}
+              label={selectedRhythm?.display_name ?? "sin ritmo"}
+            />
+          }
+          onToggleFollowStructure={() => setFollowStructure((on) => !on)}
         />
       }
       status={

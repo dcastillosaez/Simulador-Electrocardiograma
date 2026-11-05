@@ -43,7 +43,7 @@ from .measurements import MAX_CONDUCTION_PERIOD
 from .mechanics import NORMAL_PROFILE, ContractionMode, MechanicalProfile
 from .rhythm import EventTrain, RegularTrain, SilentTrain
 from .sources import BeatBasedSource
-from .types import EventKind, SignalSource, VariabilityParams
+from .types import EventKind, ImpulseOrigin, SignalSource, VariabilityParams
 
 
 class AvConduction(str, Enum):
@@ -122,6 +122,12 @@ class PatientSpec:
     t_amplitude_scale: float = 1.0
     """Amplitud de la T relativa a la normal. Negativo la invierte."""
 
+    atrial_origin: ImpulseOrigin = ImpulseOrigin.SINUS
+    """Dónde nace la actividad auricular: en el nodo sinusal o en otro punto
+    de la aurícula. No cambia la señal —la P es la que fijan sus mandos—, sino
+    el recorrido que enseña el corazón 3D: una aurícula supraventricular no
+    enciende el nodo sinusal."""
+
     p_amplitude_scale: float = 1.0
     """Amplitud de la P relativa a la sinusal. Cero la borra sin quitar la
     despolarización: la aurícula sigue mandando latidos al nodo AV aunque no
@@ -136,6 +142,10 @@ class PatientSpec:
         _check("st_shift_mv", self.st_shift_mv, -MAX_ST_SHIFT_MV, MAX_ST_SHIFT_MV)
         _check("t_amplitude_scale", self.t_amplitude_scale, -MAX_T_SCALE, MAX_T_SCALE)
         _check("p_amplitude_scale", self.p_amplitude_scale, 0.0, MAX_T_SCALE)
+        if self.atrial_origin is ImpulseOrigin.VENTRICULAR:
+            raise ValueError(
+                "atrial_origin describe la aurícula: sinus o supraventricular"
+            )
         if self.conduction_ratio < 2:
             raise ValueError(
                 f"conduction_ratio debe ser al menos 2, recibido "

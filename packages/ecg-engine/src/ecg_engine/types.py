@@ -36,6 +36,24 @@ class EventKind(str, Enum):
     VENTRICULAR = "ventricular"
 
 
+class ImpulseOrigin(str, Enum):
+    """Dónde nace el impulso que activa el corazón.
+
+    No se deduce de los eventos: en un bloqueo completo o en una taquicardia
+    ventricular los QRS vienen de un tren de escape con su propia numeración,
+    y emparejarlos con las P por índice inventaría conducción donde no la hay.
+    Lo auricular —sinusal o supraventricular— lo declara el catálogo junto al
+    perfil mecánico, y la `PatientSpec` para un paciente inventado. Lo
+    ventricular es lo que no viene de arriba.
+
+    Un escape de la unión, el día que exista, se añade aquí.
+    """
+
+    SINUS = "sinus"
+    SUPRAVENTRICULAR = "supraventricular"
+    VENTRICULAR = "ventricular"
+
+
 class WaveTarget(str, Enum):
     """Conjunto cerrado de componentes que un overlay puede modificar."""
 
