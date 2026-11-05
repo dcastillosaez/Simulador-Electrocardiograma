@@ -6,10 +6,15 @@ conducción y activa el tejido, todo con el mismo reloj que el ECG. Quien la use
 debe poder parar el trazado sobre una onda P, moverse por ella y ver qué parte
 del corazón se está activando en ese instante.
 
-Esto es una especificación: no hay nada implementado. Recoge el qué, el por qué
-y el orden, con criterios que se pueden comprobar, y sale de contrastar con el
-código una propuesta previa hecha sin ese acceso. Última revisión: 31 de
-octubre de 2026, sobre `master`.
+Esto es la especificación. Recoge el qué, el por qué y el orden, con criterios
+que se pueden comprobar, y sale de contrastar con el código una propuesta
+previa hecha sin ese acceso. Última revisión: 31 de octubre de 2026, sobre
+`master`.
+
+**Implementada** el 5 de noviembre de 2026, de H1 a H5. Lo hecho, lo
+comprobado, las adaptaciones al código —un grupo de deformación por cámara en
+lugar de dos, la ventana eléctrica adelantada— y lo que espera revisión humana
+están en [`estado.md`](estado.md).
 
 ## Lo que ya existe y condiciona el diseño
 

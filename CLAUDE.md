@@ -12,7 +12,8 @@ Este fichero son reglas, no estado. El estado y el porqué de cada decisión viv
 - `docs/fase-g/plan-de-fases.md` — las ocho sub-fases, con criterios de aceptación comprobables.
 - `docs/fase-g/estado.md` — qué está hecho, qué falta y qué no puede hacerse sin comprar un certificado o levantar un servidor.
 - `docs/fase-d/valvulas.md` — el ciclo de las cuatro válvulas y cómo se sintetizaron las poses.
-- `docs/fase-h/propagacion-electrica.md` — especificación, aún sin implementar, de la propagación eléctrica en el corazón 3D.
+- `docs/fase-h/propagacion-electrica.md` — especificación de la propagación eléctrica en el corazón 3D, implementada de H1 a H5.
+- `docs/fase-h/estado.md` — qué está hecho de la fase H, qué se comprobó, en qué se apartó de la especificación y qué espera revisión humana (anatomía de H1, tiempos de H2, FPS en la máquina de referencia).
 - `docs/requisitos-del-sistema.md` y `docs/instalacion.md`.
 - `Instrucciones.md.txt` e `Instrucciones_Electrocardiograma.md` — el brief original, como contexto histórico.
 
@@ -57,6 +58,14 @@ Reglas que no se deducen leyendo el código y que, si se rompen, rompen algo.
 **La escala del trazado la negocian las dos dimensiones**, no solo el ancho. El papel encoge —milímetro más pequeño, cuadrícula igual de cuadrada, los mismos 250 mm a lo ancho— hasta que los 40 mm de tira a 10 mm/mV caben en el alto disponible, y solo si ni al mínimo de escala caben se baja la ganancia. Sacarla del ancho a secas descarta de oficio la ganancia estándar. El reparto lo calcula `computeLayoutMetrics` (`apps/web/src/render/layout-engine.ts`, campo `ecgWidthPx`), y el sobrante horizontal es del corazón 3D, no una franja vacía. En esa columna manda el inspector: pide primero su alto natural y el escenario scrollea con lo que quede, con suelo de 220 px. El marco del corazón ocupa ese sobrante entero, alto incluido, y el precio lo paga la cámara: con `fov` vertical un lienzo estrecho recorta el modelo por los costados, así que encuadra por el lado corto (`framingRadius`).
 
 **Un replay solo es verificable si la sesión guarda la versión del motor farmacológico.** Las administraciones se registran en `drug_administrations` y los casos inventados en `custom_patients`; cambiar el motor sin registrar su versión convierte el historial en algo que ya no se puede reproducir.
+
+**La electricidad es la tercera línea temporal, con el mismo reloj.** El servidor manda los instantes de cada tramo (`heart-engine/electrical.py`, dentro de `cardiac_events`) y el cliente solo interpola el pulso; despolarización y contracción no se funden, para que una disociación electromecánica pueda existir. El origen de un impulso lo declaran el catálogo (`atrial_origin`), la `PatientSpec` y las políticas (`pairs_by_index`), nunca se deduce emparejando índices. Su ventana se publica adelantada, pero siempre dentro de `RENDER_MARGIN_S`: anunciar un evento que el motor aún no ha fijado sería anunciar lo que quizá no se dibuje.
+
+**Los tiempos de activación son datos con fuente.** Viven en `packages/heart-engine/src/heart_engine/data/activation-timing.yaml`, con referencia completa por valor, `version` y `revision_clinica`. Un valor sin fuente no entra: el motor usa el límite que ya marca el trazado y el YAML lo lista en `sin_fuente`.
+
+**Lo que dibuja el corazón es función pura del tiempo.** Pose, válvulas, pulso, tejido y actividad continua se calculan del instante y de las líneas temporales, sin nada acumulado entre fotogramas; lo caótico lleva semilla fija. Por eso el repaso del trazado congelado funciona: mueve un cursor (`PlaybackClock`) y nunca consume el buffer ni habla con el servidor. La poda de las líneas temporales es contra la cabeza del directo, con margen igual al papel.
+
+**La conducción se deforma con su cámara.** Cuelga de un grupo por cámara, con el pivote del nodo y su misma fila de `DEFORMATION`: los pivotes del `.glb` difieren y un grupo compartido se despega de la pared. Los trayectos y el mapa de activación se generan con `docs/fase-h/build-conduction-paths.py` y `build-activation-map.py`, que validan contra las dos pieles en siete puntos del ciclo y regeneran idéntico con `--check`; no se editan a mano. Ningún módulo de la propagación pregunta por un `rhythm_id`, y un test lo comprueba.
 
 **Golden signals en tres niveles.** Si cambia la señal de un ritmo, es cambio intencional o es regresión. No hay tercera opción.
 
