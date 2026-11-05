@@ -414,4 +414,4 @@ class SimulationManager:
             self._profile(),
             self.rhythm_id,
             engine_pulse_bpm(self._engine.params, self.rhythm_id),
-        ).as_payload()
+        ).as_payload(t_s=self._engine.t_s)

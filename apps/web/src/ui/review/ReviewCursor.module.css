@@ -1,0 +1,21 @@
+/* Capa del cursor del repaso. Encima del trazado y por debajo de nada que
+   reciba el ratón: la medida sigue siendo dueña del clic y del arrastre. */
+.layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.line {
+  display: none;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--inspector-ok);
+  box-shadow: 0 0 6px color-mix(in oklab, var(--inspector-ok) 60%, transparent);
+  will-change: transform;
+}

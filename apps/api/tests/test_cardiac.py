@@ -303,3 +303,14 @@ def test_una_aurícula_en_flutter_publica_impulsos_aunque_no_se_contraiga():
     manager.start("atrial_flutter", None, seed=1)
     payloads = _run(manager, 40)
     assert any(p["electrical"] for _, p in payloads)
+
+
+def test_el_estado_del_corazon_lleva_su_instante():
+    """Fase H3: el repaso guarda el estado como tramos constantes en el
+    tiempo, y para eso cada publicación dice a qué instante corresponde."""
+    manager = SimulationManager()
+    manager.start("sinus_normal", None, seed=1)
+    for _ in range(10):
+        manager.next_chunk()
+    state = manager.heart_state()
+    assert state["t_s"] == pytest.approx(manager.duration_s, abs=1e-3)

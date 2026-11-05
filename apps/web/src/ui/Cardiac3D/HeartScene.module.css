@@ -89,6 +89,10 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-1);
+  /* Con el grupo de la conducción son cinco botones, y en una sola fila
+     pedían más ancho del que deja el papel: la columna de mandos empujaba la
+     rejilla fuera del marco. Con techo, saltan de línea. */
+  max-width: 21rem;
 }
 
 .group {
@@ -201,8 +205,13 @@
    280px y la lectura de válvulas 210—, así que dejan de compartir fila: las
    vistas arriba del todo ocupando el ancho, la lectura debajo, y las capas
    apiladas contra el borde inferior. Es el reparto que aprovecha que este
-   marco tiene de sobra lo que le falta de ancho: alto. */
-@container heart (max-width: 520px) {
+   marco tiene de sobra lo que le falta de ancho: alto.
+
+   El umbral era 520px. Con el grupo de la conducción la columna de capas
+   pide unos 340px, que con los 210 de la lectura de válvulas y los márgenes
+   ya no caben por debajo de 600: entre 520 y 600 la rejilla se salía del
+   marco y se comía la última vista y el último botón. */
+@container heart (max-width: 600px) {
   .chrome {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto auto 1fr auto auto;

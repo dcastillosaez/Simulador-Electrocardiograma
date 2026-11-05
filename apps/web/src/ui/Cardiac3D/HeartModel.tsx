@@ -31,9 +31,10 @@ import {
 import type { CardiacTimeline } from "../../cardiac/cardiac-timeline";
 import type { ValveTimeline } from "../../cardiac/valve-timeline";
 import type { ElectricalTimeline } from "../../cardiac/electrical-timeline";
+import type { HeartStateTimeline } from "../../cardiac/heart-state-timeline";
+import type { PlaybackClock } from "../../cardiac/playback-clock";
 import { writePulseUniforms } from "./ConductionSystem/conduction-pulse";
 import type { HeartStateValues } from "./useCardiacTimeline";
-import type { SessionRuntime } from "../../simulation-runtime/session-runtime";
 import { ConductionSystem } from "./ConductionSystem/ConductionSystem";
 import type { ConductionUniforms } from "./ConductionSystem/conduction-material";
 import type { ConductionStructure } from "./ConductionSystem/conduction-structures";
@@ -41,7 +42,9 @@ import type { ConductionStructure } from "./ConductionSystem/conduction-structur
 export const HEART_MODEL_URL = "/models/heart.glb";
 
 export interface HeartModelProps {
-  runtime: SessionRuntime;
+  /** La cabeza de reproducción: la del directo, o el cursor del repaso. */
+  clock: PlaybackClock;
+  heartStates: MutableRefObject<HeartStateTimeline>;
   timeline: MutableRefObject<CardiacTimeline>;
   valves: MutableRefObject<ValveTimeline>;
   electrical: MutableRefObject<ElectricalTimeline>;
@@ -74,11 +77,12 @@ const PRUNE_MARGIN_S = 1;
 const PRUNE_EVERY_FRAMES = 120;
 
 export function HeartModel({
-  runtime,
+  clock,
+  heartStates,
   timeline,
   valves,
   electrical,
-  heartState,
+  heartState: latestHeartState,
   isolated,
   opacity,
   showMyocardium,
@@ -306,15 +310,27 @@ export function HeartModel({
     // `advance()` no se llama aquí: la llama `useSweepRenderer`, una sola vez
     // por tick. Llamarla también aquí consumiría trozos que el ECG nunca
     // llegaría a dibujar.
-    const tS = runtime.buffer.playbackTimeS;
+    //
+    // En el repaso, el cursor manda en vez de la cabeza: `clock` devuelve uno u
+    // otro y aquí no se distingue. Todo lo que sigue es función pura de `tS`,
+    // así que el mismo instante da la misma pose llegando desde delante,
+    // desde detrás o a cualquier velocidad.
+    const tS = clock.timeS;
     if (tS === null) return;
 
     frameCount.current += 1;
-    if (frameCount.current % PRUNE_EVERY_FRAMES === 0) {
-      timeline.current.prune(tS - PRUNE_MARGIN_S);
-      valves.current.prune(tS - PRUNE_MARGIN_S);
-      electrical.current.prune(tS - PRUNE_MARGIN_S);
+    const liveS = clock.liveTimeS;
+    if (liveS !== null && frameCount.current % PRUNE_EVERY_FRAMES === 0) {
+      // La poda va contra la cabeza del directo y no contra `tS`, que en el
+      // repaso va hacia atrás: podar contra el cursor tiraría justo el pasado
+      // que se quiere mirar. El margen es lo que abarca el papel.
+      const horizon = liveS - clock.retentionS - PRUNE_MARGIN_S;
+      timeline.current.prune(horizon);
+      valves.current.prune(horizon);
+      electrical.current.prune(horizon);
+      heartStates.current.prune(horizon);
     }
+    const heartState = heartStates.current.valuesAt(tS) ?? latestHeartState;
 
     const atria = excursionFor("atria", tS, timeline.current, heartState);
     // La conducción recibe la escala en la misma llamada que las cámaras: si

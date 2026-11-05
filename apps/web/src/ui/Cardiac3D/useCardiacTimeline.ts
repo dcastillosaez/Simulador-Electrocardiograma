@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { CardiacTimeline } from "../../cardiac/cardiac-timeline";
 import { ValveTimeline } from "../../cardiac/valve-timeline";
 import { ElectricalTimeline } from "../../cardiac/electrical-timeline";
+import { HeartStateTimeline } from "../../cardiac/heart-state-timeline";
 import type { SessionRuntime } from "../../simulation-runtime/session-runtime";
 import type {
   CardiacEventsMessage,
@@ -29,18 +30,29 @@ export interface UseCardiacTimelineResult {
    * mismo reloj. Separada de las contracciones porque una disociación
    * electromecánica tiene que poder existir. */
   electrical: MutableRefObject<ElectricalTimeline>;
+  /** El estado mecánico como tramos en el tiempo. Lo lee el dibujo, que en el
+   * repaso puede estar seis segundos por detrás del último estado. */
+  heartStates: MutableRefObject<HeartStateTimeline>;
   /** En estado sí: cambia cuatro veces por segundo como mucho, y hay
    * interfaz —modo de cada cámara— que depende de él. */
   heartState: HeartStateValues | null;
 }
 
-export function useCardiacTimeline(runtime: SessionRuntime): UseCardiacTimelineResult {
+/** `enabled` falso deja el hook montado pero sin escuchar: lo usa la escena
+ * cuando las líneas temporales se las da otro (el puesto, que las comparte con
+ * el repaso). Los hooks no se pueden llamar condicionalmente. */
+export function useCardiacTimeline(
+  runtime: SessionRuntime,
+  enabled = true
+): UseCardiacTimelineResult {
   const timeline = useRef(new CardiacTimeline());
   const valves = useRef(new ValveTimeline());
   const electrical = useRef(new ElectricalTimeline());
+  const heartStates = useRef(new HeartStateTimeline());
   const [heartState, setHeartState] = useState<HeartStateValues | null>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     const onEvents = (message: CardiacEventsMessage) => {
       const epoch = message.source_started_s ?? 0;
       timeline.current.push(message.events, epoch);
@@ -52,7 +64,12 @@ export function useCardiacTimeline(runtime: SessionRuntime): UseCardiacTimelineR
       // reproduce sin impulsos.
       electrical.current.push(message.electrical ?? [], epoch);
     };
-    const onState = (message: HeartStateMessage) => setHeartState(message.values);
+    const onState = (message: HeartStateMessage) => {
+      // Sin `t_s` —una sesión anterior a la fase H3— el estado vale desde el
+      // principio, que es lo que hacía antes.
+      heartStates.current.push(message.values, message.t_s ?? 0);
+      setHeartState(message.values);
+    };
     // Un ritmo nuevo arranca en t=0: sin vaciar, las contracciones del ritmo
     // anterior seguirían en cola con instantes que el reloj nuevo va a
     // recorrer otra vez, y el corazón latiría al ritmo viejo un rato.
@@ -60,6 +77,7 @@ export function useCardiacTimeline(runtime: SessionRuntime): UseCardiacTimelineR
       timeline.current.clear();
       valves.current.clear();
       electrical.current.clear();
+      heartStates.current.clear();
       setHeartState(null);
     };
 
@@ -71,7 +89,7 @@ export function useCardiacTimeline(runtime: SessionRuntime): UseCardiacTimelineR
       runtime.off("heartState", onState);
       runtime.off("started", onStarted);
     };
-  }, [runtime]);
+  }, [runtime, enabled]);
 
-  return { timeline, valves, electrical, heartState };
+  return { timeline, valves, electrical, heartStates, heartState };
 }

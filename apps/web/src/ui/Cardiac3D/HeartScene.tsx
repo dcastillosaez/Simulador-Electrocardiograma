@@ -33,7 +33,8 @@ import {
   apertureLabel,
   type ValveHandles,
 } from "./ValveReadout";
-import { useCardiacTimeline } from "./useCardiacTimeline";
+import { useCardiacTimeline, type UseCardiacTimelineResult } from "./useCardiacTimeline";
+import { PlaybackClock } from "../../cardiac/playback-clock";
 import { createConductionUniforms } from "./ConductionSystem/conduction-material";
 import {
   DIDACTIC_NOTICE,
@@ -132,6 +133,12 @@ function AspectFraming({ preset }: { preset: CameraPreset }) {
 
 export interface HeartSceneProps {
   runtime: SessionRuntime;
+  /** La cabeza de reproducción compartida con el repaso. Sin ella, la escena
+   * usa la del directo. */
+  clock?: PlaybackClock;
+  /** Las líneas temporales, si las aporta quien también las necesita (el
+   * repaso). Sin ellas la escena crea las suyas. */
+  cardiac?: UseCardiacTimelineResult;
   /** La estructura de conducción seleccionada. Vive fuera de la escena porque
    * su ficha se lee en el inspector. */
   selectedStructure?: ConductionStructure | null;
@@ -140,10 +147,15 @@ export interface HeartSceneProps {
 
 export function HeartScene({
   runtime,
+  clock: sharedClock,
+  cardiac,
   selectedStructure = null,
   onSelectStructure,
 }: HeartSceneProps) {
-  const { timeline, valves, electrical, heartState } = useCardiacTimeline(runtime);
+  const own = useCardiacTimeline(runtime, cardiac === undefined);
+  const { timeline, valves, electrical, heartStates, heartState } = cardiac ?? own;
+  const ownClock = useMemo(() => new PlaybackClock(runtime.buffer), [runtime]);
+  const clock = sharedClock ?? ownClock;
   const [preset, setPreset] = useState<CameraPreset>(DEFAULT_PRESET);
   const [isolated, setIsolated] = useState<ReadonlySet<HeartGroup>>(new Set());
   const [opacity, setOpacity] = useState(1);
@@ -256,7 +268,8 @@ export function HeartScene({
         <AspectFraming preset={preset} />
         <ScaleBar barRef={scaleBarRef} labelRef={scaleLabelRef} />
         <ValveReadout
-          runtime={runtime}
+          clock={clock}
+          heartStates={heartStates}
           valves={valves}
           timeline={timeline}
           heartState={heartState}
@@ -271,7 +284,8 @@ export function HeartScene({
 
         <Suspense fallback={null}>
           <HeartModel
-            runtime={runtime}
+            clock={clock}
+            heartStates={heartStates}
             timeline={timeline}
             valves={valves}
             electrical={electrical}

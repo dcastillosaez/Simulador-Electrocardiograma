@@ -44,8 +44,14 @@ class HeartState:
             flutter_hz=profile.flutter_hz,
         )
 
-    def as_payload(self) -> dict[str, Any]:
-        return {
+    def as_payload(self, t_s: float | None = None) -> dict[str, Any]:
+        """`t_s` es el instante de simulación al que corresponde el estado.
+
+        Con él el cliente guarda los cambios como tramos constantes, y el
+        repaso recupera el modo de cada cámara en cualquier instante del
+        papel: si el ritmo cambió hace seis segundos, volver atrás devuelve el
+        corazón de entonces. Opcional para no romper a quien no lo pase."""
+        payload: dict[str, Any] = {
             "type": "heart_state",
             "values": {
                 "rhythm_id": self.rhythm_id,
@@ -57,3 +63,6 @@ class HeartState:
                 "flutter_hz": self.flutter_hz,
             },
         }
+        if t_s is not None:
+            payload["t_s"] = round(t_s, 3)
+        return payload

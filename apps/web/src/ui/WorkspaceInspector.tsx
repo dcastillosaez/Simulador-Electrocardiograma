@@ -99,6 +99,10 @@ export interface WorkspaceInspectorProps {
    * que retomar) no se ofrece el botón: elegir uno en el selector ya
    * reconecta. */
   onReconnect?: () => void;
+  /** El repaso del trazado congelado está abierto. Las medidas del panel
+   * siguen siendo las del momento de congelar, y hay que decirlo para que
+   * nadie las atribuya al instante del cursor. */
+  isReviewing?: boolean;
   /** La estructura de conducción elegida en el corazón 3D, si hay alguna. */
   conductionStructure?: ConductionStructure | null;
   onCloseConductionStructure?: () => void;
@@ -128,6 +132,7 @@ export function WorkspaceInspector({
   onReconnect,
   conductionStructure = null,
   onCloseConductionStructure,
+  isReviewing = false,
 }: WorkspaceInspectorProps) {
   /** Una medida del servidor, lista para pasar a `Metric`.
    *
@@ -271,7 +276,7 @@ export function WorkspaceInspector({
             />
           </Section>
         )}
-        <Section title="Ritmo">
+        <Section title={isReviewing ? "Ritmo (medidas del momento de congelar)" : "Ritmo"}>
           {/* Fuera de la rejilla, y no como su primera casilla: el nombre del
               ritmo no es una medida —no se mide sobre la señal, es la etiqueta
               de lo que se pidió— y en media columna se partía en tres líneas,
