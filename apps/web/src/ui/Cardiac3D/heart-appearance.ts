@@ -29,7 +29,8 @@ export type HeartGroup =
   | "atria"
   | "vessels"
   | "myocardium"
-  | "valves";
+  | "valves"
+  | "conduction";
 
 export interface Appearance {
   /** Color base en hexadecimal, listo para `THREE.Color`. */
@@ -176,8 +177,18 @@ export const VALVE_APPEARANCE: Appearance = {
  *
  * Las válvulas sí están, y son el grupo que más se usa: en el corazón entero
  * quedan enterradas dentro de las cavidades, así que aislarlas —lo que deja
- * las cámaras como fantasmas— es la forma de ver cómo se abren y se cierran. */
-export const HEART_GROUPS = ["ventricles", "atria", "vessels", "valves"] as const;
+ * las cámaras como fantasmas— es la forma de ver cómo se abren y se cierran.
+ *
+ * La conducción, por lo mismo: sus vías auriculares viven dentro de la pared
+ * de la aurícula y solo se ven con el resto en fantasma. Aislarla la enciende
+ * aunque su capa esté apagada (ver `HeartScene`). */
+export const HEART_GROUPS = [
+  "ventricles",
+  "atria",
+  "vessels",
+  "valves",
+  "conduction",
+] as const;
 
 /** Qué estructuras caen en cada grupo. Se deriva de la tabla en vez de
  * escribirse aparte: dos listas que hay que mantener a la vez se

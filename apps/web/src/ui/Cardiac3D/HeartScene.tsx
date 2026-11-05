@@ -34,6 +34,11 @@ import {
   type ValveHandles,
 } from "./ValveReadout";
 import { useCardiacTimeline } from "./useCardiacTimeline";
+import { createConductionUniforms } from "./ConductionSystem/conduction-material";
+import {
+  DIDACTIC_NOTICE,
+  type ConductionStructure,
+} from "./ConductionSystem/conduction-structures";
 import { RESTING_APERTURE } from "../../cardiac/valve-timeline";
 import type { SessionRuntime } from "../../simulation-runtime/session-runtime";
 import styles from "./HeartScene.module.css";
@@ -57,6 +62,7 @@ const GROUP_LABELS: Record<HeartGroup, string> = {
   vessels: "Grandes vasos",
   myocardium: "Miocardio",
   valves: "Válvulas",
+  conduction: "Conducción",
 };
 
 /** Enciende el recorte local del renderizador.
@@ -126,14 +132,26 @@ function AspectFraming({ preset }: { preset: CameraPreset }) {
 
 export interface HeartSceneProps {
   runtime: SessionRuntime;
+  /** La estructura de conducción seleccionada. Vive fuera de la escena porque
+   * su ficha se lee en el inspector. */
+  selectedStructure?: ConductionStructure | null;
+  onSelectStructure?: (structure: ConductionStructure | null) => void;
 }
 
-export function HeartScene({ runtime }: HeartSceneProps) {
+export function HeartScene({
+  runtime,
+  selectedStructure = null,
+  onSelectStructure,
+}: HeartSceneProps) {
   const { timeline, valves, heartState } = useCardiacTimeline(runtime);
   const [preset, setPreset] = useState<CameraPreset>(DEFAULT_PRESET);
   const [isolated, setIsolated] = useState<ReadonlySet<HeartGroup>>(new Set());
   const [opacity, setOpacity] = useState(1);
   const [myocardium, setMyocardium] = useState(false);
+  // Apagada por defecto, como el miocardio: es una capa que se enciende a
+  // propósito, y sus vías auriculares y su red de Purkinje son un esquema.
+  const [conduction, setConduction] = useState(false);
+  const conductionUniforms = useMemo(() => createConductionUniforms(), []);
   // Un corte por eje, cada uno con su profundidad. `null` es apagado.
   const [cuts, setCuts] = useState<Record<CutAxis, number | null>>({
     coronal: null,
@@ -261,6 +279,12 @@ export function HeartScene({ runtime }: HeartSceneProps) {
             opacity={opacity}
             showMyocardium={myocardium}
             cuts={activeCuts}
+            // Aislar la conducción la enciende: aislar algo que no se ve
+            // dejaría el corazón en fantasma y nada delante.
+            showConduction={conduction || isolated.has("conduction")}
+            conductionUniforms={conductionUniforms}
+            selectedStructure={selectedStructure}
+            onSelectStructure={onSelectStructure}
           />
         </Suspense>
 
@@ -376,7 +400,24 @@ export function HeartScene({ runtime }: HeartSceneProps) {
             >
               Miocardio
             </button>
+            <button
+              type="button"
+              className={`${styles.group} ${conduction ? styles.groupActive : ""}`}
+              aria-pressed={conduction}
+              onClick={() => setConduction((on) => !on)}
+            >
+              {/* Otro rótulo que el del grupo de aislar: los dos botones
+                  conviven y hacen cosas distintas — este enciende la capa,
+                  aquel deja el resto del corazón en fantasma. */}
+              Ver conducción
+            </button>
           </div>
+          {/* La advertencia va pegada a la capa y solo cuando se ve: una
+              animación convincente parece más exacta de lo que es, y quien la
+              mira tiene que saber qué parte es esquema. */}
+          {(conduction || isolated.has("conduction")) && (
+            <p className={styles.didactic}>{DIDACTIC_NOTICE}</p>
+          )}
           {/* Los tres planos son combinables, no alternativas: Three.js conserva
               la geometría que está del lado bueno de todos, así que dos abren
               una esquina y tres un octante. */}

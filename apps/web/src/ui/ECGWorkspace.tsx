@@ -26,6 +26,7 @@ import { HeartScene } from "./Cardiac3D/HeartScene";
 import { MeasureOverlay, type MeasureOverlayHandle } from "./MeasureOverlay";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import { WorkspaceInspector } from "./WorkspaceInspector";
+import type { ConductionStructure } from "./Cardiac3D/ConductionSystem/conduction-structures";
 import { useLayoutMetrics } from "./hooks/useLayoutMetrics";
 import { useSimulationRuntime } from "./hooks/useSimulationRuntime";
 import { composeSnapshotLines, useSweepRenderer } from "./hooks/useSweepRenderer";
@@ -199,6 +200,10 @@ export function ECGWorkspace({
   /** El puesto entero, que es la unidad que se exporta como imagen. */
   const shellRef = useRef<HTMLDivElement>(null);
   const [measureSession, setMeasureSession] = useState<MeasurementSession | null>(null);
+  // La estructura de conducción elegida en el corazón. Aquí y no en la escena
+  // porque su ficha se lee en el inspector, que es la columna de leer.
+  const [conductionStructure, setConductionStructure] =
+    useState<ConductionStructure | null>(null);
 
   const now = useClock();
   const clock = formatClock(now);
@@ -514,7 +519,11 @@ export function ECGWorkspace({
           </div>
           <div className={styles.heartPane}>
             <div className={styles.heartFrame}>
-              <HeartScene runtime={runtime} />
+              <HeartScene
+                runtime={runtime}
+                selectedStructure={conductionStructure}
+                onSelectStructure={setConductionStructure}
+              />
             </div>
           </div>
         </div>
@@ -544,6 +553,8 @@ export function ECGWorkspace({
           measureSession={isFrozen ? measureSession : null}
           onToolChange={handleToolChange}
           onSnapChange={handleSnapChange}
+          conductionStructure={conductionStructure}
+          onCloseConductionStructure={() => setConductionStructure(null)}
         />
       }
       status={

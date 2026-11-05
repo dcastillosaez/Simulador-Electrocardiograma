@@ -6,6 +6,8 @@ import type { SnapMode } from "../measure/snap";
 import type { ToolId } from "../measure/tools";
 import type { SessionState } from "../simulation-runtime/session-runtime";
 import type { AtrialActivityName } from "../types/ws-messages";
+import { ConductionCard } from "./Cardiac3D/ConductionSystem/ConductionCard";
+import type { ConductionStructure } from "./Cardiac3D/ConductionSystem/conduction-structures";
 
 /** Lo que se escribe donde iría la frecuencia auricular cuando no hay ninguna
  * que contar. No es un hueco a secas: en una fibrilación, «fibrilatoria» es
@@ -97,6 +99,9 @@ export interface WorkspaceInspectorProps {
    * que retomar) no se ofrece el botón: elegir uno en el selector ya
    * reconecta. */
   onReconnect?: () => void;
+  /** La estructura de conducción elegida en el corazón 3D, si hay alguna. */
+  conductionStructure?: ConductionStructure | null;
+  onCloseConductionStructure?: () => void;
 }
 
 /** El panel de información del puesto de simulación: estado de la sesión y
@@ -121,6 +126,8 @@ export function WorkspaceInspector({
   onToolChange,
   onSnapChange,
   onReconnect,
+  conductionStructure = null,
+  onCloseConductionStructure,
 }: WorkspaceInspectorProps) {
   /** Una medida del servidor, lista para pasar a `Metric`.
    *
@@ -250,6 +257,17 @@ export function WorkspaceInspector({
               session={measureSession}
               onToolChange={onToolChange}
               onSnapChange={onSnapChange}
+            />
+          </Section>
+        )}
+        {/* La ficha entra solo con algo elegido y pide su alto natural, como
+            el resto del inspector: el escenario del corazón conserva su suelo
+            de 220 px y scrollea con lo que quede. */}
+        {conductionStructure && (
+          <Section title="Sistema de conducción">
+            <ConductionCard
+              structure={conductionStructure}
+              onClose={onCloseConductionStructure}
             />
           </Section>
         )}

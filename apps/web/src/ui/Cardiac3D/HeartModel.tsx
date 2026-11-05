@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
-import { DoubleSide, Mesh, MeshStandardMaterial, Plane, Vector3 } from "three";
-import { applyExcursion } from "./HeartAnimator";
+import { DoubleSide, Group, Mesh, MeshStandardMaterial, Plane, Vector3 } from "three";
+import { applyExcursion, type ConductionGroupName } from "./HeartAnimator";
 import { HEART_NODE_NAMES, bindHeartNodes, type HeartNodeName, type Object3DLike } from "./heart-nodes";
 import {
   APPEARANCE,
@@ -32,6 +32,9 @@ import type { CardiacTimeline } from "../../cardiac/cardiac-timeline";
 import type { ValveTimeline } from "../../cardiac/valve-timeline";
 import type { HeartStateValues } from "./useCardiacTimeline";
 import type { SessionRuntime } from "../../simulation-runtime/session-runtime";
+import { ConductionSystem } from "./ConductionSystem/ConductionSystem";
+import type { ConductionUniforms } from "./ConductionSystem/conduction-material";
+import type { ConductionStructure } from "./ConductionSystem/conduction-structures";
 
 export const HEART_MODEL_URL = "/models/heart.glb";
 
@@ -51,6 +54,11 @@ export interface HeartModelProps {
   /** Cortes anatómicos activos. Vacío deja el corazón entero. No son
    * excluyentes: dos planos abren una esquina y tres un octante. */
   cuts: ActiveCut[];
+  /** Enseña el sistema de conducción. */
+  showConduction: boolean;
+  conductionUniforms: ConductionUniforms;
+  selectedStructure: ConductionStructure | null;
+  onSelectStructure?: (structure: ConductionStructure | null) => void;
 }
 
 /** Cuánto se descarta de la cola por detrás de la cabeza de reproducción. Un
@@ -71,6 +79,10 @@ export function HeartModel({
   opacity,
   showMyocardium,
   cuts,
+  showConduction,
+  conductionUniforms,
+  selectedStructure,
+  onSelectStructure,
 }: HeartModelProps) {
   const { scene } = useGLTF(HEART_MODEL_URL);
   const nodes = useMemo(
@@ -82,6 +94,7 @@ export function HeartModel({
     [scene]
   );
   const frameCount = useRef(0);
+  const conductionGroups = useRef<Partial<Record<ConductionGroupName, Group>>>({});
 
   // Un material por estructura, creado una vez. El `.glb` no trae ninguno
   // —solo posiciones y normales—, así que sin esto Three.js aplica su blanco
@@ -299,10 +312,17 @@ export function HeartModel({
     }
 
     const atria = excursionFor("atria", tS, timeline.current, heartState);
-    applyExcursion(nodes, {
-      atria,
-      ventricles: excursionFor("ventricles", tS, timeline.current, heartState),
-    });
+    // La conducción recibe la escala en la misma llamada que las cámaras: si
+    // fuera en otra, un fotograma podría dibujar el His con la excursión del
+    // anterior y el corazón con la de este.
+    applyExcursion(
+      nodes,
+      {
+        atria,
+        ventricles: excursionFor("ventricles", tS, timeline.current, heartState),
+      },
+      conductionGroups.current
+    );
 
     // El mismo `tS` que acaba de mover las cámaras. Que sea el mismo no es un
     // detalle de implementación: es lo único que garantiza que la mitral se
@@ -325,6 +345,20 @@ export function HeartModel({
   return (
     <>
       <primitive object={scene} />
+      <ConductionSystem
+        nodes={nodes}
+        uniforms={conductionUniforms}
+        groups={conductionGroups}
+        visible={showConduction}
+        // Mismo trato que las válvulas: con su grupo aislado o sin aislar
+        // nada se ve con la opacidad del mando; si se aísla otra cosa, queda
+        // en fantasma.
+        opacity={groupIsVisible("conduction", isolated) ? opacity : GHOST_OPACITY}
+        planes={activePlanes.length === 0 ? null : activePlanes}
+        renderOrder={activePlanes.length === 0 ? 0 : CLIPPED_MESH_ORDER + 1}
+        selected={selectedStructure}
+        onSelect={onSelectStructure}
+      />
       {activePlanes.length > 0 && (
         <HeartCutaway
           nodes={nodes}

@@ -1,0 +1,37 @@
+.card {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-family: var(--font-ui);
+  font-weight: 600;
+}
+
+.swatch {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  flex: none;
+}
+
+.text {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+}
+
+.note {
+  margin: 0;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+}
+
+.close {
+  justify-self: start;
+}

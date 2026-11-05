@@ -226,3 +226,18 @@
     flex-wrap: wrap;
   }
 }
+
+/* La advertencia de esquema didáctico de la capa de conducción. Dentro de la
+   columna de mandos y del mismo tamaño que la atribución: es una nota que se
+   tiene que poder leer, no un aviso que tape el corazón. */
+.didactic {
+  max-width: 28ch;
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--panel-background) 78%, transparent);
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  pointer-events: auto;
+}
