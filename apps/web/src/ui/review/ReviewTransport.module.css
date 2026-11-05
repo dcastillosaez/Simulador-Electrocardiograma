@@ -44,3 +44,25 @@
   font-family: var(--font-ui);
   font-size: var(--font-size-xs);
 }
+
+.phases {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.phaseChip {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+.bar[data-phase="P"] .phaseChip[data-chip="P"],
+.bar[data-phase="PR"] .phaseChip[data-chip="PR"],
+.bar[data-phase="QRS"] .phaseChip[data-chip="QRS"],
+.bar[data-phase="T"] .phaseChip[data-chip="T"] {
+  border-color: var(--inspector-ok);
+  color: var(--text-primary);
+}

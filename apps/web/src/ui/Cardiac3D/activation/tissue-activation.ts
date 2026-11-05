@@ -90,12 +90,17 @@ export function attachActivation(name: string, geometry: BufferGeometry): boolea
  * el mismo instante da siempre la misma imagen. */
 export interface TissueUniforms {
   uTissue: { value: Vector4[] };
+  /** La actividad continua de cada tejido —un circuito de flutter, una
+   * fibrilación—: modo, fase y frecuencia. La escribe
+   * `writeContinuousActivity` (ver `continuous-activity.ts`). */
+  uContinuous: { value: Vector4[] };
   uActivationOn: { value: number };
 }
 
 export function createTissueUniforms(): TissueUniforms {
   return {
     uTissue: { value: TISSUES.map(() => new Vector4(-1, 0, 0, 0)) },
+    uContinuous: { value: TISSUES.map(() => new Vector4(0, 0, 0, 0)) },
     uActivationOn: { value: 0 },
   };
 }
@@ -191,6 +196,7 @@ vTissue = ${TISSUE_ATTRIBUTE};`
         "#include <common>",
         `#include <common>
 uniform vec4 uTissue[${TISSUES.length}];
+uniform vec4 uContinuous[${TISSUES.length}];
 uniform float uActivationOn;
 varying float vActivation;
 varying float vTissue;`
@@ -210,8 +216,19 @@ if (uActivationOn > 0.5) {
   }
   // La recuperación tiene color propio y no afirma ningún orden espacial.
   totalEmissiveRadiance += vec3(0.35, 0.6, 1.0) * 0.3 * w.w;
+  // Actividad continua: un frente que da vueltas (flutter) o manchas que
+  // cambian sin orden (fibrilación). Las dos son función del tiempo que llega
+  // en el uniforme, sin estado.
+  vec4 c = uContinuous[int(vTissue + 0.5)];
+  if (c.x > 0.5 && c.x < 1.5) {
+    float d = fract(c.y - vActivation);
+    totalEmissiveRadiance += vec3(1.0, 0.78, 0.25) * exp(-d / 0.08) * 0.5;
+  } else if (c.x > 1.5) {
+    float n = sin(vActivation * 97.0 + c.y * 9.1) * sin(vActivation * 61.0 - c.y * 13.7 + vTissue * 3.0);
+    totalEmissiveRadiance += vec3(1.0, 0.7, 0.25) * smoothstep(0.55, 0.95, n) * 0.45;
+  }
 }`
       );
   };
-  material.customProgramCacheKey = () => "tissue-activation-v1";
+  material.customProgramCacheKey = () => "tissue-activation-v2";
 }

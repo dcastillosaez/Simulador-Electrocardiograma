@@ -48,6 +48,21 @@ export interface UseReviewResult {
   seek: (tS: number) => void;
 }
 
+/** Lo que la captura exportada dice del repaso: el instante del corazón y su
+ * fase eléctrica. Vacío en directo. */
+export function reviewSnapshotLines(
+  clock: PlaybackClock,
+  electrical: ElectricalTimeline
+): string[] {
+  const tS = clock.reviewTimeS;
+  if (tS === null) return [];
+  const phase = phaseAt(electrical, tS);
+  return [
+    `Corazón en t = ${tS.toFixed(3).replace(".", ",")} s`,
+    phase ? PHASE_DESCRIPTION[phase.phase] : "Entre latidos",
+  ];
+}
+
 /** Dónde se coloca el cursor al seguirlo con zoom: a un décimo del borde
  * izquierdo, para que se vea lo que viene. */
 const FOLLOW_MARGIN = 0.1;
@@ -204,6 +219,9 @@ export function useReview({
         const phase = phaseAt(electrical.current, review.timeS);
         const text = phase ? PHASE_DESCRIPTION[phase.phase] : "Entre latidos";
         if (phaseLabel.current.textContent !== text) phaseLabel.current.textContent = text;
+        const bar = phaseLabel.current.parentElement;
+        const name = phase ? phase.phase : "";
+        if (bar && bar.dataset.phase !== name) bar.dataset.phase = name;
       }
       if (slider.current && document.activeElement !== slider.current) {
         slider.current.value = String(review.timeS);

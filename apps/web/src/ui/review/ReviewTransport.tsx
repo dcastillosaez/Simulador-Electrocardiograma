@@ -9,6 +9,8 @@ const SPEED_OPTIONS = REVIEW_SPEEDS.map((value) => ({
   label: `${String(value).replace(".", ",")}×`,
 }));
 
+const PHASES = ["P", "PR", "QRS", "T"] as const;
+
 const END_MESSAGES = {
   "rings-recreated":
     "El cambio de disposición vació el papel: el corazón ha vuelto a la cabeza de reproducción.",
@@ -80,6 +82,16 @@ export function ReviewTransport({ review, timeLabel, phaseLabel, slider }: Revie
         options={SPEED_OPTIONS}
         onChange={(value) => review.setSpeed(Number(value) as ReviewSpeed)}
       />
+      {/* Las cuatro fases del trazado, con la vigente resaltada. El bucle del
+          repaso escribe la fase en `data-phase` de la barra y el estilo hace
+          el resto: ningún renderizado de React por fotograma. */}
+      <div className={styles.phases} aria-hidden="true">
+        {PHASES.map((phase) => (
+          <span key={phase} className={styles.phaseChip} data-chip={phase}>
+            {phase}
+          </span>
+        ))}
+      </div>
       <span ref={phaseLabel} className={styles.phase} />
     </div>
   );

@@ -4,13 +4,20 @@ import styles from "./ConductionCard.module.css";
 export interface ConductionCardProps {
   structure: ConductionStructure;
   onClose?: () => void;
+  following?: boolean;
+  onToggleFollow?: () => void;
 }
 
 /** La ficha de una estructura del sistema de conducción.
  *
  * No sabe de qué estructura habla: pinta lo que dice `STRUCTURE_INFO`. Los
  * textos son datos, y su revisión clínica no obliga a tocar este componente. */
-export function ConductionCard({ structure, onClose }: ConductionCardProps) {
+export function ConductionCard({
+  structure,
+  onClose,
+  following = false,
+  onToggleFollow,
+}: ConductionCardProps) {
   const info = STRUCTURE_INFO[structure];
   return (
     <div className={styles.card}>
@@ -28,6 +35,16 @@ export function ConductionCard({ structure, onClose }: ConductionCardProps) {
         <p className={styles.note} role="note">
           Esquema didáctico: el trazado no reconstruye fibras reales.
         </p>
+      )}
+      {onToggleFollow && (
+        <button
+          type="button"
+          className={styles.close}
+          aria-pressed={following}
+          onClick={onToggleFollow}
+        >
+          {following ? "Dejar de seguir" : "Seguir con la cámara"}
+        </button>
       )}
       {onClose && (
         <button type="button" className={styles.close} onClick={onClose}>

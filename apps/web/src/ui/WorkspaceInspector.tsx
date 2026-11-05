@@ -106,6 +106,8 @@ export interface WorkspaceInspectorProps {
   /** La estructura de conducción elegida en el corazón 3D, si hay alguna. */
   conductionStructure?: ConductionStructure | null;
   onCloseConductionStructure?: () => void;
+  followingStructure?: boolean;
+  onToggleFollowStructure?: () => void;
 }
 
 /** El panel de información del puesto de simulación: estado de la sesión y
@@ -132,6 +134,8 @@ export function WorkspaceInspector({
   onReconnect,
   conductionStructure = null,
   onCloseConductionStructure,
+  followingStructure = false,
+  onToggleFollowStructure,
   isReviewing = false,
 }: WorkspaceInspectorProps) {
   /** Una medida del servidor, lista para pasar a `Metric`.
@@ -273,6 +277,8 @@ export function WorkspaceInspector({
             <ConductionCard
               structure={conductionStructure}
               onClose={onCloseConductionStructure}
+              following={followingStructure}
+              onToggleFollow={onToggleFollowStructure}
             />
           </Section>
         )}

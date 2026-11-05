@@ -41,6 +41,7 @@ import {
   injectActivation,
   writeTissueUniforms,
 } from "./activation/tissue-activation";
+import { writeContinuousActivity } from "./activation/continuous-activity";
 import type { HeartStateValues } from "./useCardiacTimeline";
 import { ConductionSystem } from "./ConductionSystem/ConductionSystem";
 import type { ConductionUniforms } from "./ConductionSystem/conduction-material";
@@ -383,6 +384,7 @@ export function HeartModel({
     // siete pares de números, y así encenderla no enseña un fotograma viejo.
     writePulseUniforms(electrical.current, tS, conductionUniforms);
     writeTissueUniforms(electrical.current, tS, tissueUniforms);
+    writeContinuousActivity(heartState, tS, conductionUniforms, tissueUniforms);
 
     applyAperture(valveNodes, {
       atrioventricular: valves.current.apertureAt("atrioventricular", tS, atria),

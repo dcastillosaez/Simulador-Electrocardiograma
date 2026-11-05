@@ -31,7 +31,7 @@ import { useCardiacTimeline } from "./Cardiac3D/useCardiacTimeline";
 import { PlaybackClock } from "../cardiac/playback-clock";
 import { ReviewCursor, type ReviewCursorHandle } from "./review/ReviewCursor";
 import { ReviewTransport } from "./review/ReviewTransport";
-import { useReview } from "./review/useReview";
+import { reviewSnapshotLines, useReview } from "./review/useReview";
 import { useLayoutMetrics } from "./hooks/useLayoutMetrics";
 import { useSimulationRuntime } from "./hooks/useSimulationRuntime";
 import { composeSnapshotLines, useSweepRenderer } from "./hooks/useSweepRenderer";
@@ -240,6 +240,7 @@ export function ECGWorkspace({
   // porque su ficha se lee en el inspector, que es la columna de leer.
   const [conductionStructure, setConductionStructure] =
     useState<ConductionStructure | null>(null);
+  const [followStructure, setFollowStructure] = useState(false);
 
   const now = useClock();
   const clock = formatClock(now);
@@ -251,9 +252,15 @@ export function ECGWorkspace({
       composeSnapshot({
         stamp: clock,
         overlay: measureOverlayRef.current?.getCanvas() ?? null,
-        readout: composeSnapshotLines(isFrozen ? measureSession : null),
+        readout: [
+          ...composeSnapshotLines(isFrozen ? measureSession : null),
+          // En el repaso, la captura dice de qué instante y de qué fase es el
+          // corazón que enseña: el trazado congelado y el corazón ya no son
+          // del mismo momento si no se dice.
+          ...reviewSnapshotLines(playbackClock, cardiac.electrical.current),
+        ],
       }),
-    [composeSnapshot, clock, isFrozen, measureSession]
+    [composeSnapshot, clock, isFrozen, measureSession, playbackClock, cardiac.electrical]
   );
 
   // Lo que se exporta es el puesto entero, no el ECG suelto: la ganancia, la
@@ -576,6 +583,7 @@ export function ECGWorkspace({
                 cardiac={cardiac}
                 selectedStructure={conductionStructure}
                 onSelectStructure={setConductionStructure}
+                followStructure={followStructure}
               />
             </div>
           </div>
@@ -608,7 +616,12 @@ export function ECGWorkspace({
           onToolChange={handleToolChange}
           onSnapChange={handleSnapChange}
           conductionStructure={conductionStructure}
-          onCloseConductionStructure={() => setConductionStructure(null)}
+          onCloseConductionStructure={() => {
+            setConductionStructure(null);
+            setFollowStructure(false);
+          }}
+          followingStructure={followStructure}
+          onToggleFollowStructure={() => setFollowStructure((on) => !on)}
         />
       }
       status={

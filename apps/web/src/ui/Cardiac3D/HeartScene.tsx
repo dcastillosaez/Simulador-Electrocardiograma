@@ -36,6 +36,7 @@ import {
 import { useCardiacTimeline, type UseCardiacTimelineResult } from "./useCardiacTimeline";
 import { PlaybackClock } from "../../cardiac/playback-clock";
 import { createConductionUniforms } from "./ConductionSystem/conduction-material";
+import { FollowStructure } from "./ConductionSystem/FollowStructure";
 import {
   DIDACTIC_NOTICE,
   type ConductionStructure,
@@ -143,6 +144,8 @@ export interface HeartSceneProps {
    * su ficha se lee en el inspector. */
   selectedStructure?: ConductionStructure | null;
   onSelectStructure?: (structure: ConductionStructure | null) => void;
+  /** La cámara gira alrededor de la estructura elegida. */
+  followStructure?: boolean;
 }
 
 export function HeartScene({
@@ -151,6 +154,7 @@ export function HeartScene({
   cardiac,
   selectedStructure = null,
   onSelectStructure,
+  followStructure = false,
 }: HeartSceneProps) {
   const own = useCardiacTimeline(runtime, cardiac === undefined);
   const { timeline, valves, electrical, heartStates, heartState } = cardiac ?? own;
@@ -266,6 +270,7 @@ export function HeartScene({
             resultado parecido sin salir a Internet. */}
         <LocalClipping />
         <AspectFraming preset={preset} />
+        <FollowStructure structure={followStructure ? selectedStructure : null} />
         <ScaleBar barRef={scaleBarRef} labelRef={scaleLabelRef} />
         <ValveReadout
           clock={clock}
