@@ -34,6 +34,13 @@ import type { ElectricalTimeline } from "../../cardiac/electrical-timeline";
 import type { HeartStateTimeline } from "../../cardiac/heart-state-timeline";
 import type { PlaybackClock } from "../../cardiac/playback-clock";
 import { writePulseUniforms } from "./ConductionSystem/conduction-pulse";
+import {
+  ACTIVATED_MESHES,
+  attachActivation,
+  createTissueUniforms,
+  injectActivation,
+  writeTissueUniforms,
+} from "./activation/tissue-activation";
 import type { HeartStateValues } from "./useCardiacTimeline";
 import { ConductionSystem } from "./ConductionSystem/ConductionSystem";
 import type { ConductionUniforms } from "./ConductionSystem/conduction-material";
@@ -109,6 +116,20 @@ export function HeartModel({
   // por defecto a las nueve y el corazón se ve como un bloque gris de una
   // pieza. No es que al modelo le falten cavidades: es que estaban todas del
   // mismo color.
+  // La activación del tejido (fase H4): un uniforme por tejido, compartido por
+  // las cinco mallas que se activan, y dos atributos por vértice que se añaden
+  // una vez al cargar. Las mallas cuyo número de vértices no cuadra con el
+  // mapa se quedan sin activación (ver `attachActivation`).
+  const tissueUniforms = useMemo(() => createTissueUniforms(), []);
+  const activated = useMemo(() => {
+    const ok = new Set<HeartNodeName>();
+    for (const name of ACTIVATED_MESHES) {
+      const mesh = nodes[name] as unknown as Mesh;
+      if (mesh.geometry && attachActivation(name, mesh.geometry)) ok.add(name);
+    }
+    return ok;
+  }, [nodes]);
+
   const materials = useMemo(() => {
     const table = {} as Record<HeartNodeName, MeshStandardMaterial>;
     for (const name of HEART_NODE_NAMES) {
@@ -120,9 +141,14 @@ export function HeartModel({
         // grandes vasos cojan algo del reflejo especular y no queden planos.
         metalness: 0.04,
       });
+      if (activated.has(name)) injectActivation(table[name], tissueUniforms);
     }
     return table;
-  }, []);
+  }, [activated, tissueUniforms]);
+
+  useEffect(() => {
+    tissueUniforms.uActivationOn.value = showConduction ? 1 : 0;
+  }, [tissueUniforms, showConduction]);
 
   // Un solo material para las once valvas: las cuatro válvulas comparten
   // aspecto, y darle a cada valva el suyo serían once programas de sombreado
@@ -356,6 +382,7 @@ export function HeartModel({
     // El pulso, del mismo `tS`. Se escribe aunque la capa esté apagada: son
     // siete pares de números, y así encenderla no enseña un fotograma viejo.
     writePulseUniforms(electrical.current, tS, conductionUniforms);
+    writeTissueUniforms(electrical.current, tS, tissueUniforms);
 
     applyAperture(valveNodes, {
       atrioventricular: valves.current.apertureAt("atrioventricular", tS, atria),
