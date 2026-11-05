@@ -79,12 +79,14 @@ describe("sin casos especiales por ritmo", () => {
     "src/ui/Cardiac3D/ConductionSystem",
     "src/ui/Cardiac3D/activation",
     "src/ui/review",
+    "src/ui/ladder",
   ];
   const FILES = [
     "src/cardiac/electrical-timeline.ts",
     "src/cardiac/electrical-phase.ts",
     "src/cardiac/review-controller.ts",
     "src/cardiac/playback-clock.ts",
+    "src/cardiac/ladder.ts",
     "src/ui/Cardiac3D/HeartModel.tsx",
   ];
   const RHYTHMS = [

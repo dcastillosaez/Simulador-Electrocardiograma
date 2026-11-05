@@ -120,6 +120,13 @@ export class ElectricalTimeline {
     return out;
   }
 
+  /** Los impulsos que tocan la ventana `[t0S, t1S]`, en orden. Para dibujar
+   * fuera del camino caliente —el diagrama en escalera—; devuelve los objetos
+   * guardados, que no se deben modificar. */
+  impulsesBetween(t0S: number, t1S: number): readonly ElectricalImpulsePayload[] {
+    return this.impulses.filter((impulse) => impulse.lastS >= t0S && impulse.firstS <= t1S);
+  }
+
   /** El siguiente límite de tramo después de `tS` (o el anterior, con
    * `direction` negativa). Es lo que usa el paso a paso del repaso: saltar al
    * próximo instante en que algo empieza o termina. `null` si no hay. */

@@ -31,6 +31,7 @@ import { useCardiacTimeline } from "./Cardiac3D/useCardiacTimeline";
 import { PlaybackClock } from "../cardiac/playback-clock";
 import { ReviewCursor, type ReviewCursorHandle } from "./review/ReviewCursor";
 import { ReviewTransport } from "./review/ReviewTransport";
+import { LadderPanel } from "./ladder/LadderPanel";
 import { reviewSnapshotLines, useReview } from "./review/useReview";
 import { useLayoutMetrics } from "./hooks/useLayoutMetrics";
 import { useSimulationRuntime } from "./hooks/useSimulationRuntime";
@@ -621,6 +622,13 @@ export function ECGWorkspace({
             setFollowStructure(false);
           }}
           followingStructure={followStructure}
+          ladder={
+            <LadderPanel
+              electrical={cardiac.electrical}
+              clock={playbackClock}
+              label={selectedRhythm?.display_name ?? "sin ritmo"}
+            />
+          }
           onToggleFollowStructure={() => setFollowStructure((on) => !on)}
         />
       }

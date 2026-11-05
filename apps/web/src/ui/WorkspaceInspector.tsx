@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Inspector, Metric, MetricGrid, Panel, Section, SectionTitle } from "@ui-system";
 import { zoneFor, ZONE_LABEL } from "./AxisControl/axis-zones";
 import { MeasurePanel } from "./MeasurePanel";
@@ -108,6 +109,9 @@ export interface WorkspaceInspectorProps {
   onCloseConductionStructure?: () => void;
   followingStructure?: boolean;
   onToggleFollowStructure?: () => void;
+  /** El diagrama en escalera de la secuencia eléctrica (fase H5). Llega hecho
+   * porque quien tiene las líneas temporales es el puesto. */
+  ladder?: ReactNode;
 }
 
 /** El panel de información del puesto de simulación: estado de la sesión y
@@ -136,6 +140,7 @@ export function WorkspaceInspector({
   onCloseConductionStructure,
   followingStructure = false,
   onToggleFollowStructure,
+  ladder,
   isReviewing = false,
 }: WorkspaceInspectorProps) {
   /** Una medida del servidor, lista para pasar a `Metric`.
@@ -282,6 +287,7 @@ export function WorkspaceInspector({
             />
           </Section>
         )}
+        {ladder && <Section title="Secuencia eléctrica">{ladder}</Section>}
         <Section title={isReviewing ? "Ritmo (medidas del momento de congelar)" : "Ritmo"}>
           {/* Fuera de la rejilla, y no como su primera casilla: el nombre del
               ritmo no es una medida —no se mide sobre la señal, es la etiqueta

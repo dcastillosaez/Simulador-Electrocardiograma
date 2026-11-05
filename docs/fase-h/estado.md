@@ -14,11 +14,11 @@ aquí y qué espera una revisión humana. La especificación es
 | H2 Secuencia eléctrica en el servidor | **Hecha, sin revisión clínica** | Tramos contra `measure` en todos los ritmos; Mobitz I, disociación, trozos de 100 ms, llegada antes de reproducir | Revisión clínica de `activation-timing.yaml` |
 | H3 Repaso temporal | **Hecha** | Función pura del tiempo, retención acotada en ocho horas, sin mensajes al servidor ni repintado | — |
 | H4 Activación del miocardio | **Hecha, sin revisión** | Mapa reproducible, ningún vértice fuera de su tramo, epicardio después del endocardio en siete puntos | Revisión del orden de activación; FPS con y sin corte en la máquina de referencia |
-| H5 Patologías y pulido | **Hecha, salvo «comparar ritmos»** | Tabla de ritmos contra el catálogo real; fármacos que reconstruyen la fuente; ningún `rhythm_id` en la propagación | Revisión docente de cómo se ve cada ritmo |
+| H5 Patologías y pulido | **Hecha** | Tabla de ritmos contra el catálogo real; fármacos que reconstruyen la fuente; ningún `rhythm_id` en la propagación | Revisión docente de cómo se ve cada ritmo |
 
-Lo que queda **no es programación** salvo «comparar ritmos» (ver H5): son
-revisiones que tiene que firmar alguien con criterio clínico y una medida de
-rendimiento que hay que tomar en la máquina de referencia, con GPU.
+Lo que queda **no es programación**: son revisiones que tiene que firmar alguien
+con criterio clínico y una medida de rendimiento que hay que tomar en la
+máquina de referencia, con GPU.
 
 ## Tests ejecutados
 
@@ -31,7 +31,7 @@ Todos en local, el 5 de noviembre de 2026, sobre el último commit de la rama:
 | `packages/pharmacology-engine` | 111 pasan |
 | `apps/api` con `ECG_TEST_DB=postgres` (Postgres 16 local) | 315 pasan |
 | `apps/api` con `ECG_TEST_DB=sqlite` | 315 pasan |
-| `apps/web`: `npx tsc -b --noEmit` y `npm test` | sin errores de tipos; 689 pasan en 70 ficheros |
+| `apps/web`: `npx tsc -b --noEmit` y `npm test` | sin errores de tipos; 692 pasan en 71 ficheros |
 | `docs/fase-h/build-conduction-paths.py --check` | idéntico al fichero versionado |
 | `docs/fase-h/build-activation-map.py --check` | idéntico al fichero versionado |
 
@@ -172,7 +172,7 @@ distancia exige una velocidad de conducción sin fuente.
 
 **No comprobable aquí.** La caída de FPS con y sin corte (ver H1).
 
-## H5 — Patologías y pulido · hecha, salvo «comparar ritmos»
+## H5 — Patologías y pulido · hecha
 
 - `apps/api/tests/test_electrical_rhythms.py` recorre la tabla de la
   especificación con los ritmos reales y comprueba `origin`, `outcome`, tramos y
@@ -188,9 +188,13 @@ distancia exige una velocidad de conducción sin fuente.
   exportada lleva el instante y la fase del corazón.
 - Ocho horas sin acumular: test de H3. La geometría se construye una vez.
 
-**No hecho.** «Comparar ritmos». Hacerlo bien pide decidir qué se compara —dos
-sesiones a la vez o una tabla de referencia— y es una decisión de producto que
-no está en la especificación.
+- Comparar ritmos: el inspector dibuja el diagrama en escalera de los últimos
+  cuatro segundos (aurícula, unión AV, ventrículo; el color dice el origen y un
+  bloqueo se queda a mitad de la unión) y permite fijarlo para compararlo con el
+  del ritmo siguiente. Sale de los tramos del servidor, sin preguntar qué ritmo
+  es. Comprobado en Chromium con un Mobitz I fijado frente a un bloqueo
+  completo. Es una forma de comparar elegida aquí: la especificación no decía
+  cuál, y conviene que la revise quien la vaya a usar en clase.
 
 **Pendiente de revisión humana.** Que cada ritmo se reconozca como dice la tabla,
 mirándolo.
