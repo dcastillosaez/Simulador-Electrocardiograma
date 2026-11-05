@@ -17,6 +17,8 @@ export type AvConductionName =
   | "wenckebach"
   | "complete_block";
 
+export type AtrialOriginName = "sinus" | "supraventricular";
+
 export interface PatientPayload {
   atrial_rate_bpm: number;
   av_conduction: AvConductionName;
@@ -32,6 +34,11 @@ export interface PatientPayload {
   st_shift_mv: number;
   t_amplitude_scale: number;
   p_amplitude_scale: number;
+  /** Dónde nace la aurícula. No cambia el trazado: cambia el recorrido que
+   * enseña el corazón 3D (una aurícula supraventricular no enciende el nodo
+   * sinusal). Opcional porque los pacientes guardados antes no lo traen; el
+   * servidor los toma por sinusales. */
+  atrial_origin?: AtrialOriginName;
 
   systolic_bp_mmhg: number;
   diastolic_bp_mmhg: number;
@@ -59,6 +66,7 @@ export const DEFAULT_PATIENT: PatientPayload = {
   st_shift_mv: 0,
   t_amplitude_scale: 1,
   p_amplitude_scale: 1,
+  atrial_origin: "sinus",
   systolic_bp_mmhg: 120,
   diastolic_bp_mmhg: 75,
   respiratory_rate_bpm: 14,

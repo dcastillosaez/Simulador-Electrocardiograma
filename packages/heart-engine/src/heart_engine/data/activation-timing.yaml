@@ -1,0 +1,119 @@
+# Reparto temporal de la activación entre las estructuras del sistema de
+# conducción. Lo consume `heart_engine/electrical.py`.
+#
+# Claude no es fuente de verdad clínica, y este fichero tampoco lo pretende:
+# cada valor cita de dónde sale, con la referencia completa y con lo que se
+# pudo comprobar de ella. Las cifras se localizaron con búsquedas en la web
+# (noviembre de 2026) y solo se pudieron leer fragmentos de resumen o del
+# texto indexado, no los artículos completos. Por eso `revision_clinica` está
+# pendiente: antes de dar por buena la fase H2, alguien con criterio clínico
+# tiene que leer las fuentes y firmar estos números.
+#
+# Lo que NO está aquí es igual de importante que lo que está. Un valor sin
+# fuente se queda fuera y el motor usa el límite que ya marca el trazado (el
+# inicio o el final de una onda), no un número inventado. Ver `sin_fuente`.
+
+version: 1
+revision_clinica: pendiente
+
+auriculas:
+  # Retraso del inicio de la activación de la aurícula izquierda respecto a la
+  # derecha. El motor lo cuenta desde el inicio de la P.
+  retraso_auricula_izquierda_s:
+    valor: 0.031
+    dispersion: "31 ± 13 ms"
+    medida: >-
+      Activación endocárdica más precoz de la aurícula izquierda (región del
+      haz de Bachmann), medida desde la activación de la región auricular del
+      nodo sinusal, en ritmo sinusal.
+    poblacion: >-
+      35 pacientes con antecedente de fibrilación auricular, en ritmo sinusal
+      durante el estudio: no son sujetos sanos.
+    referencia: >-
+      Lemery R, et al. Normal
+      atrial activation and voltage during sinus rhythm in the human heart: an
+      endocardial and epicardial mapping study in patients with a history of
+      atrial fibrillation. J Cardiovasc Electrophysiol. 2007;18(4):402-408.
+      doi:10.1111/j.1540-8167.2007.00762.x. PMID: 17394455.
+    verificacion: >-
+      Fragmento del resumen leído a través de un buscador; revista, año,
+      volumen, páginas y PMID confirmados. La lista completa de autores no se
+      ha comprobado contra el artículo.
+    aproximacion: >-
+      El motor lo aplica desde el inicio de la P de superficie, no desde el
+      electrograma del nodo sinusal: la diferencia entre las dos referencias no
+      tiene fuente (ver `sin_fuente`).
+
+his_purkinje:
+  # Intervalo HV: del inicio del potencial de His al inicio de la activación
+  # ventricular. El tramo del His empieza HV antes del inicio del QRS.
+  intervalo_hv_s:
+    valor: 0.045
+    dispersion: "45 ± 6 ms; rango normal en adultos 35-55 ms"
+    medida: >-
+      Del inicio de la deflexión de His al inicio de la activación ventricular,
+      registro endocavitario.
+    poblacion: "12 pacientes con conducción AV normal, 26 ± 7 años."
+    referencia: >-
+      Lee YS, Lien WP. Left ventricular approach for recording His bundle
+      potential in man. Chest. 1975;67(6):696-701. doi:10.1378/chest.67.6.696.
+      PMID: 1126224.
+    referencia_rango: >-
+      Josephson ME. Josephson's Clinical Cardiac Electrophysiology: Techniques
+      and Interpretations. 5.ª ed. Filadelfia: Wolters Kluwer; 2016. Capítulo
+      «Electrophysiologic Investigation: General Concepts» (rango HV normal de
+      35 a 55 ms en adultos).
+    verificacion: >-
+      Lee y Lien: fragmento del resumen a través de un buscador. Josephson:
+      fragmento del capítulo indexado; la edición y el capítulo se infieren
+      del título, sin número de página comprobado.
+
+  # De la rama izquierda al inicio de la activación ventricular. Es lo que
+  # dura el tramo de ramas y Purkinje, que termina en el inicio del QRS. El
+  # tramo del His es la diferencia entre los dos intervalos (20 ms con estos
+  # valores), coherente con la duración del potencial de His que dan las
+  # mismas fuentes (19 ± 3 ms en Lee y Lien; 15-25 ms en Josephson).
+  rama_izquierda_a_ventriculo_s:
+    valor: 0.025
+    dispersion: "25 ± 3 ms"
+    medida: >-
+      Intervalo LB-V: del potencial de la rama izquierda al inicio de la
+      activación ventricular.
+    poblacion: "10 de los 12 pacientes del mismo estudio."
+    referencia: >-
+      Lee YS, Lien WP. Left ventricular approach for recording His bundle
+      potential in man. Chest. 1975;67(6):696-701. doi:10.1378/chest.67.6.696.
+      PMID: 1126224.
+    verificacion: >-
+      Fragmento del resumen a través de un buscador, en paráfrasis y no en cita
+      literal. Pendiente de leer en el artículo si el «LB 15 ± 3 ms» del mismo
+      resumen es el intervalo H-LB o la duración del potencial.
+
+sin_fuente:
+  - nombre: fin de la activación de la aurícula derecha dentro de la P
+    efecto: >-
+      La aurícula derecha se activa desde el inicio hasta el final de la P.
+      Hay una cifra (fin de la AD a 93 ± 17 ms, de la AI a 116 ± 18 ms,
+      atribuida a Lemery 2007) que solo aparece en una cita secundaria y no
+      se ha podido leer en la fuente.
+  - nombre: reparto de la P en tercios (derecha, mixta, izquierda)
+    efecto: >-
+      No se usa. Solo aparece en material docente no revisado por pares.
+  - nombre: reparto del intervalo LB-V entre ramas y red de Purkinje
+    efecto: >-
+      Ramas y Purkinje comparten la misma ventana y el cliente los recorre como
+      un único trayecto.
+  - nombre: intervalo RB-V normativo
+    efecto: >-
+      La rama derecha usa la misma ventana que la izquierda.
+  - nombre: del disparo del nodo sinusal al inicio de la P de superficie
+    efecto: >-
+      El nodo sinusal se marca en el inicio de la P, sin adelanto. El tiempo de
+      conducción sinoauricular medido con electrograma (46-116 ms en Reiffel
+      JA et al., Circulation 1980;62(6):1324-1334, PMID 7438368) llega al
+      inicio de la activación auricular en el electrograma, no al de la P de
+      superficie, así que no sirve para este hueco.
+  - nombre: duración total de la activación ventricular
+    efecto: >-
+      Se toma de la extensión del QRS que genera el motor: un QRS de 140 ms da
+      una activación de 140 ms.

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { CardiacTimeline } from "../../cardiac/cardiac-timeline";
 import { ValveTimeline } from "../../cardiac/valve-timeline";
+import { ElectricalTimeline } from "../../cardiac/electrical-timeline";
 import type { SessionRuntime } from "../../simulation-runtime/session-runtime";
 import type {
   CardiacEventsMessage,
@@ -24,6 +25,10 @@ export interface UseCardiacTimelineResult {
    * —una contracción parte de cero, una auriculoventricular parte de abierta—.
    * Comparten el reloj, que es lo que las mantiene sincronizadas. */
   valves: MutableRefObject<ValveTimeline>;
+  /** La secuencia eléctrica: tercera línea temporal del mismo mensaje y del
+   * mismo reloj. Separada de las contracciones porque una disociación
+   * electromecánica tiene que poder existir. */
+  electrical: MutableRefObject<ElectricalTimeline>;
   /** En estado sí: cambia cuatro veces por segundo como mucho, y hay
    * interfaz —modo de cada cámara— que depende de él. */
   heartState: HeartStateValues | null;
@@ -32,6 +37,7 @@ export interface UseCardiacTimelineResult {
 export function useCardiacTimeline(runtime: SessionRuntime): UseCardiacTimelineResult {
   const timeline = useRef(new CardiacTimeline());
   const valves = useRef(new ValveTimeline());
+  const electrical = useRef(new ElectricalTimeline());
   const [heartState, setHeartState] = useState<HeartStateValues | null>(null);
 
   useEffect(() => {
@@ -42,6 +48,9 @@ export function useCardiacTimeline(runtime: SessionRuntime): UseCardiacTimelineR
       // que el servidor publicara válvulas se reproduce sin ellas en vez de
       // reventar al primer mensaje.
       valves.current.push(message.valves ?? [], epoch);
+      // Lo mismo para la electricidad: una sesión guardada sin este campo se
+      // reproduce sin impulsos.
+      electrical.current.push(message.electrical ?? [], epoch);
     };
     const onState = (message: HeartStateMessage) => setHeartState(message.values);
     // Un ritmo nuevo arranca en t=0: sin vaciar, las contracciones del ritmo
@@ -50,6 +59,7 @@ export function useCardiacTimeline(runtime: SessionRuntime): UseCardiacTimelineR
     const onStarted = () => {
       timeline.current.clear();
       valves.current.clear();
+      electrical.current.clear();
       setHeartState(null);
     };
 
@@ -63,5 +73,5 @@ export function useCardiacTimeline(runtime: SessionRuntime): UseCardiacTimelineR
     };
   }, [runtime]);
 
-  return { timeline, valves, heartState };
+  return { timeline, valves, electrical, heartState };
 }

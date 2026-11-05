@@ -81,6 +81,7 @@ from ecg_engine.patient import (
     MAX_T_SCALE,
     MIN_PR_MS,
 )
+from ecg_engine.types import ImpulseOrigin
 from pharmacology_engine import DrugAdministration
 
 from .pharmacology.projection import PatientVitals
@@ -176,6 +177,9 @@ class PatientPayload(FinitePayload):
     st_shift_mv: float = Field(default=0.0, ge=-MAX_ST_SHIFT_MV, le=MAX_ST_SHIFT_MV)
     t_amplitude_scale: float = Field(default=1.0, ge=-MAX_T_SCALE, le=MAX_T_SCALE)
     p_amplitude_scale: float = Field(default=1.0, ge=0.0, le=MAX_T_SCALE)
+    # Con valor por defecto: los pacientes guardados antes de que existiera
+    # se cargan como sinusales, que es lo que eran.
+    atrial_origin: Literal["sinus", "supraventricular"] = "sinus"
 
     # --- constantes, que no son del motor de señal -------------------------
     systolic_bp_mmhg: float = Field(default=120.0, ge=0.0, le=260.0)
@@ -221,6 +225,7 @@ class PatientPayload(FinitePayload):
             st_shift_mv=self.st_shift_mv,
             t_amplitude_scale=self.t_amplitude_scale,
             p_amplitude_scale=self.p_amplitude_scale,
+            atrial_origin=ImpulseOrigin(self.atrial_origin),
         )
 
 

@@ -143,7 +143,7 @@ export function HeartScene({
   selectedStructure = null,
   onSelectStructure,
 }: HeartSceneProps) {
-  const { timeline, valves, heartState } = useCardiacTimeline(runtime);
+  const { timeline, valves, electrical, heartState } = useCardiacTimeline(runtime);
   const [preset, setPreset] = useState<CameraPreset>(DEFAULT_PRESET);
   const [isolated, setIsolated] = useState<ReadonlySet<HeartGroup>>(new Set());
   const [opacity, setOpacity] = useState(1);
@@ -274,6 +274,7 @@ export function HeartScene({
             runtime={runtime}
             timeline={timeline}
             valves={valves}
+            electrical={electrical}
             heartState={heartState}
             isolated={isolated}
             opacity={opacity}

@@ -30,6 +30,8 @@ import {
 } from "./HeartCutaway";
 import type { CardiacTimeline } from "../../cardiac/cardiac-timeline";
 import type { ValveTimeline } from "../../cardiac/valve-timeline";
+import type { ElectricalTimeline } from "../../cardiac/electrical-timeline";
+import { writePulseUniforms } from "./ConductionSystem/conduction-pulse";
 import type { HeartStateValues } from "./useCardiacTimeline";
 import type { SessionRuntime } from "../../simulation-runtime/session-runtime";
 import { ConductionSystem } from "./ConductionSystem/ConductionSystem";
@@ -42,6 +44,7 @@ export interface HeartModelProps {
   runtime: SessionRuntime;
   timeline: MutableRefObject<CardiacTimeline>;
   valves: MutableRefObject<ValveTimeline>;
+  electrical: MutableRefObject<ElectricalTimeline>;
   heartState: HeartStateValues | null;
   /** Grupos aislados. Vacío significa el corazón entero. */
   isolated: ReadonlySet<HeartGroup>;
@@ -74,6 +77,7 @@ export function HeartModel({
   runtime,
   timeline,
   valves,
+  electrical,
   heartState,
   isolated,
   opacity,
@@ -309,6 +313,7 @@ export function HeartModel({
     if (frameCount.current % PRUNE_EVERY_FRAMES === 0) {
       timeline.current.prune(tS - PRUNE_MARGIN_S);
       valves.current.prune(tS - PRUNE_MARGIN_S);
+      electrical.current.prune(tS - PRUNE_MARGIN_S);
     }
 
     const atria = excursionFor("atria", tS, timeline.current, heartState);
@@ -332,6 +337,10 @@ export function HeartModel({
     // la onda A de la mitral y la tricúspide. No se recalcula ni se aproxima:
     // la patada auricular *es* la sístole auricular, y quién decide cuándo
     // ocurre es el servidor.
+    // El pulso, del mismo `tS`. Se escribe aunque la capa esté apagada: son
+    // siete pares de números, y así encenderla no enseña un fotograma viejo.
+    writePulseUniforms(electrical.current, tS, conductionUniforms);
+
     applyAperture(valveNodes, {
       atrioventricular: valves.current.apertureAt("atrioventricular", tS, atria),
       semilunar: valves.current.apertureAt(

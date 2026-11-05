@@ -3,7 +3,7 @@ name = "heart-engine"
 version = "0.1.0"
 description = "Traduccion de electrofisiologia a mecanica cardiaca"
 requires-python = ">=3.12"
-dependencies = ["ecg-engine"]
+dependencies = ["ecg-engine", "pyyaml>=6.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]

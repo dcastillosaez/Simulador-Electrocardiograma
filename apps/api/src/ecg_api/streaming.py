@@ -145,7 +145,10 @@ async def stream_cardiac(
     while True:
         if manager.state is SimulationState.RUNNING:
             events = manager.cardiac_events()
-            if events is not None and events["events"]:
+            # Con contracciones o con electricidad: una aurícula que conduce
+            # sin que el ventrículo se contraiga —o un impulso bloqueado en el
+            # nodo AV entre dos latidos— también es algo que enseñar.
+            if events is not None and (events["events"] or events["electrical"]):
                 await publish(events)
             state = manager.heart_state()
             if state is not None:

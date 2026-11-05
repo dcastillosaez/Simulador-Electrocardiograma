@@ -277,12 +277,14 @@ version = "0.1.0"
 source = { editable = "../../packages/heart-engine" }
 dependencies = [
     { name = "ecg-engine" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "ecg-engine", editable = "../../packages/ecg-engine" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
 ]
 provides-extras = ["dev"]
 

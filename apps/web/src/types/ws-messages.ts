@@ -188,6 +188,39 @@ export interface ValveEventPayload {
   index: number;
 }
 
+/** Un tramo del recorrido de un impulso: qué estructura y entre qué dos
+ * instantes de simulación, redondeados a milisegundos. Un tramo de duración
+ * cero es una marca: el disparo del nodo sinusal, o un impulso que llega al
+ * nodo AV y ahí se queda. */
+export interface ElectricalSegmentPayload {
+  structure: ElectricalStructureName;
+  t_start_s: number;
+  t_end_s: number;
+}
+
+export type ElectricalStructureName =
+  | "sa_node"
+  | "right_atrium"
+  | "left_atrium"
+  | "av_node"
+  | "his_bundle"
+  | "bundle_branches"
+  | "purkinje"
+  | "ventricular_myocardium"
+  | "ventricular_recovery";
+
+export type ImpulseOriginName = "sinus" | "supraventricular" | "ventricular";
+
+/** Un impulso con todos sus tramos. El servidor decide cuándo empieza cada
+ * tramo y si el impulso llega; el cliente solo interpola el pulso dentro.
+ * `outcome` no tiene «retrasado»: el retraso es la duración del tramo AV. */
+export interface ElectricalImpulsePayload {
+  impulse: number;
+  origin: ImpulseOriginName;
+  outcome: "conducted" | "blocked";
+  segments: ElectricalSegmentPayload[];
+}
+
 export interface CardiacEventsMessage {
   type: "cardiac_events";
   t_start_s: number;
@@ -205,6 +238,9 @@ export interface CardiacEventsMessage {
    * de forma organizada — en una fibrilación ventricular no hay sístole que
    * cierre nada. */
   valves: ValveEventPayload[];
+  /** La secuencia eléctrica (fase H). Ausente en sesiones guardadas antes de
+   * que existiera: se reproducen sin electricidad. */
+  electrical?: ElectricalImpulsePayload[];
 }
 
 export type ContractionModeName =
@@ -219,6 +255,11 @@ export type ContractionModeName =
  * sistólico, contractilidad) se añaden como opcionales cuando existan. */
 export interface HeartStateMessage {
   type: "heart_state";
+  /** Instante de simulación en que se publicó (fase H3). Con él el cliente
+   * guarda los cambios de estado como tramos constantes y el repaso recupera
+   * el modo de cada cámara en cualquier instante. Ausente en sesiones
+   * anteriores. */
+  t_s?: number;
   values: {
     rhythm_id: string;
     heart_rate_bpm: number | null;
